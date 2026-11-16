@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Explicitly opt in with a migrated, disposable local DB that includes
-// db-service #858 (holistic_mentorship_dictation_usage_records). Synthetic rows
-// remain; drop the disposable DB to remove them. ElevenLabs is faked at fetch.
+// db-service #858 (holistic_mentorship_dictation_usage_records) and the
+// migration adding its detected_language and translation columns. Synthetic
+// rows remain; drop the disposable DB to remove them. ElevenLabs and OpenRouter
+// are faked at fetch.
 // HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_lms500 DATABASE_HOST=localhost \
 // DATABASE_USER=postgres DATABASE_PASSWORD=postgres npx vitest run src/lib/holistic-dictation.integration.test.ts
 const database = process.env.HOLISTIC_DICTATION_TEST_DATABASE;
@@ -14,13 +16,23 @@ let dictation: typeof import("./holistic-dictation");
 let schoolId: number;
 let programId: number;
 
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+// Every outbound call goes through fetchMock, which hands it to the fake for
+// the provider it targets.
 const fetchMock = vi.fn();
+const scribeMock = vi.fn();
+const openRouterMock = vi.fn();
 
-function scribeSaid(text: string, lastWordEndSeconds: number) {
-  return new Response(JSON.stringify({
+function scribeSaid(text: string, lastWordEndSeconds: number, languageCode: string | null = "eng") {
+  return Response.json({
+    ...(languageCode ? { language_code: languageCode, language_probability: 0.95 } : {}),
     text,
     words: [{ text, type: "word", start: 0, end: lastWordEndSeconds }],
-  }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+}
+
+function translated(content: string) {
+  return Response.json({ choices: [{ finish_reason: "stop", message: { content } }] });
 }
 
 async function newMentor() {
@@ -50,9 +62,9 @@ function remaining(mentorUserId: number, at: string) {
 async function recordsOf(mentorUserId: number) {
   return db.query<{
     note_kind: string; audio_seconds: number; characters_returned: number;
-    outcome: string; completed: boolean;
+    outcome: string; detected_language: string | null; translation: string; completed: boolean;
   }>(
-    `SELECT note_kind, audio_seconds, characters_returned, outcome,
+    `SELECT note_kind, audio_seconds, characters_returned, outcome, detected_language, translation,
             completed_at IS NOT NULL AS completed
      FROM holistic_mentorship_dictation_usage_records
      WHERE mentor_user_id = $1 ORDER BY id`,
@@ -92,7 +104,12 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
   beforeEach(() => {
     vi.stubEnv("HOLISTIC_DICTATION_ENABLED", "true");
     vi.stubEnv("HOLISTIC_DICTATION_ELEVENLABS_API_KEY", "sk_integration_dummy");
+    vi.stubEnv("HOLISTIC_DICTATION_OPENROUTER_API_KEY", "sk-or-integration-dummy");
     fetchMock.mockReset();
+    scribeMock.mockReset();
+    openRouterMock.mockReset();
+    fetchMock.mockImplementation((target: string, init: RequestInit) =>
+      (String(target) === OPENROUTER_URL ? openRouterMock : scribeMock)(target, init));
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -103,7 +120,7 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
 
   it("counts a clip toward the India-time day it was recorded in", async () => {
     const mentor = await newMentor();
-    fetchMock.mockImplementation(async () => scribeSaid("Haan", 0.5));
+    scribeMock.mockImplementation(async () => scribeSaid("Yes", 0.5));
 
     // 18:29 UTC is 23:59 IST on 10 Nov; 18:31 UTC is 00:01 IST on 11 Nov.
     await dictate(mentor, "2026-11-10T18:29:00Z", 10_000);
@@ -119,7 +136,7 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
   it("sums only this Mentor's clips and never reports below zero", async () => {
     const mentor = await newMentor();
     const otherMentor = await newMentor();
-    fetchMock.mockImplementation(async () => scribeSaid("Theek hai", 1));
+    scribeMock.mockImplementation(async () => scribeSaid("Fine", 1));
     const at = "2026-11-12T06:00:00Z";
 
     await dictate(otherMentor, at, 125_000);
@@ -142,20 +159,76 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
 
   it("finishes a record with its outcome, characters and the longer of clip and words", async () => {
     const mentor = await newMentor();
-    fetchMock.mockResolvedValue(scribeSaid("Usne bola exam ka stress hai.", 4.9));
+    scribeMock.mockResolvedValue(scribeSaid("She said exam stress is high.", 4.9));
 
     await dictate(mentor, "2026-11-13T06:00:00Z", 4_200);
 
+    expect(openRouterMock).not.toHaveBeenCalled();
     expect(await recordsOf(mentor)).toEqual([{
-      note_kind: "post_session", audio_seconds: 5, characters_returned: 29, outcome: "ok", completed: true,
+      note_kind: "post_session", audio_seconds: 5, characters_returned: 29, outcome: "ok",
+      detected_language: "eng", translation: "skipped", completed: true,
     }]);
+  });
+
+  it("records a translated clip with the language heard and the English length returned", async () => {
+    const mentor = await newMentor();
+    const english = "The student said the exam stress is very high.";
+    scribeMock.mockResolvedValue(scribeSaid("छात्र ने कहा कि परीक्षा का तनाव बहुत है।", 5.6, "HIN"));
+    openRouterMock.mockResolvedValue(translated(english));
+
+    await expect(dictate(mentor, "2026-11-13T07:00:00Z", 4_200))
+      .resolves.toMatchObject({ outcome: "ok", text: english });
+
+    expect(await recordsOf(mentor)).toEqual([{
+      note_kind: "post_session", audio_seconds: 6, characters_returned: english.length, outcome: "ok",
+      detected_language: "hin", translation: "ok", completed: true,
+    }]);
+  });
+
+  it("records a failed translation as a failed clip that still counts", async () => {
+    const mentor = await newMentor();
+    scribeMock.mockResolvedValue(scribeSaid("Usne bola exam ka stress hai.", 4.9, "hin"));
+    openRouterMock.mockImplementation(async () => new Response("upstream error", { status: 500 }));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const at = "2026-11-13T08:00:00Z";
+
+    await expect(dictate(mentor, at, 4_200)).resolves.toEqual({ outcome: "failed", remainingSeconds: 1795 });
+
+    expect(openRouterMock).toHaveBeenCalledTimes(2);
+    expect(await recordsOf(mentor)).toEqual([{
+      note_kind: "post_session", audio_seconds: 5, characters_returned: 0, outcome: "failed",
+      detected_language: "hin", translation: "failed", completed: true,
+    }]);
+  });
+
+  it("records no language and no translation when nothing was heard", async () => {
+    const mentor = await newMentor();
+    scribeMock.mockResolvedValue(Response.json({ language_code: "hin", text: " ", words: [] }));
+
+    await expect(dictate(mentor, "2026-11-13T09:00:00Z", 3_000))
+      .resolves.toEqual({ outcome: "nothing_heard", remainingSeconds: 1797 });
+
+    expect(await recordsOf(mentor)).toEqual([{
+      note_kind: "post_session", audio_seconds: 3, characters_returned: 0, outcome: "nothing_heard",
+      detected_language: null, translation: "not_run", completed: true,
+    }]);
+  });
+
+  it("refuses a translation status outside the four allowed values", async () => {
+    const mentor = await newMentor();
+    await expect(db.query(
+      `INSERT INTO holistic_mentorship_dictation_usage_records
+         (mentor_user_id, school_id, program_id, note_kind, audio_seconds, characters_returned,
+          outcome, translation, inserted_at, updated_at)
+       VALUES ($1, $2, $3, 'post_session', 1, 0, 'failed', 'translated', now(), now())`,
+      [mentor, schoolId, programId])).rejects.toThrow();
   });
 
   it("records a five-minute clip, and at most 305 s when the words run past it", async () => {
     const mentor = await newMentor();
-    fetchMock
-      .mockResolvedValueOnce(scribeSaid("Lamba jawab", 299.6))
-      .mockResolvedValueOnce(scribeSaid("Aur lamba jawab", 311.2));
+    scribeMock
+      .mockResolvedValueOnce(scribeSaid("Long answer", 299.6))
+      .mockResolvedValueOnce(scribeSaid("An even longer answer", 311.2));
     const at = "2026-11-15T06:00:00Z";
 
     await expect(dictate(mentor, at, 300_000)).resolves.toMatchObject({ outcome: "ok", remainingSeconds: 1500 });
@@ -169,7 +242,7 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
     let duringCall: { records: Awaited<ReturnType<typeof recordsOf>>; remainingSeconds: number } | null = null;
     // What the table holds while ElevenLabs is working is what stays if the
     // host kills the request at that moment.
-    fetchMock.mockImplementation(async () => {
+    scribeMock.mockImplementation(async () => {
       duringCall = {
         records: await recordsOf(mentor),
         remainingSeconds: await remaining(mentor, "2026-11-14T06:00:00Z"),
@@ -181,11 +254,15 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
     await dictate(mentor, "2026-11-14T06:00:00Z", 7_400);
 
     expect(duringCall).toEqual({
-      records: [{ note_kind: "post_session", audio_seconds: 8, characters_returned: 0, outcome: "failed", completed: false }],
+      records: [{
+        note_kind: "post_session", audio_seconds: 8, characters_returned: 0, outcome: "failed",
+        detected_language: null, translation: "not_run", completed: false,
+      }],
       remainingSeconds: 1792,
     });
-    expect(await recordsOf(mentor)).toEqual([
-      { note_kind: "post_session", audio_seconds: 8, characters_returned: 0, outcome: "failed", completed: true },
-    ]);
+    expect(await recordsOf(mentor)).toEqual([{
+      note_kind: "post_session", audio_seconds: 8, characters_returned: 0, outcome: "failed",
+      detected_language: null, translation: "not_run", completed: true,
+    }]);
   });
 });

@@ -13,8 +13,12 @@ export type TranscribeSpeechInput = {
   signal: AbortSignal;
 };
 
+// Scribe's own guess at the spoken language (e.g. "eng", "hin") and how sure
+// it is, or null when the reply leaves them out.
+export type SpokenLanguage = { languageCode: string | null; languageProbability: number | null };
+
 export type TranscribeSpeechResult =
-  | { kind: "text"; text: string; lastWordEndSeconds: number }
+  | ({ kind: "text"; text: string; lastWordEndSeconds: number } & SpokenLanguage)
   | { kind: "empty" };
 
 type ScribeWord = { type?: unknown; end?: unknown };
@@ -53,11 +57,22 @@ async function readScribeBody(response: Response, signal: AbortSignal) {
   } catch {
     throw new ScribeTranscriptionError(signal.aborted ? "timeout" : "malformed");
   }
-  const { text, words } = (body ?? {}) as { text?: unknown; words?: unknown };
+  const { text, words, ...language } = (body ?? {}) as {
+    text?: unknown; words?: unknown; language_code?: unknown; language_probability?: unknown;
+  };
   if (typeof text !== "string" || (words !== undefined && !Array.isArray(words))) {
     throw new ScribeTranscriptionError("malformed");
   }
-  return { text, words: (words ?? []) as ScribeWord[] };
+  return { text, words: (words ?? []) as ScribeWord[], language: spokenLanguage(language) };
+}
+
+function spokenLanguage(body: { language_code?: unknown; language_probability?: unknown }): SpokenLanguage {
+  const code = typeof body.language_code === "string" ? body.language_code.trim() : "";
+  const probability = body.language_probability;
+  return {
+    languageCode: code || null,
+    languageProbability: typeof probability === "number" && Number.isFinite(probability) ? probability : null,
+  };
 }
 
 export async function transcribeSpeech(input: TranscribeSpeechInput): Promise<TranscribeSpeechResult> {
@@ -77,5 +92,5 @@ export async function transcribeSpeech(input: TranscribeSpeechInput): Promise<Tr
   const words = body.words.filter((word) => word?.type === "word");
   if (!text || words.length === 0) return { kind: "empty" };
   const lastWordEndSeconds = Math.max(0, ...words.map((word) => Number(word.end) || 0));
-  return { kind: "text", text, lastWordEndSeconds };
+  return { kind: "text", text, lastWordEndSeconds, ...body.language };
 }

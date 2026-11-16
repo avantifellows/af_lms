@@ -30,8 +30,10 @@ describe("ElevenLabs Scribe client", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("returns Scribe's trimmed text and the end of the last spoken word", async () => {
+  it("returns Scribe's trimmed text, the end of the last spoken word and the spoken language", async () => {
     fetchMock.mockResolvedValue(providerJson({
+      language_code: "hin",
+      language_probability: 0.87,
       text: "  Usne bola exam ka stress hai.  ",
       words: [
         { text: "Usne", type: "word", start: 0.1, end: 0.5 },
@@ -45,7 +47,23 @@ describe("ElevenLabs Scribe client", () => {
       kind: "text",
       text: "Usne bola exam ka stress hai.",
       lastWordEndSeconds: 4.9,
+      languageCode: "hin",
+      languageProbability: 0.87,
     });
+  });
+
+  it.each([
+    ["missing", {}],
+    ["blank or the wrong type", { language_code: "  ", language_probability: "0.9" }],
+    ["not a number", { language_code: 7, language_probability: Number.NaN }],
+  ])("returns no language when Scribe's language fields are %s", async (_label, language) => {
+    fetchMock.mockResolvedValue(providerJson({
+      text: "Theek hai",
+      words: [{ text: "Theek", type: "word", start: 0, end: 0.4 }],
+      ...language,
+    }));
+
+    await expect(call()).resolves.toMatchObject({ kind: "text", languageCode: null, languageProbability: null });
   });
 
   it.each([

@@ -12,6 +12,8 @@ type UsageRecord = {
   audioSeconds: number;
   charactersReturned: number;
   outcome: string;
+  detectedLanguage: string | null;
+  translation: string;
   completed: boolean;
 };
 
@@ -41,17 +43,25 @@ vi.mock("@/lib/db", () => {
       const [mentorUserId, schoolId, programId, noteKind, audioSeconds] = params as [
         number, number, number, string, number,
       ];
+      if (!/detected_language, translation/.test(text) || !/NULL, 'not_run'/.test(text)) {
+        throw new Error("The insert must start the record with no language and translation not_run");
+      }
       const record = {
         id: db.records.length + 1, mentorUserId, schoolId, programId, noteKind,
-        audioSeconds, charactersReturned: 0, outcome: "failed", completed: false,
+        audioSeconds, charactersReturned: 0, outcome: "failed", detectedLanguage: null, translation: "not_run",
+        completed: false,
       };
       db.records.push(record);
       return [{ id: record.id }];
     }
     if (text.includes(`UPDATE ${usageTable}`)) {
-      const [id, outcome, charactersReturned, audioSeconds] = params as [number, string, number, number];
+      const [id, outcome, charactersReturned, audioSeconds, detectedLanguage, translation] = params as [
+        number, string, number, number, string | null, string,
+      ];
+      if (!/detected_language = \$5, translation = \$6/.test(text)) throw new Error(`Unexpected update: ${text}`);
       Object.assign(db.records.find((record) => record.id === id)!, {
-        outcome, charactersReturned, audioSeconds, completed: /completed_at\s*=/.test(text),
+        outcome, charactersReturned, audioSeconds, detectedLanguage, translation,
+        completed: /completed_at\s*=/.test(text),
       });
       return [];
     }
@@ -82,8 +92,14 @@ const context = { params: Promise.resolve({ studentId: "41", phaseId: "73" }) };
 const url = "http://localhost/api/holistic-mentorship/students/41/phases/73/dictation";
 const contextQuery = "?school_code=SCH001&academic_year=2026-2027&program_id=1";
 const apiKey = "sk_live_dictation_key_123";
+const openRouterKey = "sk-or-v1-dictation-translate-456";
 
+// Every outbound call goes through fetchMock, which hands it to the fake for
+// the provider it targets.
 const fetchMock = vi.fn();
+const scribeMock = vi.fn();
+const openRouterMock = vi.fn();
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 type Fields = { audio?: Blob | null; kind?: string; duration_ms?: string; filename?: string };
 
@@ -104,13 +120,39 @@ function scribeReply(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+// Scribe hears English: returned as it is, with no translation call.
 const spokenReply = {
-  text: " Usne bola exam ka stress hai. ",
+  language_code: "eng",
+  language_probability: 0.98,
+  text: " She said exam stress is high. ",
   words: [
-    { text: "Usne", type: "word", start: 0.2, end: 0.6 },
-    { text: "hai.", type: "word", start: 4.4, end: 4.9 },
+    { text: "She", type: "word", start: 0.2, end: 0.6 },
+    { text: "high.", type: "word", start: 4.4, end: 4.9 },
   ],
 };
+
+// Scribe hears Hindi: translated through OpenRouter before it is returned.
+const hindiText = "छात्र ने कहा कि परीक्षा का तनाव बहुत है।";
+const hindiReply = {
+  language_code: "hin",
+  language_probability: 0.91,
+  text: hindiText,
+  words: [
+    { text: "छात्र", type: "word", start: 0.2, end: 0.7 },
+    { text: "है।", type: "word", start: 5.1, end: 5.6 },
+  ],
+};
+const englishTranslation = "The student said the exam stress is very high.";
+
+function scribeSaid(text: string, lastWordEnd: number) {
+  return scribeReply({ language_code: "eng", text, words: [{ text, type: "word", start: 0, end: lastWordEnd }] });
+}
+
+function translated(content: string, finishReason = "stop") {
+  return new Response(JSON.stringify({ choices: [{ finish_reason: finishReason, message: { content } }] }), {
+    status: 200, headers: { "content-type": "application/json" },
+  });
+}
 
 const mentorAccess = {
   ok: true,
@@ -134,7 +176,8 @@ function spyOnConsole() {
 
 function expectNothingSensitiveIn(logs: string) {
   expect(logs).not.toContain(apiKey);
-  expect(logs).not.toMatch(/Usne|bola|stress/);
+  expect(logs).not.toContain(openRouterKey);
+  expect(logs).not.toMatch(/She said|stress|student|छात्र|परीक्षा|Usne|bola/);
   expect(logs).not.toMatch(/\b41\b|\b73\b/); // Student and Phase ids
 }
 
@@ -148,8 +191,15 @@ describe("Holistic Dictation API", () => {
     vi.stubEnv("HOLISTIC_DICTATION_ENABLED", "true");
     vi.stubEnv("HOLISTIC_DICTATION_ELEVENLABS_API_KEY", apiKey);
     vi.stubEnv("HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION", "");
+    vi.stubEnv("HOLISTIC_DICTATION_OPENROUTER_API_KEY", openRouterKey);
+    vi.stubEnv("HOLISTIC_DICTATION_TRANSLATION_MODEL", "");
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue(scribeReply(spokenReply));
+    scribeMock.mockReset();
+    openRouterMock.mockReset();
+    fetchMock.mockImplementation((target: string, init: RequestInit) =>
+      (String(target) === OPENROUTER_URL ? openRouterMock : scribeMock)(target, init));
+    scribeMock.mockImplementation(async () => scribeReply(spokenReply));
+    openRouterMock.mockImplementation(async () => translated(englishTranslation));
     vi.stubGlobal("fetch", fetchMock);
     mockSession.mockResolvedValue({ user: { email: "nila.sen@example.com" } });
     mockAccess.mockResolvedValue(mentorAccess);
@@ -163,12 +213,15 @@ describe("Holistic Dictation API", () => {
   });
 
   it.each([
-    ["the flag is off", "false", apiKey],
-    ["the flag is unset", "", apiKey],
-    ["the flag is on but no key is set", "true", ""],
-  ])("returns 404 without calling ElevenLabs when %s", async (_label, flag, key) => {
+    ["the flag is off", "false", apiKey, openRouterKey],
+    ["the flag is unset", "", apiKey, openRouterKey],
+    ["the flag is on but no ElevenLabs key is set", "true", "", openRouterKey],
+    ["the flag is on but no OpenRouter key is set", "true", apiKey, ""],
+    ["the flag is on but the OpenRouter key is blank", "true", apiKey, "   "],
+  ])("returns 404 without calling any provider when %s", async (_label, flag, key, translationKey) => {
     vi.stubEnv("HOLISTIC_DICTATION_ENABLED", flag);
     vi.stubEnv("HOLISTIC_DICTATION_ELEVENLABS_API_KEY", key);
+    vi.stubEnv("HOLISTIC_DICTATION_OPENROUTER_API_KEY", translationKey);
 
     const response = await post();
 
@@ -177,7 +230,7 @@ describe("Holistic Dictation API", () => {
     expect(db.records).toEqual([]);
   });
 
-  it("returns the Mentor's verbatim words and records the attempt", async () => {
+  it("returns English as Scribe heard it, with no translation call, and records the attempt", async () => {
     db.usedTodaySeconds = 600;
 
     const response = await post({ duration_ms: "4200" });
@@ -185,9 +238,12 @@ describe("Holistic Dictation API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       outcome: "ok",
-      text: "Usne bola exam ka stress hai.",
+      text: "She said exam stress is high.",
       remainingSeconds: 1195,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scribeMock).toHaveBeenCalledTimes(1);
+    expect(openRouterMock).not.toHaveBeenCalled();
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "nila.sen@example.com" } },
       "notes_draft",
@@ -196,19 +252,22 @@ describe("Holistic Dictation API", () => {
     // duration 4.2 s, last word ends at 4.9 s → ceil(4.9) = 5 s.
     expect(db.records).toEqual([{
       id: 1, mentorUserId: 9, schoolId: 4, programId: 1, noteKind: "post_session",
-      audioSeconds: 5, charactersReturned: 29, outcome: "ok", completed: true,
+      audioSeconds: 5, charactersReturned: 29, outcome: "ok", detectedLanguage: "eng", translation: "skipped",
+      completed: true,
     }]);
   });
 
   it("returns nothing heard when Scribe hears no words, and still counts the clip", async () => {
-    fetchMock.mockResolvedValue(scribeReply({ text: "  ", words: [] }));
+    scribeMock.mockResolvedValue(scribeReply({ language_code: "hin", text: "  ", words: [] }));
 
     const response = await post({ duration_ms: "3000" });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ outcome: "nothing_heard", remainingSeconds: 1797 });
+    expect(openRouterMock).not.toHaveBeenCalled();
     expect(db.records).toEqual([expect.objectContaining({
-      audioSeconds: 3, charactersReturned: 0, outcome: "nothing_heard", completed: true,
+      audioSeconds: 3, charactersReturned: 0, outcome: "nothing_heard", detectedLanguage: null,
+      translation: "not_run", completed: true,
     })]);
   });
 
@@ -218,7 +277,7 @@ describe("Holistic Dictation API", () => {
     ["a 503", () => new Response("Usne bola exam ka stress hai", { status: 503 })],
     ["malformed JSON", () => new Response("{Usne bola", { status: 200 })],
   ])("returns 502 for %s and records a failed attempt", async (_label, reply) => {
-    fetchMock.mockResolvedValue(reply());
+    scribeMock.mockResolvedValue(reply());
     const logged = spyOnConsole();
 
     const response = await post({ duration_ms: "4200" });
@@ -229,13 +288,16 @@ describe("Holistic Dictation API", () => {
       remainingSeconds: 1795,
     });
     expect(db.records).toEqual([expect.objectContaining({
-      audioSeconds: 5, charactersReturned: 0, outcome: "failed", completed: true,
+      audioSeconds: 5, charactersReturned: 0, outcome: "failed", detectedLanguage: null, translation: "not_run",
+      completed: true,
     })]);
+    expect(openRouterMock).not.toHaveBeenCalled();
+    expect(logged()).toContain("Holistic Dictation transcription failed");
     expectNothingSensitiveIn(logged());
   });
 
   it("returns 502 for a network error and records a failed attempt", async () => {
-    fetchMock.mockRejectedValue(new TypeError(`connect ECONNRESET ${apiKey}`));
+    scribeMock.mockRejectedValue(new TypeError(`connect ECONNRESET ${apiKey}`));
     const logged = spyOnConsole();
 
     const response = await post();
@@ -285,7 +347,7 @@ describe("Holistic Dictation API", () => {
     vi.useFakeTimers();
     let waitedMs: number | null = null;
     let recordWhileWaiting: UsageRecord | undefined;
-    fetchMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+    scribeMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
       const calledAt = Date.now();
       recordWhileWaiting = { ...db.records[0] };
       init.signal?.addEventListener("abort", () => {
@@ -300,7 +362,9 @@ describe("Holistic Dictation API", () => {
     const response = await pending;
 
     expect(waitedMs).toBe(25_000);
-    expect(recordWhileWaiting).toMatchObject({ outcome: "failed", completed: false });
+    expect(recordWhileWaiting).toMatchObject({
+      outcome: "failed", detectedLanguage: null, translation: "not_run", completed: false,
+    });
     expect(response.status).toBe(502);
     expect(db.records).toEqual([expect.objectContaining({ audioSeconds: 5, outcome: "failed", completed: true })]);
     expect(logged()).toContain("timeout");
@@ -308,10 +372,7 @@ describe("Holistic Dictation API", () => {
   });
 
   it("records at most 305 seconds when Scribe's words run past the clip", async () => {
-    fetchMock.mockResolvedValue(scribeReply({
-      text: "Bahut lamba jawab",
-      words: [{ text: "jawab", type: "word", start: 310.0, end: 311.2 }],
-    }));
+    scribeMock.mockResolvedValue(scribeSaid("A very long answer", 311.2));
 
     await post({ duration_ms: "300000" });
 
@@ -319,6 +380,8 @@ describe("Holistic Dictation API", () => {
   });
 
   function expectNoProviderCallOrRecord() {
+    expect(scribeMock).not.toHaveBeenCalled();
+    expect(openRouterMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(db.records).toEqual([]);
   }
@@ -421,14 +484,20 @@ describe("Holistic Dictation API", () => {
 
   it("holds no transaction open while ElevenLabs transcribes", async () => {
     let transactionOpenDuringCall: boolean | null = null;
-    fetchMock.mockImplementation(async () => {
+    scribeMock.mockImplementation(async () => {
       transactionOpenDuringCall = db.transactionOpen;
-      return scribeReply(spokenReply);
+      return scribeReply(hindiReply);
+    });
+    let transactionOpenDuringTranslation: boolean | null = null;
+    openRouterMock.mockImplementation(async () => {
+      transactionOpenDuringTranslation = db.transactionOpen;
+      return translated(englishTranslation);
     });
 
     await post();
 
     expect(transactionOpenDuringCall).toBe(false);
+    expect(transactionOpenDuringTranslation).toBe(false);
   });
 
   const tenMegabytes = 10 * 1024 * 1024;
@@ -480,7 +549,7 @@ describe("Holistic Dictation API", () => {
   });
 
   it.each([["1", 1], ["300000", 300], ["305000", 305]])("accepts duration_ms %s and records %i s", async (duration, seconds) => {
-    fetchMock.mockResolvedValue(scribeReply({ text: "Haan", words: [{ text: "Haan", type: "word", start: 0, end: 0.4 }] }));
+    scribeMock.mockResolvedValue(scribeSaid("Yes", 0.4));
 
     expect((await post({ duration_ms: duration })).status).toBe(200);
     expect(db.records[0]).toMatchObject({ audioSeconds: seconds });
@@ -524,17 +593,17 @@ describe("Holistic Dictation API", () => {
 
   it("allows a 15 s clip at 1,790 s used (1,805 ≤ 1,805) and reports 0 remaining", async () => {
     db.usedTodaySeconds = 1790;
-    fetchMock.mockResolvedValue(scribeReply({ text: "Theek hai", words: [{ text: "hai", type: "word", start: 1, end: 14.2 }] }));
+    scribeMock.mockResolvedValue(scribeSaid("Fine", 14.2));
 
     const response = await post({ duration_ms: "15000" });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ outcome: "ok", text: "Theek hai", remainingSeconds: 0 });
+    await expect(response.json()).resolves.toEqual({ outcome: "ok", text: "Fine", remainingSeconds: 0 });
     expect(db.records[0]).toMatchObject({ audioSeconds: 15, outcome: "ok" });
   });
 
   it("allows a five-minute clip at 1,505 s used (1,805 ≤ 1,805) and refuses it at 1,506 s", async () => {
-    fetchMock.mockResolvedValue(scribeReply({ text: "Lamba jawab", words: [{ text: "jawab", type: "word", start: 1, end: 299.6 }] }));
+    scribeMock.mockResolvedValue(scribeSaid("Long answer", 299.6));
     db.usedTodaySeconds = 1506;
 
     const refused = await post({ duration_ms: "300000" });
@@ -549,7 +618,7 @@ describe("Holistic Dictation API", () => {
     const allowed = await post({ duration_ms: "300000" });
 
     expect(allowed.status).toBe(200);
-    await expect(allowed.json()).resolves.toEqual({ outcome: "ok", text: "Lamba jawab", remainingSeconds: 0 });
+    await expect(allowed.json()).resolves.toEqual({ outcome: "ok", text: "Long answer", remainingSeconds: 0 });
     expect(db.records[0]).toMatchObject({ audioSeconds: 300, outcome: "ok" });
   });
 
@@ -559,5 +628,241 @@ describe("Holistic Dictation API", () => {
     await post();
 
     expectNothingSensitiveIn(logged());
+  });
+
+  describe("translation into English", () => {
+    const DEVANAGARI = /[ऀ-ॿ]/;
+
+    function sentToOpenRouter(call = 0) {
+      const [target, init] = openRouterMock.mock.calls[call] as [string, RequestInit];
+      return { url: target, headers: new Headers(init.headers), body: JSON.parse(String(init.body)) };
+    }
+
+    async function expectTranscriptionFailureResponse(response: Response) {
+      expect(response.status).toBe(502);
+      const body = await response.text();
+      expect(body).not.toMatch(DEVANAGARI);
+      expect(JSON.parse(body)).toEqual({ error: "Couldn't transcribe. Try again", remainingSeconds: 1794 });
+    }
+
+    beforeEach(() => {
+      scribeMock.mockImplementation(async () => scribeReply(hindiReply));
+    });
+
+    it("translates a Hindi clip and returns only the English", async () => {
+      let recordWhileTranslating: UsageRecord | undefined;
+      openRouterMock.mockImplementation(async () => {
+        recordWhileTranslating = { ...db.records[0] };
+        return translated(englishTranslation);
+      });
+
+      const response = await post({ duration_ms: "4200" });
+
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).not.toMatch(DEVANAGARI);
+      expect(JSON.parse(body)).toEqual({ outcome: "ok", text: englishTranslation, remainingSeconds: 1794 });
+      expect(scribeMock).toHaveBeenCalledTimes(1);
+      expect(openRouterMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const sent = sentToOpenRouter();
+      expect(sent.url).toBe(OPENROUTER_URL);
+      expect(sent.headers.get("authorization")).toBe(`Bearer ${openRouterKey}`);
+      expect(sent.body).toMatchObject({
+        model: "openai/gpt-6.1-terra",
+        provider: { zdr: true, data_collection: "deny" },
+        reasoning: { effort: "none" },
+        max_tokens: 4000,
+      });
+      expect(sent.body.messages[1].content).toBe(`<transcript>\n${hindiText}\n</transcript>`);
+      expect(recordWhileTranslating).toMatchObject({ outcome: "failed", translation: "not_run", completed: false });
+      // duration 4.2 s, last word ends at 5.6 s → 6 s.
+      expect(db.records).toEqual([expect.objectContaining({
+        audioSeconds: 6, charactersReturned: englishTranslation.length, outcome: "ok",
+        detectedLanguage: "hin", translation: "ok", completed: true,
+      })]);
+    });
+
+    it("uses the translation model from the environment", async () => {
+      vi.stubEnv("HOLISTIC_DICTATION_TRANSLATION_MODEL", " anthropic/claude-haiku-5.5 ");
+
+      await post();
+
+      expect(sentToOpenRouter().body.model).toBe("anthropic/claude-haiku-5.5");
+    });
+
+    it.each([
+      ["romanised Hindi", { language_code: "hin", text: "Usne bola exam ka stress hai." }],
+      ["English with a Devanagari word", { language_code: "eng", text: "She said the stress is बहुत high." }],
+      ["a clip with no language code", { text: "She said exam stress is high." }],
+    ])("translates %s", async (_label, heard) => {
+      scribeMock.mockResolvedValue(scribeReply({ ...heard, words: [{ text: "x", type: "word", start: 0, end: 1 }] }));
+
+      const response = await post();
+
+      await expect(response.json()).resolves.toMatchObject({ outcome: "ok", text: englishTranslation });
+      expect(openRouterMock).toHaveBeenCalledTimes(1);
+      expect(db.records[0]).toMatchObject({ translation: "ok", charactersReturned: englishTranslation.length });
+    });
+
+    it("records the detected language in lower case", async () => {
+      scribeMock.mockResolvedValue(scribeReply({ ...hindiReply, language_code: "HIN" }));
+
+      await post();
+
+      expect(db.records[0]).toMatchObject({ detectedLanguage: "hin", translation: "ok" });
+    });
+
+    it("records no language when Scribe's code is longer than the column allows", async () => {
+      scribeMock.mockResolvedValue(scribeReply({ ...hindiReply, language_code: "x".repeat(17) }));
+
+      await post();
+
+      expect(db.records[0]).toMatchObject({ detectedLanguage: null, translation: "ok", outcome: "ok" });
+    });
+
+    it("retries a failed translation once and returns the English", async () => {
+      openRouterMock
+        .mockResolvedValueOnce(new Response(`upstream echoed ${hindiText}`, { status: 503 }))
+        .mockResolvedValueOnce(translated(englishTranslation));
+      const logged = spyOnConsole();
+
+      const response = await post({ duration_ms: "4200" });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ outcome: "ok", text: englishTranslation });
+      expect(openRouterMock).toHaveBeenCalledTimes(2);
+      expect(scribeMock).toHaveBeenCalledTimes(1);
+      expect(db.records).toEqual([expect.objectContaining({
+        outcome: "ok", translation: "ok", charactersReturned: englishTranslation.length, completed: true,
+      })]);
+      expect(logged()).toContain("Holistic Dictation translation failed");
+      expect(logged()).toContain("503");
+      expectNothingSensitiveIn(logged());
+    });
+
+    it.each([
+      ["a 500 echoing the transcript", () => new Response(`upstream echoed ${hindiText}`, { status: 500 })],
+      ["a reply still in Hindi", () => translated(hindiText)],
+      ["a cut-off reply", () => translated("The student said", "length")],
+      ["an empty reply", () => translated("  ")],
+      ["a refused reply", () => translated("", "content_filter")],
+      ["a network error", () => { throw new TypeError(`connect ECONNRESET ${openRouterKey} ${hindiText}`); }],
+    ])("fails the clip like a failed transcription after two attempts with %s", async (_label, reply) => {
+      openRouterMock.mockImplementation(async () => reply());
+      const logged = spyOnConsole();
+
+      const response = await post({ duration_ms: "4200" });
+
+      await expectTranscriptionFailureResponse(response);
+      expect(openRouterMock).toHaveBeenCalledTimes(2);
+      expect(db.records).toEqual([expect.objectContaining({
+        audioSeconds: 6, charactersReturned: 0, outcome: "failed", detectedLanguage: "hin",
+        translation: "failed", completed: true,
+      })]);
+      expect(logged()).toContain("Holistic Dictation translation failed");
+      expect(logged()).not.toContain("transcription failed");
+      expect(logged()).not.toMatch(DEVANAGARI);
+      expectNothingSensitiveIn(logged());
+    });
+
+    it("gives a failed translation the same response as a failed transcription", async () => {
+      openRouterMock.mockImplementation(async () => new Response("", { status: 500 }));
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const translationFailure = await post({ duration_ms: "4200" });
+
+      db.records = [];
+      scribeMock.mockResolvedValue(new Response("", { status: 500 }));
+      const transcriptionFailure = await post({ duration_ms: "6000" });
+
+      expect(translationFailure.status).toBe(transcriptionFailure.status);
+      await expect(translationFailure.json()).resolves.toEqual(await transcriptionFailure.json());
+    });
+
+    function hangUntilAborted(log: number[]) {
+      return (_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        const calledAt = Date.now();
+        init.signal?.addEventListener("abort", () => {
+          log.push(Date.now() - calledAt);
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    }
+
+    function scribeAnswersAfter(ms: number) {
+      scribeMock.mockImplementation(() =>
+        new Promise((resolve) => setTimeout(() => resolve(scribeReply(hindiReply)), ms)));
+    }
+
+    async function postWithFakeTimers() {
+      const startedAt = Date.now();
+      const pending = post({ duration_ms: "4200" });
+      await vi.runAllTimersAsync();
+      const response = await pending;
+      return { response, elapsedMs: Date.now() - startedAt };
+    }
+
+    it("gives each translation attempt at most 15 s and retries while 5 s or more are left", async () => {
+      vi.useFakeTimers();
+      scribeAnswersAfter(3_000);
+      const waits: number[] = [];
+      openRouterMock.mockImplementation(hangUntilAborted(waits));
+      const logged = spyOnConsole();
+
+      const { response, elapsedMs } = await postWithFakeTimers();
+
+      // Scribe 3 s, first attempt 15 s (t = 18 s), 9 s left: the retry gets 9 s.
+      expect(waits).toEqual([15_000, 9_000]);
+      expect(elapsedMs).toBe(27_000);
+      await expectTranscriptionFailureResponse(response);
+      expect(db.records[0]).toMatchObject({ outcome: "failed", translation: "failed", completed: true });
+      expect(logged()).toContain("timeout");
+      expectNothingSensitiveIn(logged());
+    });
+
+    it("does not retry when less than 5 s are left before the 27 s deadline", async () => {
+      vi.useFakeTimers();
+      scribeAnswersAfter(8_000);
+      const waits: number[] = [];
+      openRouterMock.mockImplementation(hangUntilAborted(waits));
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      const { response, elapsedMs } = await postWithFakeTimers();
+
+      // Scribe 8 s, first attempt 15 s (t = 23 s), 4 s left: no retry.
+      expect(waits).toEqual([15_000]);
+      expect(elapsedMs).toBe(23_000);
+      await expectTranscriptionFailureResponse(response);
+    });
+
+    it("cuts a slow Scribe's translation off at the 27 s deadline", async () => {
+      vi.useFakeTimers();
+      scribeAnswersAfter(20_000);
+      const waits: number[] = [];
+      openRouterMock.mockImplementation(hangUntilAborted(waits));
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      const { response, elapsedMs } = await postWithFakeTimers();
+
+      expect(waits).toEqual([7_000]);
+      expect(elapsedMs).toBe(27_000);
+      await expectTranscriptionFailureResponse(response);
+    });
+
+    it("retries a fast failure and succeeds inside the deadline", async () => {
+      vi.useFakeTimers();
+      scribeAnswersAfter(5_000);
+      openRouterMock
+        .mockImplementationOnce(() => new Promise((resolve) =>
+          setTimeout(() => resolve(new Response("", { status: 502 })), 2_000)))
+        .mockImplementationOnce(() => new Promise((resolve) =>
+          setTimeout(() => resolve(translated(englishTranslation)), 4_000)));
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      const { response, elapsedMs } = await postWithFakeTimers();
+
+      expect(elapsedMs).toBe(11_000);
+      await expect(response.json()).resolves.toMatchObject({ outcome: "ok", text: englishTranslation });
+    });
   });
 });

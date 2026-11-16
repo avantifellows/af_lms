@@ -54,7 +54,7 @@ export type DictationState =
 
 export type DictationKind = "post_session" | "follow_up";
 
-// Called with the transcribed words when the response arrives. Returns a
+// Called with the clip's words, in English, when the response arrives. Returns a
 // message to show under the box when the words could not be added.
 export type ApplyDictationText = (target: string, text: string) => string | null;
 

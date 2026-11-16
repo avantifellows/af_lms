@@ -67,8 +67,10 @@ function validateClip(form: FormData): { ok: true; clip: ValidClip } | { ok: fal
   return { ok: true, clip: { audio, filename, durationMs } };
 }
 
-// Dictation (#500): one recorded clip in, verbatim text out. The route only
-// parses, gates and maps; the Holistic Dictation module does the work.
+// Dictation (#500): one recorded clip in, everything said out as English text
+// (translated in full when it was not spoken in English). A failed translation
+// fails the clip exactly like a failed transcription. The route only parses,
+// gates and maps; the Holistic Dictation module does the work.
 export async function POST(
   request: NextRequest,
   { params }: { params: RouteParams }
