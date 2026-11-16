@@ -105,6 +105,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          EXAM_PASSWORD_KMS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_KEY_ID }}
+          EXAM_PASSWORD_KMS_REGION: ${{ secrets.EXAM_PASSWORD_KMS_REGION }}
+          EXAM_PASSWORD_KMS_ACCESS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_ACCESS_KEY_ID }}
+          EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: ${{ secrets.EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY }}
           CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
@@ -149,6 +153,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg exam_kms_key "$EXAM_PASSWORD_KMS_KEY_ID" \
+            --arg exam_kms_region "$EXAM_PASSWORD_KMS_REGION" \
+            --arg exam_kms_access_key_id "$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" \
+            --arg exam_kms_secret "$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" \
             --arg cms_url "$CMS_SERVICE_URL" \
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
@@ -191,6 +199,10 @@ jobs:
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
               S3_DOCS_SECRET_ACCESS_KEY: $y,
+              EXAM_PASSWORD_KMS_KEY_ID: $exam_kms_key,
+              EXAM_PASSWORD_KMS_REGION: $exam_kms_region,
+              EXAM_PASSWORD_KMS_ACCESS_KEY_ID: $exam_kms_access_key_id,
+              EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: $exam_kms_secret,
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
@@ -306,6 +318,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          EXAM_PASSWORD_KMS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_KEY_ID }}
+          EXAM_PASSWORD_KMS_REGION: ${{ secrets.EXAM_PASSWORD_KMS_REGION }}
+          EXAM_PASSWORD_KMS_ACCESS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_ACCESS_KEY_ID }}
+          EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: ${{ secrets.EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY }}
           CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
@@ -350,6 +366,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg exam_kms_key "$EXAM_PASSWORD_KMS_KEY_ID" \
+            --arg exam_kms_region "$EXAM_PASSWORD_KMS_REGION" \
+            --arg exam_kms_access_key_id "$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" \
+            --arg exam_kms_secret "$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" \
             --arg cms_url "$CMS_SERVICE_URL" \
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
@@ -392,6 +412,10 @@ jobs:
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
               S3_DOCS_SECRET_ACCESS_KEY: $y,
+              EXAM_PASSWORD_KMS_KEY_ID: $exam_kms_key,
+              EXAM_PASSWORD_KMS_REGION: $exam_kms_region,
+              EXAM_PASSWORD_KMS_ACCESS_KEY_ID: $exam_kms_access_key_id,
+              EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: $exam_kms_secret,
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
@@ -514,6 +538,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          EXAM_PASSWORD_KMS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_KEY_ID }}
+          EXAM_PASSWORD_KMS_REGION: ${{ secrets.EXAM_PASSWORD_KMS_REGION }}
+          EXAM_PASSWORD_KMS_ACCESS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_ACCESS_KEY_ID }}
+          EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: ${{ secrets.EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY }}
           CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
@@ -557,6 +585,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg exam_kms_key "$EXAM_PASSWORD_KMS_KEY_ID" \
+            --arg exam_kms_region "$EXAM_PASSWORD_KMS_REGION" \
+            --arg exam_kms_access_key_id "$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" \
+            --arg exam_kms_secret "$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" \
             --arg cms_url "$CMS_SERVICE_URL" \
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
@@ -599,6 +631,10 @@ jobs:
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
               S3_DOCS_SECRET_ACCESS_KEY: $y,
+              EXAM_PASSWORD_KMS_KEY_ID: $exam_kms_key,
+              EXAM_PASSWORD_KMS_REGION: $exam_kms_region,
+              EXAM_PASSWORD_KMS_ACCESS_KEY_ID: $exam_kms_access_key_id,
+              EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: $exam_kms_secret,
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,

@@ -6,8 +6,17 @@ export interface ExamRecordWrite {
   student_id: number;
   exam_id: number;
   application_number: string;
-  application_password: string | null;
   sessions_applied: number[] | null;
+  /**
+   * Only ever null: the DB Service still has the legacy plaintext column, and
+   * sending null wipes whatever a not-yet-backfilled row holds there.
+   */
+  application_password?: null;
+  /**
+   * Base64 KMS ciphertext, or null to clear the password. Leave both password
+   * keys out to keep what is stored.
+   */
+  application_password_ciphertext?: string | null;
 }
 
 /** Thrown on a non-2xx from the DB Service; carries the upstream body. */
