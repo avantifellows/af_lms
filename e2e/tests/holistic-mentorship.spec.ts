@@ -3,7 +3,14 @@ import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "../fixtures/auth";
 import { collectBrowserHealth, expectBrowserHealth } from "../helpers/browser-health";
 import { getTestPool } from "../helpers/db";
-import { FAKE_ELEVENLABS_TRANSCRIPT, readFakeElevenLabsCalls } from "../helpers/fake-elevenlabs";
+import {
+  FAKE_ELEVENLABS_TRANSCRIPT,
+  FAKE_OPENROUTER_FAIL_HEADERS,
+  FAKE_OPENROUTER_TRANSLATION,
+  FAKE_SCRIBE_HINDI_HEADERS,
+  readFakeElevenLabsCalls,
+  readFakeOpenRouterCalls,
+} from "../helpers/fake-elevenlabs";
 
 type Fixture = {
   schoolCode: string;
@@ -23,6 +30,7 @@ type Fixture = {
 let fixture: Fixture;
 
 const HOLISTIC_TEACHER_EMAIL = "e2e-holistic-teacher@test.local";
+const DEVANAGARI = /\p{Script=Devanagari}/u;
 
 const RESPONSIVE_VIEWPORTS = [
   { name: "desktop", width: 1280, height: 800 },
@@ -431,47 +439,13 @@ test.describe("Holistic Mentorship release workflows", () => {
   test("a clip from Chromium's real recorder passes the real dictation route", async ({
     holisticTeacherPage: page,
   }) => {
-    // Chromium's fake capture device hangs in CoreAudio on macOS unless the
-    // app that launched it has Microphone permission, so the microphone is the
-    // one piece not real here: a Web Audio tone stands in for it. Chromium's
-    // MediaRecorder, the recorder hook, the dictation route, the server's
-    // ElevenLabs fake, autosave and the usage row are all real.
-    await page.addInitScript(() => {
-      navigator.mediaDevices.getUserMedia = async () => {
-        const audio = new AudioContext();
-        const tone = audio.createOscillator();
-        const microphone = audio.createMediaStreamDestination();
-        tone.connect(microphone);
-        tone.start();
-        return microphone.stream;
-      };
-    });
-    // Pass-through only: Chromium hides a Blob request body unless it is routed.
-    await page.route("**/dictation?**", (route) => route.continue());
     const usageBefore = await holisticTeacherDictationUsage();
     const callsBefore = readFakeElevenLabsCalls().length;
+    const translationsBefore = readFakeOpenRouterCalls().length;
 
-    await page.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
-    const answer = page.getByRole("textbox", { name: "What support will help next?" });
-    await answer.fill("Recorded for real.");
-    const mic = page.getByRole("button", { name: /^Dictate: .*What support will help next\?$/ });
-    await mic.click();
-    const startedAt = Date.now();
-    await expect(page.getByText("Recording 0:02", { exact: true })).toBeVisible();
-    const upload = page.waitForRequest((request) => request.url().includes("/dictation?"));
-    const reply = page.waitForResponse((response) => response.url().includes("/dictation?"));
     const expected = `Recorded for real. ${FAKE_ELEVENLABS_TRANSCRIPT}`;
-    const saved = page.waitForResponse((response) => response.request().method() === "PATCH" &&
-      response.request().postData()?.includes(`"answer":${JSON.stringify(expected)}`) === true);
-    await mic.click();
-    const recordedMs = Date.now() - startedAt;
-
-    const request = await upload;
-    const form = await new Response(new Uint8Array(request.postDataBuffer() ?? []), {
-      headers: { "content-type": request.headers()["content-type"] },
-    }).formData();
-    const clip = form.get("audio") as File;
-    const durationMs = Number(form.get("duration_ms"));
+    const { answer, clip, durationMs, recordedMs, response, saved } =
+      await dictateWithRealRecorder(page, "Recorded for real.", { expectedAnswer: expected });
     test.info().annotations.push({
       type: "clip",
       description: `${clip.type}, ${clip.size} bytes, ${durationMs} ms (test clock ${recordedMs} ms)`,
@@ -481,19 +455,21 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(clip.size).toBeGreaterThan(0);
     expect(clip.size).toBeLessThan(100_000);
     expect(Math.abs(durationMs - recordedMs)).toBeLessThan(1_000);
-    const response = await reply;
     expect(response.status()).toBe(200);
     expect(await response.json()).toMatchObject({ outcome: "ok", text: FAKE_ELEVENLABS_TRANSCRIPT });
 
     await expect(answer).toHaveValue(expected);
-    expect((await saved).status()).toBe(200);
-    // The server fake answered one speech-to-text call, with the same clip.
+    expect((await saved!).status()).toBe(200);
+    // The server fake answered one speech-to-text call, with the same clip,
+    // in English, so nothing was sent for translation.
     expect(readFakeElevenLabsCalls().slice(callsBefore)).toMatchObject([{
       method: "POST",
       url: expect.stringMatching(/^https:\/\/api\.elevenlabs\.io\/v1\/speech-to-text(\?|$)/),
       answered: true,
       file: { size: clip.size, type: clip.type },
+      language: "eng",
     }]);
+    expect(readFakeOpenRouterCalls().slice(translationsBefore)).toEqual([]);
     const usage = (await holisticTeacherDictationUsage())
       .filter((row) => !usageBefore.some((old) => old.id === row.id));
     expect(usage).toEqual([expect.objectContaining({
@@ -501,6 +477,91 @@ test.describe("Holistic Mentorship release workflows", () => {
       outcome: "ok",
       audio_seconds: Math.ceil(durationMs / 1000),
       characters_returned: FAKE_ELEVENLABS_TRANSCRIPT.length,
+      detected_language: "eng",
+      translation: "skipped",
+    })]);
+  });
+
+  test("a Hindi clip through the real dictation route arrives in the box as English", async ({
+    holisticTeacherPage: page,
+  }) => {
+    const usageBefore = await holisticTeacherDictationUsage();
+    const callsBefore = readFakeElevenLabsCalls().length;
+    const translationsBefore = readFakeOpenRouterCalls().length;
+
+    const expected = `Recorded in Hindi. ${FAKE_OPENROUTER_TRANSLATION}`;
+    const { answer, clip, durationMs, response, saved } = await dictateWithRealRecorder(page, "Recorded in Hindi.", {
+      expectedAnswer: expected,
+      steeringHeaders: FAKE_SCRIBE_HINDI_HEADERS,
+    });
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toMatchObject({ outcome: "ok", text: FAKE_OPENROUTER_TRANSLATION });
+    await expect(answer).toHaveValue(expected);
+    expect(await answer.inputValue()).not.toMatch(DEVANAGARI);
+    expect((await saved!).status()).toBe(200);
+
+    expect(readFakeElevenLabsCalls().slice(callsBefore)).toMatchObject([{
+      method: "POST",
+      answered: true,
+      file: { size: clip.size, type: clip.type },
+      language: "hin",
+    }]);
+    // One translation call, asking for zero-retention routing.
+    expect(readFakeOpenRouterCalls().slice(translationsBefore)).toEqual([expect.objectContaining({
+      method: "POST",
+      url: "https://openrouter.ai/api/v1/chat/completions",
+      answered: true,
+      forcedFailure: false,
+      model: expect.any(String),
+      messageCount: 2,
+      provider: { zdr: true, data_collection: "deny" },
+      reasoning: expect.any(Object),
+      stream: false,
+    })]);
+    const usage = (await holisticTeacherDictationUsage())
+      .filter((row) => !usageBefore.some((old) => old.id === row.id));
+    expect(usage).toEqual([expect.objectContaining({
+      note_kind: "post_session",
+      outcome: "ok",
+      audio_seconds: Math.ceil(durationMs / 1000),
+      characters_returned: FAKE_OPENROUTER_TRANSLATION.length,
+      detected_language: "hin",
+      translation: "ok",
+    })]);
+
+    await page.reload();
+    await expect(answer).toHaveValue(expected);
+  });
+
+  test("a Hindi clip whose translation fails twice adds nothing and offers Retry", async ({
+    holisticTeacherPage: page,
+  }) => {
+    const usageBefore = await holisticTeacherDictationUsage();
+    const callsBefore = readFakeElevenLabsCalls().length;
+    const translationsBefore = readFakeOpenRouterCalls().length;
+
+    const { answer, response } = await dictateWithRealRecorder(page, "Translation will fail.", {
+      steeringHeaders: { ...FAKE_SCRIBE_HINDI_HEADERS, ...FAKE_OPENROUTER_FAIL_HEADERS },
+    });
+    expect(response.status()).toBe(502);
+    await expect(page.getByText("Couldn't transcribe. Try again", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+    await expect(answer).toHaveValue("Translation will fail.");
+
+    expect(readFakeElevenLabsCalls().slice(callsBefore)).toMatchObject([{ answered: true, language: "hin" }]);
+    // The first attempt and its one retry, both refused by the fake.
+    expect(readFakeOpenRouterCalls().slice(translationsBefore)).toMatchObject([
+      { answered: true, forcedFailure: true, provider: { zdr: true, data_collection: "deny" } },
+      { answered: true, forcedFailure: true, provider: { zdr: true, data_collection: "deny" } },
+    ]);
+    const usage = (await holisticTeacherDictationUsage())
+      .filter((row) => !usageBefore.some((old) => old.id === row.id));
+    expect(usage).toEqual([expect.objectContaining({
+      note_kind: "post_session",
+      outcome: "failed",
+      characters_returned: 0,
+      detected_language: "hin",
+      translation: "failed",
     })]);
   });
 
@@ -1115,6 +1176,66 @@ function installFakeMic() {
   Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
 }
 
+// Chromium's fake capture device hangs in CoreAudio on macOS unless the app
+// that launched it has Microphone permission, so the microphone is the one
+// piece not real in these tests: a Web Audio tone stands in for it.
+// Chromium's MediaRecorder, the recorder hook, the dictation route, the
+// server's provider fakes, autosave and the usage row are all real.
+function installWebAudioMicrophone() {
+  navigator.mediaDevices.getUserMedia = async () => {
+    const audio = new AudioContext();
+    const tone = audio.createOscillator();
+    const microphone = audio.createMediaStreamDestination();
+    tone.connect(microphone);
+    tone.start();
+    return microphone.stream;
+  };
+}
+
+// Types `prefix` into the draft answer, records about 2 s with the real
+// recorder and stops. `steeringHeaders` are added to this dictation request
+// only, to steer the server's provider fakes (see fake-elevenlabs.cjs).
+async function dictateWithRealRecorder(
+  page: Page,
+  prefix: string,
+  options: { expectedAnswer?: string; steeringHeaders?: Record<string, string> } = {}
+) {
+  await page.addInitScript(installWebAudioMicrophone);
+  // Routed even with no headers to add: Chromium hides a Blob request body
+  // unless it is routed. allHeaders keeps the session cookie.
+  await page.route("**/dictation?**", async (route) => route.continue({
+    headers: { ...(await route.request().allHeaders()), ...options.steeringHeaders },
+  }));
+  await page.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
+  const answer = page.getByRole("textbox", { name: "What support will help next?" });
+  await answer.fill(prefix);
+  const mic = page.getByRole("button", { name: /^Dictate: .*What support will help next\?$/ });
+  await mic.click();
+  const startedAt = Date.now();
+  await expect(page.getByText("Recording 0:02", { exact: true })).toBeVisible();
+  const upload = page.waitForRequest((request) => request.url().includes("/dictation?"));
+  const reply = page.waitForResponse((response) => response.url().includes("/dictation?"));
+  const { expectedAnswer } = options;
+  const saved = expectedAnswer === undefined ? undefined : page.waitForResponse((response) =>
+    response.request().method() === "PATCH" &&
+    response.request().postData()?.includes(`"answer":${JSON.stringify(expectedAnswer)}`) === true);
+  await mic.click();
+  const recordedMs = Date.now() - startedAt;
+
+  const request = await upload;
+  const form = await new Response(new Uint8Array(request.postDataBuffer() ?? []), {
+    headers: { "content-type": request.headers()["content-type"] },
+  }).formData();
+  return {
+    answer,
+    clip: form.get("audio") as File,
+    durationMs: Number(form.get("duration_ms")),
+    recordedMs,
+    response: await reply,
+    saved,
+  };
+}
+
 // The Mentor's content-free Dictation Usage Records, oldest first.
 async function holisticTeacherDictationUsage() {
   const pool = getTestPool();
@@ -1125,8 +1246,11 @@ async function holisticTeacherDictationUsage() {
       outcome: string;
       audio_seconds: number;
       characters_returned: number;
+      detected_language: string | null;
+      translation: string;
     }>(
-      `SELECT record.id, record.note_kind, record.outcome, record.audio_seconds, record.characters_returned
+      `SELECT record.id, record.note_kind, record.outcome, record.audio_seconds, record.characters_returned,
+              record.detected_language, record.translation
        FROM holistic_mentorship_dictation_usage_records record
        JOIN "user" mentor ON mentor.id = record.mentor_user_id
        WHERE LOWER(mentor.email) = $1 ORDER BY record.id`,
