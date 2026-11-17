@@ -52,6 +52,11 @@ beforeEach(() => {
   // that short-circuits (read-only, PMU) leaves its unused rows behind and
   // shifts the next test's queue, so the query queue is reset outright.
   mockQuery.mockReset();
+  // Same for the DB Service writes: a test that queues a one-off rejection
+  // but stops before using it must not fail whichever test runs next.
+  mockCreate.mockReset();
+  mockUpdate.mockReset();
+  mockDelete.mockReset();
   mockListExams.mockResolvedValue([JEE, NEET]);
   mockListRecords.mockResolvedValue([]);
   mockEncrypt.mockImplementation(async (plaintext, studentId) => `enc(${plaintext}|${studentId})`);
@@ -148,17 +153,21 @@ describe("GET /api/students/[id]/exam-records", () => {
   });
 });
 
+/** PUT one registration and expect a 403 that never reached the DB Service. */
+async function expectRefusedBeforeWriting() {
+  const res = await PUT(
+    putRequest({ exams: [{ exam_id: 1, application_number: "JEE123" }] }),
+    routeParams({ id: "7" }),
+  );
+  expect(res.status).toBe(403);
+  expect(mockCreate).not.toHaveBeenCalled();
+}
+
 describe("PUT /api/students/[id]/exam-records", () => {
   it("refuses a PMU (JNV NVS) Student, so the UI gate can't be walked around", async () => {
     authorize({ pmuOnly: true });
 
-    const res = await PUT(
-      putRequest({ exams: [{ exam_id: 1, application_number: "JEE123" }] }),
-      routeParams({ id: "7" }),
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockCreate).not.toHaveBeenCalled();
+    await expectRefusedBeforeWriting();
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockDelete).not.toHaveBeenCalled();
   });
@@ -166,13 +175,7 @@ describe("PUT /api/students/[id]/exam-records", () => {
   it("refuses a read-only user before touching the DB Service", async () => {
     authorize({ readOnly: true });
 
-    const res = await PUT(
-      putRequest({ exams: [{ exam_id: 1, application_number: "JEE123" }] }),
-      routeParams({ id: "7" }),
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockCreate).not.toHaveBeenCalled();
+    await expectRefusedBeforeWriting();
   });
 
   it("creates a registration for an exam the Student has none for", async () => {
@@ -218,7 +221,9 @@ describe("PUT /api/students/[id]/exam-records", () => {
 
   it("fails a registration whose password cannot be encrypted, and sends nothing for it", async () => {
     authorize();
-    mockEncrypt.mockRejectedValueOnce(new Error("AccessDeniedException"));
+    mockEncrypt.mockRejectedValueOnce(
+      new Error("User arn:aws:iam::123:user/x is not authorized on arn:aws:kms:ap-south-1:123:key/k"),
+    );
 
     const res = await PUT(
       putRequest({
@@ -232,8 +237,9 @@ describe("PUT /api/students/[id]/exam-records", () => {
 
     expect(res.status).toBe(200);
     expect((await res.json()).warnings).toEqual([
-      "Could not save JEE Mains: AccessDeniedException",
+      "Could not save JEE Mains: the password could not be encrypted; try again later",
     ]);
+    expect(JSON.stringify(mockCreate.mock.calls)).not.toContain("arn:aws");
     expect(mockCreate).toHaveBeenCalledTimes(1);
     expect(mockCreate.mock.calls[0][0]).toMatchObject({ exam_id: 2 });
   });

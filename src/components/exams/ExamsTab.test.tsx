@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ExamsTab } from "./ExamsTab";
 import type { StudentExamRecord } from "@/lib/competitive-exams";
@@ -65,6 +65,13 @@ async function renderStoredJee(canReveal = true) {
   const user = userEvent.setup();
   await renderTab({ boardStream: "PCM" }, [storedJee], canReveal);
   return user;
+}
+
+/** Press Save right after the initial load, and wait for the save request. */
+async function pressSaveAfterLoad(user: ReturnType<typeof userEvent.setup>) {
+  mockFetch.mockResolvedValueOnce(jsonResponse({ records: [] }));
+  await user.click(screen.getByRole("button", { name: "Save Exams" }));
+  await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
 }
 
 /** Press Save, answer it with `records`, and return the first exam it sent. */
@@ -149,6 +156,25 @@ describe("ExamsTab", () => {
     expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
   });
 
+  it("drops a reveal that lands after the save it was overtaken by", async () => {
+    const user = await renderStoredJee();
+    let answerReveal: (res: Response) => void = () => {};
+    mockFetch.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (answerReveal = resolve)),
+    );
+    await user.click(screen.getByRole("button", { name: "Show JEE Mains password" }));
+    await user.click(screen.getByLabelText("Session 2"));
+    await saveFirstExam(user, [storedJee]);
+
+    await act(async () => answerReveal(jsonResponse({ password: "late-secret" })));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Show JEE Mains password" })).toBeEnabled(),
+    );
+    expect(screen.queryByDisplayValue("late-secret")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
+  });
+
   it("keeps a stored password on save by leaving it out", async () => {
     const user = await renderStoredJee();
 
@@ -177,7 +203,7 @@ describe("ExamsTab", () => {
 
     await user.click(screen.getByRole("button", { name: "Change JEE Mains password" }));
     await user.type(screen.getByLabelText("Application password"), "typo");
-    await user.click(screen.getByRole("button", { name: "Keep stored" }));
+    await user.click(screen.getByRole("button", { name: "Keep stored JEE Mains password" }));
     await user.click(screen.getByLabelText("Session 2"));
 
     expect(await saveFirstExam(user, [storedJee])).not.toHaveProperty("application_password");
@@ -188,7 +214,7 @@ describe("ExamsTab", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove JEE Mains password" }));
     expect(screen.getByText("Password will be removed when you save.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Undo" }));
+    await user.click(screen.getByRole("button", { name: "Undo removing JEE Mains password" }));
     expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
 
     await user.click(screen.getByRole("button", { name: "Remove JEE Mains password" }));
@@ -244,10 +270,7 @@ describe("ExamsTab", () => {
 
     await user.type(screen.getByLabelText("Application number"), "JEE123");
     await user.click(screen.getByLabelText("Session 2"));
-    mockFetch.mockResolvedValueOnce(jsonResponse({ records: [] }));
-    await user.click(screen.getByRole("button", { name: "Save Exams" }));
-
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    await pressSaveAfterLoad(user);
     expect(savedBody().exams[0].sessions_applied).toEqual([2]);
   });
 
@@ -279,10 +302,7 @@ describe("ExamsTab", () => {
     await renderTab({ boardStream: "PCM" }, [storedJee]);
 
     await user.click(screen.getByRole("button", { name: "Remove" }));
-    mockFetch.mockResolvedValueOnce(jsonResponse({ records: [] }));
-    await user.click(screen.getByRole("button", { name: "Save Exams" }));
-
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    await pressSaveAfterLoad(user);
     expect(savedBody()).toEqual({ exams: [], removed_record_ids: [10] });
   });
 

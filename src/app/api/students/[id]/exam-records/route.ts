@@ -82,15 +82,29 @@ async function toWrite(
   };
   if (exam.password.action === "set") {
     write.application_password = null;
-    write.application_password_ciphertext = await encryptExamPassword(
-      exam.password.value,
-      studentId,
-    );
+    write.application_password_ciphertext = await encryptOrFail(exam.password.value, studentId);
   } else if (exam.password.action === "clear") {
     write.application_password = null;
     write.application_password_ciphertext = null;
   }
   return write;
+}
+
+/**
+ * KMS errors name the key ARN and the IAM user, which belong in the server log
+ * and not in a warning shown to whoever is editing the Student, so they are
+ * replaced with a plain message here.
+ */
+async function encryptOrFail(plaintext: string, studentId: number): Promise<string> {
+  try {
+    return await encryptExamPassword(plaintext, studentId);
+  } catch (error) {
+    console.error(
+      "Exam password encryption failed:",
+      error instanceof Error ? error.name : typeof error,
+    );
+    throw new Error("the password could not be encrypted; try again later");
+  }
 }
 
 function errorText(error: unknown): string {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, FormSection } from "@/components/ui";
 import {
   MASKED_PASSWORD,
@@ -109,12 +109,17 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
   const [rows, setRows] = useState<ExamRow[]>([]);
   const [removedRecordIds, setRemovedRecordIds] = useState<number[]>([]);
   const [canRevealPassword, setCanRevealPassword] = useState(false);
-  // Keyed by exam id. `showTyped` toggles a new password's input; `revealed`
-  // holds a stored password fetched (and logged) by the reveal route.
+  // `showTyped` is keyed by exam id and toggles a new password's input. The
+  // reveal state is keyed by record id: a revealed password belongs to one
+  // stored registration, and must never surface on a row that has since been
+  // removed, re-added or reloaded under the same exam.
   const [showTyped, setShowTyped] = useState<Record<number, boolean>>({});
   const [revealed, setRevealed] = useState<Record<number, string>>({});
   const [revealing, setRevealing] = useState<Record<number, boolean>>({});
   const [revealErrors, setRevealErrors] = useState<Record<number, string>>({});
+  // Bumped whenever revealed passwords are forgotten, so a reveal still in
+  // flight at that moment is dropped when it lands instead of showing.
+  const revealEpoch = useRef(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -160,50 +165,60 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
 
   /** Drop every revealed or half-typed password, e.g. once a save lands. */
   function forgetPasswords() {
+    revealEpoch.current += 1;
     setShowTyped({});
     setRevealed({});
     setRevealing({});
     setRevealErrors({});
   }
 
-  function hideRevealed(examId: number) {
-    setRevealed((current) => {
-      const next = { ...current };
-      delete next[examId];
-      return next;
-    });
+  function hideRevealed(recordId: number | null) {
+    if (recordId === null) return;
+    setRevealed((current) => without(current, recordId));
+    setRevealErrors((current) => without(current, recordId));
+  }
+
+  /** Forget everything about one registration's password, e.g. on removal. */
+  function forgetRow(row: ExamRow) {
+    setShowTyped((current) => without(current, row.examId));
+    if (row.recordId === null) return;
+    const recordId = row.recordId;
+    setRevealed((current) => without(current, recordId));
+    setRevealing((current) => without(current, recordId));
+    setRevealErrors((current) => without(current, recordId));
   }
 
   async function revealPassword(row: ExamRow) {
     if (row.recordId === null) return;
-    setRevealing((current) => ({ ...current, [row.examId]: true }));
-    setRevealErrors((current) => {
-      const next = { ...current };
-      delete next[row.examId];
-      return next;
-    });
+    const recordId = row.recordId;
+    const epoch = revealEpoch.current;
+    const stale = () => revealEpoch.current !== epoch;
+    setRevealing((current) => ({ ...current, [recordId]: true }));
+    setRevealErrors((current) => without(current, recordId));
     try {
       const res = await fetch(
-        `/api/students/${studentId}/exam-records/${row.recordId}/password`,
+        `/api/students/${studentId}/exam-records/${recordId}/password`,
         { method: "POST", cache: "no-store" },
       );
       const data = await res.json().catch(() => ({}));
+      if (stale()) return;
       if (!res.ok || typeof data.password !== "string") {
         setRevealErrors((current) => ({
           ...current,
-          [row.examId]: data.error || `Could not show the password (${res.status})`,
+          [recordId]: data.error || `Could not show the password (${res.status})`,
         }));
         return;
       }
-      setRevealed((current) => ({ ...current, [row.examId]: data.password }));
+      setRevealed((current) => ({ ...current, [recordId]: data.password }));
     } catch (err) {
       console.error("ExamsTab reveal failed:", err instanceof Error ? err.name : err);
+      if (stale()) return;
       setRevealErrors((current) => ({
         ...current,
-        [row.examId]: "Network error while showing the password.",
+        [recordId]: "Network error while showing the password.",
       }));
     } finally {
-      setRevealing((current) => ({ ...current, [row.examId]: false }));
+      if (!stale()) setRevealing((current) => without(current, recordId));
     }
   }
 
@@ -230,6 +245,7 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
     setSaved(false);
     setRows((current) => {
       const row = current.find((candidate) => candidate.examId === examId);
+      if (row) forgetRow(row);
       // A stored registration is only deleted when the save goes through, so
       // the id is remembered rather than the row being dropped silently.
       if (row?.recordId) {
@@ -422,12 +438,14 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
                     <PasswordField
                       row={row}
                       canReveal={canRevealPassword}
-                      revealed={revealed[row.examId]}
-                      revealing={Boolean(revealing[row.examId])}
-                      revealError={revealErrors[row.examId]}
+                      revealed={row.recordId === null ? undefined : revealed[row.recordId]}
+                      revealing={row.recordId !== null && Boolean(revealing[row.recordId])}
+                      revealError={
+                        row.recordId === null ? undefined : revealErrors[row.recordId]
+                      }
                       showTyped={Boolean(showTyped[row.examId])}
                       onReveal={() => void revealPassword(row)}
-                      onHide={() => hideRevealed(row.examId)}
+                      onHide={() => hideRevealed(row.recordId)}
                       onToggleTyped={() =>
                         setShowTyped((current) => ({
                           ...current,
@@ -435,7 +453,7 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
                         }))
                       }
                       onChange={(change) => {
-                        hideRevealed(row.examId);
+                        hideRevealed(row.recordId);
                         updateRow(row.examId, change);
                       }}
                     />
@@ -514,7 +532,12 @@ function PasswordField({
     return (
       <div className="mt-1 flex items-center gap-2">
         <p className="flex-1 text-sm text-text-muted">Password will be removed when you save.</p>
-        <Button variant="ghost" size="sm" onClick={() => onChange({ clearPassword: false })}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange({ clearPassword: false })}
+          aria-label={`Undo removing ${row.examName} password`}
+        >
           Undo
         </Button>
       </div>
@@ -596,10 +619,23 @@ function PasswordField({
         {showTyped ? "Hide" : "Show"}
       </Button>
       {row.hasStoredPassword && (
-        <Button variant="ghost" size="sm" onClick={() => onChange({ newPassword: null })}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange({ newPassword: null })}
+          aria-label={`Keep stored ${row.examName} password`}
+        >
           Keep stored
         </Button>
       )}
     </div>
   );
+}
+
+/** A copy of `record` without `key`. */
+function without<T>(record: Record<number, T>, key: number): Record<number, T> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
 }

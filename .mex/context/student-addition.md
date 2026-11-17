@@ -210,8 +210,13 @@ both to see passwords and allowed admins and program admins to.
 The save is tri-state per registration: `application_password` left out keeps what is
 stored (the tab never has it to send back), `null`/blank clears it, a string replaces it.
 A KMS failure fails that registration like a DB Service failure, and the plaintext never
-leaves for the DB Service. Writes send `application_password: null` alongside the
-ciphertext, which wipes any legacy plaintext on the row. `scripts/encrypt-exam-passwords.ts`
+leaves for the DB Service; the warning says only that the password could not be encrypted
+(KMS errors name the key and IAM user, so they stay in the server log). Writes send
+`application_password: null` alongside the ciphertext, which wipes any legacy plaintext on
+the row, and a password write fails unless the DB Service answers with exactly the
+ciphertext sent and no plaintext — a DB Service without the ciphertext column would
+otherwise drop it and report success. Reveal state in the tab is keyed by record id, and a
+reveal still in flight when the tab reloads or saves is discarded when it lands. `scripts/encrypt-exam-passwords.ts`
 re-encrypts the rest (dry-run by default, round-trips every value before writing); once
 it reports nothing pending, a db-service migration drops `application_password`.
 
