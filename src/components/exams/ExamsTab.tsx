@@ -120,6 +120,10 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
   // Bumped whenever revealed passwords are forgotten, so a reveal still in
   // flight at that moment is dropped when it lands instead of showing.
   const revealEpoch = useRef(0);
+  // The reveal each record is waiting on; removing the row forgets it, so that
+  // reveal is dropped too without cancelling other rows' reveals.
+  const pendingReveals = useRef(new Map<number, number>());
+  const revealSeq = useRef(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -184,6 +188,7 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
     if (row.recordId === null) return;
     const recordId = row.recordId;
     setRevealed((current) => without(current, recordId));
+    pendingReveals.current.delete(recordId);
     setRevealing((current) => without(current, recordId));
     setRevealErrors((current) => without(current, recordId));
   }
@@ -192,7 +197,10 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
     if (row.recordId === null) return;
     const recordId = row.recordId;
     const epoch = revealEpoch.current;
-    const stale = () => revealEpoch.current !== epoch;
+    const token = ++revealSeq.current;
+    pendingReveals.current.set(recordId, token);
+    const stale = () =>
+      revealEpoch.current !== epoch || pendingReveals.current.get(recordId) !== token;
     setRevealing((current) => ({ ...current, [recordId]: true }));
     setRevealErrors((current) => without(current, recordId));
     try {
