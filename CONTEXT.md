@@ -134,6 +134,26 @@ _Avoid_: Test completion, test done
 A test whose test purpose is `system_wide_mandated`, distinct from a System-wide Optional Test (`system_wide_optional`). It is the only kind of test the JNV NVS Performance view reports.
 _Avoid_: Mandatory test, official test
 
+**Monthly Test**:
+The set of System-wide Mandated Test Papers that JNV NVS Students sit in one month, named for that month, such as "October".
+_Avoid_: Test set, monthly mandated test, test (for the whole month's set)
+
+**Paper**:
+One System-wide Mandated Test session inside a Monthly Test, such as "NVS G11 NDA October Test".
+_Avoid_: Test (for one session), quiz, stream paper
+
+**Test Attendance Tab**:
+The School page tab that shows, for each JNV NVS Student, whether they opened and submitted each Monthly Test.
+_Avoid_: Attendance tab, test tracking tab, live tracking
+
+**Test Attendance Status**:
+A Student's state for one Monthly Test: Yet to start, In progress, or Submitted while it is running; Absent, Opened not submitted, or Submitted once it has closed.
+_Avoid_: Present, No Test Attempt, attempt status
+
+**Attended**:
+A Student attended a Monthly Test if they opened any of its Papers, whether or not they submitted.
+_Avoid_: Present, appeared, took the test
+
 ### Visits & Actions
 
 **Visit**:
@@ -779,6 +799,16 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - Only completed **Visits** contribute to **Visit Concerns** and **Visit Highlights**
 - A new mention of an existing **Visit Concern** attaches to it rather than creating a new one, so its **Concern Resolution** history stays with it
 - A resolved **Visit Concern** reopens automatically when a **Visit** dated after its resolution mentions it again; a Visit dated on or before the resolution never reopens it
+- The **Test Attendance Tab** is for JNV NVS only; a **PMU Manager**, a **PMU Govt School User**, and an **Admin** can view it, and nobody edits anything on it
+- A **Monthly Test** has many **Papers**; which Papers belong to it and its name come from the PMU's test set list, while each Paper's grade and opening and closing times come from the LMS `session` table
+- A **Monthly Test** is running from the earliest opening time to the latest closing time among its **Papers**
+- **Exam Preparing For** does not decide which **Paper** a Student sits: a Student may open any Paper of the **Monthly Test**, and more than one
+- A Student has one **Test Attendance Status** per **Monthly Test**, the furthest state reached on any of its **Papers**; Submitted on one Paper makes the Student Submitted
+- The **Test Attendance Tab** lists the same Students as the Enrollment tab: JNV NVS Students of the School who have not dropped out
+- The **Test Attendance Tab** groups Students by grade and **Exam Preparing For**, not by **Paper**; each Student is counted once
+- A **Paper** opened or submitted after its **Monthly Test** closed still counts towards the Student's **Test Attendance Status**
+- A grade that had no **Paper** in a **Monthly Test** is left out of that Monthly Test
+- The submitted state on the **Test Attendance Tab** is read from the warehouse attendance table at the 15-minute cadence (etl-next#238); the tab launches only once that is in production
 
 ## Example dialogue
 
