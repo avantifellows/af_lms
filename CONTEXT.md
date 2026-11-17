@@ -808,6 +808,7 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - The **Test Attendance Tab** groups Students by grade and **Exam Preparing For**, not by **Paper**; each Student is counted once
 - A **Paper** opened or submitted after its **Monthly Test** closed still counts towards the Student's **Test Attendance Status**
 - A grade that had no **Paper** in a **Monthly Test** is left out of that Monthly Test
+- A Student is counted only for a **Monthly Test** that closed after they joined JNV NVS; a Student who joined while it was still running is counted for it
 - The submitted state on the **Test Attendance Tab** is read from the warehouse attendance table at the 15-minute cadence (etl-next#238); the tab launches only once that is in production
 
 ## Example dialogue
