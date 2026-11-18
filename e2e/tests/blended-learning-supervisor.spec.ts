@@ -14,8 +14,9 @@ import {
 
 // A team-lead Mentor (BLENDED_SUPERVISOR) against the real fixture DDL: they
 // log for their own Mentee (Lata), view Mentor B's Mentees (Sana, Tara) and
-// flags read-only through a running Supervision, and see nothing of Mentor A's,
-// whose Supervision has ended. Writes are refused server-side.
+// flags read-only through a running Supervision (never a dropout of theirs),
+// and see nothing of Mentor A's, whose Supervision has ended. Writes are
+// refused server-side.
 
 const { mentorB: tara, reassignedToB: sana } = OTHER_STUDENTS;
 const { attemptLatest: ira } = MENTEES;
@@ -111,6 +112,26 @@ test.describe("Blended Learning supervisor view", () => {
     }
     await expect(page.getByRole("link", { name: /^New log for / })).toHaveCount(0);
     await expect(page.getByText(fullName(SUPERVISOR_MENTEE))).toHaveCount(0);
+  });
+
+  test("a supervised Mentor's dropout is hidden from the supervisor too", async ({ page }) => {
+    const sanaId = await studentId(sana);
+    const before = await withPool(async (pool) => {
+      const result = await pool.query<{ status: string | null }>(`SELECT status FROM student WHERE id = $1`, [sanaId]);
+      await pool.query(`UPDATE student SET status = 'dropout' WHERE id = $1`, [sanaId]);
+      return result.rows[0].status;
+    });
+    try {
+      await page.goto(`/blended-learning?mentor=${await mentorId(BLENDED_MENTOR_B.email)}`);
+      await expect(page.getByText(/^1 student · \d{4}-\d{4}$/)).toBeVisible();
+      await expect(page.getByRole("link", { name: `View ${fullName(tara)}` }).first()).toBeVisible();
+      await expect(page.getByText(fullName(sana))).toHaveCount(0);
+
+      const response = await page.goto(`/blended-learning/students/${sanaId}`);
+      expect(response?.status()).toBe(404);
+    } finally {
+      await withPool((pool) => pool.query(`UPDATE student SET status = $2 WHERE id = $1`, [sanaId, before]));
+    }
   });
 
   test("an ended Supervision or an unsupervised Mentor shows nothing of theirs", async ({ page }) => {

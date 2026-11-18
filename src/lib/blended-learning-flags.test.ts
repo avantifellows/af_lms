@@ -135,8 +135,8 @@ describe("a Mentor's flags", () => {
     const [listSql, listParams] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
     expect(listSql).toMatch(/NOT \$7::boolean OR EXISTS/);
     const [, mentorParam, yearParam] = OWN_STUDENTS.exec(listSql)!;
-    expect(listParams[Number(mentorParam) - 1]).toEqual([9001]);
-    expect(listParams[Number(yearParam) - 1]).toBe("2026-2027");
+    expect(listParams![Number(mentorParam) - 1]).toEqual([9001]);
+    expect(listParams![Number(yearParam) - 1]).toBe("2026-2027");
     expect(listParams).toEqual([null, null, "maths", null, 51, "2026-2027", true, [9001]]);
     const [countSql, countParams] = mockQuery.mock.calls.find(([sql]) => /count\(\*\)/.test(sql))!;
     expect(countSql).toMatch(OWN_STUDENTS);
@@ -188,7 +188,7 @@ describe("a supervisor's flags", () => {
     const mentorParam = async (mentorUserId: number) => {
       mockQuery.mockClear();
       await listFlags(SUPERVISOR, { mentorUserId }, { lastSeenAt: null });
-      return mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))![1][1];
+      return mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))![1]![1];
     };
 
     expect(await mentorParam(9002)).toBe(9002);

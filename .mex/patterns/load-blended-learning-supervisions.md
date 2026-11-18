@@ -15,7 +15,7 @@ edges:
     condition: for the Supervision table and the Mapping source it mirrors
   - target: context/setup.md
     condition: for the .env files the script reads database credentials from
-last_updated: 2026-11-12
+last_updated: 2026-11-18
 ---
 
 # Load Blended Learning Supervisions
@@ -40,13 +40,22 @@ runbooks or PR text.
 2. Look the people up read-only and check each is a live `blended_mentor` with active Mappings:
    ```sql
    -- PGOPTIONS='-c default_transaction_read_only=on' psql service=af_db
-   SELECT p.email, p.role, p.revoked_at, COALESCE(p.user_id, u.id) AS user_id,
+   SELECT p.email, p.role, p.revoked_at, resolved.user_id,
           (SELECT count(*) FROM blended_learning_mentor_mentee_mappings m
-           WHERE m.mentor_user_id = COALESCE(p.user_id, u.id) AND m.ended_at IS NULL
-             AND m.academic_year = '<CURRENT_ACADEMIC_YEAR>') AS active_mentees
-   FROM user_permission p LEFT JOIN "user" u ON lower(u.email) = lower(p.email)
+           WHERE m.mentor_user_id = resolved.user_id AND m.ended_at IS NULL
+             AND m.academic_year = '<CURRENT_ACADEMIC_YEAR>'
+             AND NOT EXISTS (SELECT 1 FROM student d WHERE d.id = m.student_id AND d.status = 'dropout')
+          ) AS active_mentees
+   FROM user_permission p
+   CROSS JOIN LATERAL (
+     SELECT COALESCE(p.user_id, (SELECT u.id FROM "user" u WHERE lower(u.email) = lower(p.email)
+                                 ORDER BY u.id LIMIT 1)) AS user_id
+   ) resolved
    WHERE lower(p.email) IN (lower('<supervisor>'), lower('<mentor>'));
    ```
+   One row per person: the id resolves as the app does (`user_permission.user_id`, else the
+   lowest-id `user` with that email; some staff emails also sit on legacy student `user` rows,
+   so never join `user` by email alone). The count leaves dropouts out, as the loader's does.
 3. Dry run (a read-only connection; writes nothing):
    `npm run blended:load-supervisions -- --pair=<supervisor email>:<mentor email> [--pair=…] --by=<your email> --env-file=.env.production`
    (`--env=staging` reads `.env.staging`; the default is `.env.local`).

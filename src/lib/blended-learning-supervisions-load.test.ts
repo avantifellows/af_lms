@@ -72,6 +72,9 @@ describe("runSupervisionsLoad", () => {
     ]);
     expect(report).toMatchObject({ written: 0, blocked: false, academicYear: CURRENT_ACADEMIC_YEAR });
     expect(withTransaction).not.toHaveBeenCalled();
+    // The count is what the supervisor will see: dropouts are left out.
+    const [countSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("count(*)"))!;
+    expect(countSql).toContain("dropout_student.status = 'dropout'");
   });
 
   it("inserts on apply, in one transaction, with the operator and reason as audit", async () => {

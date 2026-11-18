@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 
 import { query, withTransaction } from "./db";
+import { activeBlendedMappingSql } from "./blended-learning-access";
 import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 
 // Operator loader for Blended Learning Supervisions (server-only; run through
@@ -39,7 +40,8 @@ export type PairReport = SupervisionPair & {
   outcome: PairOutcome;
   supervisorUserId: number | null;
   mentorUserId: number | null;
-  // The Mentor's active current-year Mappings: what the supervisor will see.
+  // The Mentor's active current-year Mappings, dropouts left out: what the
+  // supervisor will see.
   menteeCount: number;
 };
 
@@ -112,7 +114,7 @@ async function menteeCount(mentorUserId: number | null): Promise<number> {
   if (mentorUserId === null) return 0;
   const rows = await query<{ count: number | string }>(
     `SELECT count(*) AS count FROM blended_learning_mentor_mentee_mappings mapping
-     WHERE mapping.mentor_user_id = $1 AND mapping.academic_year = $2 AND mapping.ended_at IS NULL`,
+     WHERE mapping.mentor_user_id = $1 AND ${activeBlendedMappingSql("mapping", "$2")}`,
     [mentorUserId, CURRENT_ACADEMIC_YEAR]
   );
   return Number(rows[0]?.count ?? 0);
