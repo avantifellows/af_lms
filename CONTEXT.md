@@ -816,7 +816,7 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - The **Test Attendance Tab** groups Students by grade and **Exam Preparing For**, not by **Paper**; each Student is counted once
 - A **Paper** opened or submitted after its **Monthly Test** closed still counts towards the Student's **Test Attendance Status**
 - A grade that had no **Paper** in a **Monthly Test** is left out of that Monthly Test
-- A Student is counted only for a **Monthly Test** that closed after they joined JNV NVS; a Student who joined while it was still running is counted for it
+- A Student is counted for a **Monthly Test** only if they joined JNV NVS on or before the day it closed (IST); a Student who joined while it was still running is counted for it, and one with no joining date on record is counted
 - A Student's joining date for this rule is their earliest JNV NVS batch enrollment in the academic year, so a later move between NVS batches does not remove earlier **Monthly Tests**
 - A **Monthly Test** appears on the **Test Attendance Tab** only once it is in the PMU's test set list; the list's "current" mark is ignored, and a switched-off **Paper** in a set is skipped
 - The **Test Attendance Tab** covers grades 11 and 12; a Student with no **Exam Preparing For** is grouped under "Not set"
