@@ -5,6 +5,10 @@ import userEvent from "@testing-library/user-event";
 import TestAttendanceTab from "./TestAttendanceTab";
 
 const mockFetch = vi.fn();
+const { mockDownload } = vi.hoisted(() => ({ mockDownload: vi.fn() }));
+
+// Building the file is the export module's own test; here only what is asked for.
+vi.mock("@/lib/test-attendance-export", () => ({ downloadTestAttendance: mockDownload }));
 
 const threeStudents = {
   monthlyTests: [],
@@ -32,7 +36,7 @@ describe("TestAttendanceTab", () => {
   it("loads the School's Test Attendance and shows the Enrolled count", async () => {
     mockFetch.mockResolvedValue(ok(threeStudents));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     const enrolled = await screen.findByRole("region", { name: "Enrolled" });
     expect(within(enrolled).getByText("3")).toBeInTheDocument();
@@ -42,7 +46,7 @@ describe("TestAttendanceTab", () => {
   it("says there are no Monthly Tests yet when none has opened", async () => {
     mockFetch.mockResolvedValue(ok(threeStudents));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     expect(await screen.findByText("No Monthly Tests yet")).toBeInTheDocument();
   });
@@ -53,7 +57,7 @@ describe("TestAttendanceTab", () => {
   ])("shows an error panel, never zeros, after %s", async (_label, fail) => {
     fail();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Couldn't load Test Attendance");
@@ -66,7 +70,7 @@ describe("TestAttendanceTab", () => {
     mockFetch.mockResolvedValueOnce(failed(500)).mockResolvedValueOnce(ok(threeStudents));
     const user = userEvent.setup();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
     await user.click(await screen.findByRole("button", { name: "Retry" }));
 
     const enrolled = await screen.findByRole("region", { name: "Enrolled" });
@@ -106,7 +110,7 @@ describe("TestAttendanceTab — period strip", () => {
   it("lists All year first, then the months newest first, with the running month marked live", async () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z")));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     const buttons = await periodButtons();
     expect(buttons.map((b) => b.textContent)).toEqual(["All year", "November live", "October", "July"]);
@@ -115,7 +119,7 @@ describe("TestAttendanceTab — period strip", () => {
   it("opens on the running month", async () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z")));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     expect(await screen.findByRole("button", { name: "November live" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "All year" })).toHaveAttribute("aria-pressed", "false");
@@ -134,7 +138,7 @@ describe("TestAttendanceTab — period strip", () => {
       ok(withTests("2026-11-18T08:30:00.000Z", [july, october, ...order.map((key) => running[key as keyof typeof running])])),
     );
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     expect(await screen.findByRole("button", { name: "Retest live" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "November live" })).toHaveAttribute("aria-pressed", "false");
@@ -143,7 +147,7 @@ describe("TestAttendanceTab — period strip", () => {
   it("opens on All year with the Enrolled count when no Monthly Test is running", async () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z", [july, october])));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     expect(await screen.findByRole("button", { name: "All year" })).toHaveAttribute("aria-pressed", "true");
     expect(within(screen.getByRole("region", { name: "Enrolled" })).getByText("3")).toBeInTheDocument();
@@ -154,7 +158,7 @@ describe("TestAttendanceTab — period strip", () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z")));
     const user = userEvent.setup();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
     await user.click(await screen.findByRole("button", { name: "October" }));
 
     expect(screen.getByRole("button", { name: "October" })).toHaveAttribute("aria-pressed", "true");
@@ -167,7 +171,7 @@ describe("TestAttendanceTab — period strip", () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z")));
     const user = userEvent.setup();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
     await user.click(await screen.findByRole("button", { name: "October" }));
     await user.click(screen.getByRole("button", { name: "All year" }));
 
@@ -188,7 +192,7 @@ describe("TestAttendanceTab — period strip", () => {
     mockFetch.mockResolvedValue(ok(withTests(serverTime)));
     const user = userEvent.setup();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
     await user.click(await screen.findByRole("button", { name: "November live" }));
 
     expect(screen.getByText(banner)).toBeInTheDocument();
@@ -200,7 +204,7 @@ describe("TestAttendanceTab — period strip", () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-21T08:30:00.000Z", [morning])));
     const user = userEvent.setup();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
     await user.click(await screen.findByRole("button", { name: "November live" }));
 
     expect(screen.getByText("November tests are running. They close tomorrow at 9:05 am")).toBeInTheDocument();
@@ -209,7 +213,7 @@ describe("TestAttendanceTab — period strip", () => {
   it("shows no period strip when no Monthly Test has opened", async () => {
     mockFetch.mockResolvedValue(ok(threeStudents));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     expect(await screen.findByText("No Monthly Tests yet")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Period" })).not.toBeInTheDocument();
@@ -245,7 +249,7 @@ function studentRows() {
 
 async function openMonth(name: string) {
   const user = userEvent.setup();
-  render(<TestAttendanceTab schoolUdise="24120100101" />);
+  render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
   await user.click(await screen.findByRole("button", { name }));
   return user;
 }
@@ -421,7 +425,7 @@ describe("TestAttendanceTab — filters", () => {
   it("puts the Grade and Exam Preparing For filters above the period strip", async () => {
     mockFetch.mockResolvedValue(ok(monthData));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     const strip = await screen.findByRole("group", { name: "Period" });
     for (const name of ["Grade", "Exam Preparing For"]) {
@@ -440,7 +444,7 @@ describe("TestAttendanceTab — filters", () => {
   it("offers Not set when some listed Student has no Exam Preparing For", async () => {
     mockFetch.mockResolvedValue(ok(monthData));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     const filter = await screen.findByRole("group", { name: "Exam Preparing For" });
     expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual([
@@ -457,7 +461,7 @@ describe("TestAttendanceTab — filters", () => {
   it("offers no Not set when every listed Student has an Exam Preparing For", async () => {
     mockFetch.mockResolvedValue(ok({ ...monthData, students: monthStudents.filter((s) => s.examPreparingFor != null) }));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     const filter = await screen.findByRole("group", { name: "Exam Preparing For" });
     expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual([
@@ -474,7 +478,7 @@ describe("TestAttendanceTab — filters", () => {
     mockFetch.mockResolvedValue(ok(monthData));
     const user = userEvent.setup();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
     await user.click(await screen.findByRole("button", { name: "All year" }));
     await user.click(filterButton("Grade", "12"));
 
@@ -485,7 +489,7 @@ describe("TestAttendanceTab — filters", () => {
     mockFetch.mockResolvedValue(ok(monthData));
     const user = userEvent.setup();
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
     await screen.findByRole("group", { name: "Grade" });
     await user.click(filterButton("Grade", "12"));
     await user.click(screen.getByRole("button", { name: "October" }));
@@ -622,7 +626,7 @@ async function advance(ms: number) {
 
 async function renderWithFakeTimers() {
   vi.useFakeTimers();
-  render(<TestAttendanceTab schoolUdise="24120100101" />);
+  render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
   await settle();
 }
 
@@ -782,7 +786,7 @@ describe("TestAttendanceTab — last refreshed", () => {
   ])("shows when the attendance data was last refreshed next to the closing text: %s", async (_label, lastRefreshed, text) => {
     mockFetch.mockResolvedValue(ok({ ...monthData, lastRefreshed, serverTime: "2026-11-18T08:50:00.000Z" }));
 
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     expect(await screen.findByText(text)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
@@ -825,7 +829,7 @@ const yearData = {
 async function openAllYear(data: unknown = yearData) {
   mockFetch.mockResolvedValue(ok(data));
   const user = userEvent.setup();
-  render(<TestAttendanceTab schoolUdise="24120100101" />);
+  render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
   await user.click(await screen.findByRole("button", { name: "All year" }));
   return user;
 }
@@ -1078,23 +1082,21 @@ describe("TestAttendanceTab — All year chart", () => {
 
   it("shows no chart when no Monthly Test has opened", async () => {
     mockFetch.mockResolvedValue(ok({ ...yearData, monthlyTests: [] }));
-    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
 
     expect(await screen.findByText("No Monthly Tests yet")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Attendance by Monthly Test" })).not.toBeInTheDocument();
   });
 });
 
-// Excel downloads (#530): each list downloads as it is on screen.
+// Excel downloads (#530): each list downloads as it is on screen, built in the
+// browser from the response already loaded.
 describe("TestAttendanceTab — Download", () => {
-  let assign: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
-    assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
+    mockDownload.mockReset().mockResolvedValue(undefined);
   });
 
-  it("downloads a month's list with the selected period, filters and list filter", async () => {
+  it("downloads a month's list from the loaded data with the selected period, filters and list filter", async () => {
     mockFetch.mockResolvedValue(ok(monthData));
     const user = await openMonth("November live");
     await user.click(filterButton("Grade", "11"));
@@ -1102,9 +1104,13 @@ describe("TestAttendanceTab — Download", () => {
 
     await user.click(screen.getByRole("button", { name: "Download" }));
 
-    expect(assign).toHaveBeenCalledWith(
-      "/api/school/24120100101/test-attendance/export?period=november&grade=11&examPreparingFor=all&list=opened",
+    expect(mockDownload).toHaveBeenCalledWith(
+      monthData,
+      { period: "november", filters: { grade: 11, examPreparingFor: "all" }, list: "opened" },
+      "14042",
     );
+    // Built from the response on screen: no new request.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("downloads a month's default list, Absent on a closed month", async () => {
@@ -1114,8 +1120,10 @@ describe("TestAttendanceTab — Download", () => {
 
     await user.click(screen.getByRole("button", { name: "Download" }));
 
-    expect(assign).toHaveBeenCalledWith(
-      "/api/school/24120100101/test-attendance/export?period=october&grade=all&examPreparingFor=Not+set&list=not_opened",
+    expect(mockDownload).toHaveBeenCalledWith(
+      monthData,
+      { period: "october", filters: { grade: "all", examPreparingFor: "Not set" }, list: "not_opened" },
+      "14042",
     );
   });
 
@@ -1126,9 +1134,20 @@ describe("TestAttendanceTab — Download", () => {
 
     await user.click(screen.getByRole("button", { name: "Download" }));
 
-    expect(assign).toHaveBeenCalledWith(
-      "/api/school/24120100101/test-attendance/export?period=all&grade=all&examPreparingFor=Engineering&list=follow_up",
+    expect(mockDownload).toHaveBeenCalledWith(
+      yearData,
+      { period: "all", filters: { grade: "all", examPreparingFor: "Engineering" }, list: "follow_up" },
+      "14042",
     );
+  });
+
+  it("says so when the file cannot be made", async () => {
+    mockDownload.mockRejectedValue(new Error("chunk failed"));
+    const user = await openAllYear();
+
+    await user.click(screen.getByRole("button", { name: "Download" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't download this list. Please try again.");
   });
 
   it("offers no Download when the All year page has no list yet", async () => {

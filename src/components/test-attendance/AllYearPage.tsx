@@ -89,8 +89,8 @@ export default function AllYearPage({
 }: {
   monthlyTests: TestAttendanceMonthlyTest[];
   students: TestAttendanceStudent[];
-  /** Downloads the list as it is on screen, under this list filter. */
-  onDownload: (list: AllYearListFilter) => void;
+  /** Downloads the list as it is on screen, under this list filter; rejects when the file cannot be made. */
+  onDownload: (list: AllYearListFilter) => Promise<void>;
 }) {
   const [filter, setFilter] = useState<AllYearListFilter>("all");
   const tiles = allYearTiles(students, monthlyTests);

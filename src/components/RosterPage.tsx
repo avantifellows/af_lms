@@ -844,7 +844,7 @@ function testAttendanceContent(
     scope.kind === "school" &&
     scope.school.af_school_category === "JNV" &&
     roster.some(isTestAttendanceStudent);
-  return show ? <TestAttendanceTab schoolUdise={schoolUdise} /> : null;
+  return show ? <TestAttendanceTab schoolUdise={schoolUdise} schoolCode={scope.school.code} /> : null;
 }
 
 async function fetchRosterData(scope: RosterScope) {

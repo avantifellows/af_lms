@@ -116,8 +116,8 @@ export default function MonthPage({
   /** Every opened Monthly Test, for the "Previous 3 tests" window. */
   monthlyTests: TestAttendanceMonthlyTest[];
   students: TestAttendanceStudent[];
-  /** Downloads the list as it is on screen, under this list filter. */
-  onDownload: (list: MonthListFilter) => void;
+  /** Downloads the list as it is on screen, under this list filter; rejects when the file cannot be made. */
+  onDownload: (list: MonthListFilter) => Promise<void>;
 }) {
   const [filter, setFilter] = useState<MonthListFilter>(DEFAULT_MONTH_FILTER);
   const [showAll, setShowAll] = useState(false);

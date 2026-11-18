@@ -14,7 +14,7 @@ import { Button, Card } from "@/components/ui";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import AllYearPage from "@/components/test-attendance/AllYearPage";
 import MonthPage from "@/components/test-attendance/MonthPage";
-import { testAttendanceExportQuery } from "@/lib/test-attendance-export";
+import { downloadTestAttendance } from "@/lib/test-attendance-export";
 import {
   TEST_ATTENDANCE_GRADES,
   type AllYearListFilter,
@@ -247,7 +247,7 @@ function NoMonthlyTests({ enrolled }: { enrolled: number }) {
 
 /** The loaded tab: filters, the period strip, and the selected period's page. */
 function LoadedTab({
-  schoolUdise,
+  schoolCode,
   data,
   refreshing,
   period,
@@ -256,7 +256,7 @@ function LoadedTab({
   onFiltersChange,
   onRefresh,
 }: {
-  schoolUdise: string;
+  schoolCode: string;
   data: TestAttendanceResponse;
   refreshing: boolean;
   period: Period | null;
@@ -269,15 +269,10 @@ function LoadedTab({
   const periodKey = selected ? selected.key : "all";
   // Filtering and counting happen here, from the response already loaded: no new request.
   const students = filterStudents(data.students, filters);
-  // The file holds the list on screen: this period, these filters, that list filter.
+  // The file holds the list on screen, built from this response: this period,
+  // these filters, that list filter. No new request, so never newer data.
   const download = (list: MonthListFilter | AllYearListFilter) =>
-    window.location.assign(
-      `/api/school/${encodeURIComponent(schoolUdise)}/test-attendance/export?${testAttendanceExportQuery({
-        period: periodKey,
-        filters,
-        list,
-      })}`,
-    );
+    downloadTestAttendance(data, { period: periodKey, filters, list }, schoolCode);
 
   if (data.monthlyTests.length === 0) {
     return (
@@ -311,7 +306,14 @@ function LoadedTab({
   );
 }
 
-export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string }) {
+export default function TestAttendanceTab({
+  schoolUdise,
+  schoolCode,
+}: {
+  schoolUdise: string;
+  /** For the Download file name. */
+  schoolCode: string;
+}) {
   const { state, period, setPeriod, retry, refresh } = useTestAttendance(schoolUdise);
   // Held here, not in LoadedTab, so the filters survive a failed re-fetch and Retry.
   const [filters, setFilters] = useState<TestAttendanceFilters>(ALL_STUDENTS);
@@ -333,7 +335,7 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
 
   return (
     <LoadedTab
-      schoolUdise={schoolUdise}
+      schoolCode={schoolCode}
       data={state.data}
       refreshing={state.refreshing}
       period={period}

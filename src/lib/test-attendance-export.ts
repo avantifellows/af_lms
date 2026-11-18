@@ -1,23 +1,21 @@
-// Test Attendance export (#517): the query the tab's Download buttons send and
-// the sheet the export route builds from it. Client-safe and pure: the rows
-// come from the same rules module as the lists on screen, so the file holds
-// the same rows, in the same order, as the list the user is looking at.
+// Test Attendance export (#517): the list on screen as one Excel sheet, built
+// in the browser from the response the tab already loaded, so the file holds
+// the same rows, in the same order, as the list the user is looking at (never
+// newer data). The rows come from the same rules module as the lists on
+// screen. Client-safe; ExcelJS is loaded only when a file is built.
 
-import {
-  ALL_YEAR_LIST_FILTERS,
-  EXAM_PREPARING_FOR_GROUPS,
-  MONTH_LIST_FILTERS,
-  type AllYearListFilter,
-  type ExamPreparingForGroup,
-  type MonthListFilter,
-  type TestAttendanceResponse,
+import type {
+  AllYearListFilter,
+  ExamPreparingForGroup,
+  MonthListFilter,
+  TestAttendanceResponse,
 } from "@/types/test-attendance";
+import { saveBlob } from "@/lib/file-download";
 import {
   allYearColumns,
   allYearStudents,
   attendanceStatus,
   attendedText,
-  DEFAULT_MONTH_FILTER,
   monthStudents,
   filterStudents,
   windowMark,
@@ -32,45 +30,6 @@ export interface TestAttendanceExport {
   period: ExportPeriod;
   filters: TestAttendanceFilters;
   list: MonthListFilter | AllYearListFilter;
-}
-
-const GRADES: Record<string, TestAttendanceFilters["grade"]> = { all: "all", "11": 11, "12": 12 };
-// The values the screen's filters offer, from the same constants.
-const EXAM_GROUPS: readonly ("all" | ExamPreparingForGroup)[] = ["all", ...EXAM_PREPARING_FOR_GROUPS];
-
-/** The export URL's query string for the list on screen. */
-export function testAttendanceExportQuery({ period, filters, list }: TestAttendanceExport): string {
-  return new URLSearchParams({
-    period,
-    grade: String(filters.grade),
-    examPreparingFor: filters.examPreparingFor,
-    list,
-  }).toString();
-}
-
-/**
- * Reads an export request. Grade, Exam Preparing For and the list filter
- * default to what the tab opens on; a value the tab never sends is an error.
- * Whether a Monthly Test key exists is only known once the data is loaded.
- */
-export function parseTestAttendanceExport(
-  params: URLSearchParams,
-): { ok: true; request: TestAttendanceExport } | { ok: false; error: string } {
-  const period = params.get("period");
-  if (!period) return { ok: false, error: "period is required" };
-
-  const grade = GRADES[params.get("grade") ?? "all"];
-  if (grade == null) return { ok: false, error: "grade must be all, 11 or 12" };
-
-  const examPreparingFor = (params.get("examPreparingFor") ?? "all") as "all" | ExamPreparingForGroup;
-  if (!EXAM_GROUPS.includes(examPreparingFor)) return { ok: false, error: "examPreparingFor is not recognised" };
-
-  const allYear = period === "all";
-  const list = (params.get("list") ?? (allYear ? "all" : DEFAULT_MONTH_FILTER)) as MonthListFilter | AllYearListFilter;
-  const lists: readonly string[] = allYear ? ALL_YEAR_LIST_FILTERS : MONTH_LIST_FILTERS;
-  if (!lists.includes(list)) return { ok: false, error: `list must be one of ${lists.join(", ")}` };
-
-  return { ok: true, request: { period, filters: { grade, examPreparingFor }, list } };
 }
 
 /** One sheet: its name, the header row and the data rows. */
@@ -160,4 +119,40 @@ export function testAttendanceSheet(
       previous.note ?? "",
     ]),
   };
+}
+
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/**
+ * The sheet as an .xlsx workbook: one worksheet, a bold header row frozen at
+ * the top, the first and last columns wider. ExcelJS is imported here, not at
+ * the top of the module, so it loads only when someone downloads.
+ */
+export async function testAttendanceWorkbook(sheet: TestAttendanceSheet): Promise<ArrayBuffer> {
+  const { default: ExcelJS } = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(sheet.name, { views: [{ state: "frozen", ySplit: 1 }] });
+  worksheet.addRow(sheet.header);
+  sheet.rows.forEach((values) => worksheet.addRow(values));
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.columns.forEach((column, index) => {
+    column.width = index === 0 || index === sheet.header.length - 1 ? 28 : 16;
+  });
+  return workbook.xlsx.writeBuffer();
+}
+
+/**
+ * Downloads the list on screen from the loaded response as
+ * `test-attendance-<school code>-<period slug>.xlsx`. Throws when the period is
+ * not an opened Monthly Test or the file cannot be built; the caller shows it.
+ */
+export async function downloadTestAttendance(
+  data: Pick<TestAttendanceResponse, "monthlyTests" | "students">,
+  request: TestAttendanceExport,
+  schoolCode: string,
+): Promise<void> {
+  const sheet = testAttendanceSheet(data, request);
+  if (!sheet) throw new Error("Monthly Test not found");
+  const file = await testAttendanceWorkbook(sheet);
+  saveBlob(new Blob([file], { type: XLSX_TYPE }), `test-attendance-${schoolCode}-${sheet.periodSlug}.xlsx`);
 }
