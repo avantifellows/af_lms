@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import TestAttendanceTab from "./TestAttendanceTab";
@@ -112,8 +112,36 @@ describe("TestAttendanceTab — period strip", () => {
     expect(buttons.map((b) => b.textContent)).toEqual(["All year", "November live", "October", "July"]);
   });
 
-  it("opens on All year with the Enrolled count", async () => {
+  it("opens on the running month", async () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z")));
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+
+    expect(await screen.findByRole("button", { name: "November live" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "All year" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("November tests are running. They close on 21 Nov at 11:55 pm")).toBeInTheDocument();
+  });
+
+  it.each([
+    // Opens 18 Nov, closes 20 Nov: opened after November, closes before it.
+    ["closes first", { opensAt: "2026-11-17T23:30:00.000Z", closesAt: "2026-11-20T18:25:00.000Z" }, ["retest", "november"]],
+    // Opens 18 Nov, closes 23 Nov: opened after November, closes after it.
+    ["closes last", { opensAt: "2026-11-17T23:30:00.000Z", closesAt: "2026-11-23T18:25:00.000Z" }, ["november", "retest"]],
+  ])("opens on the running month that opened last when two are running and it %s", async (_label, times, order) => {
+    const retest = { ...november, key: "retest", name: "Retest", shortName: "Ret", ...times };
+    const running = { november, retest };
+    mockFetch.mockResolvedValue(
+      ok(withTests("2026-11-18T08:30:00.000Z", [july, october, ...order.map((key) => running[key as keyof typeof running])])),
+    );
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+
+    expect(await screen.findByRole("button", { name: "Retest live" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "November live" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("opens on All year with the Enrolled count when no Monthly Test is running", async () => {
+    mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z", [july, october])));
 
     render(<TestAttendanceTab schoolUdise="24120100101" />);
 
@@ -406,7 +434,7 @@ describe("TestAttendanceTab — filters", () => {
     const user = userEvent.setup();
 
     render(<TestAttendanceTab schoolUdise="24120100101" />);
-    await screen.findByRole("group", { name: "Grade" });
+    await user.click(await screen.findByRole("button", { name: "All year" }));
     await user.click(filterButton("Grade", "12"));
 
     expect(within(tile("Enrolled")).getByText("1")).toBeInTheDocument();
@@ -519,5 +547,212 @@ describe("TestAttendanceTab — by grade and Exam Preparing For", () => {
     expect(
       block.compareDocumentPosition(screen.getByRole("table", { name: "Students" })) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+// The running November of `monthData`, as a later fetch returns it: Arun has
+// since submitted. Server time 18 Nov, 2:15 pm IST.
+const monthDataLater = {
+  ...monthData,
+  students: monthStudents.map((student) =>
+    student.name === "Arun Mehta" ? { ...student, attendance: { ...student.attendance, november: "submitted" } } : student,
+  ),
+  lastRefreshed: "2026-11-18T08:45:00.000Z",
+  serverTime: "2026-11-18T08:45:10.000Z",
+};
+
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
+
+/** Lets pending fetches resolve and React render, under fake timers. */
+async function settle() {
+  for (let i = 0; i < 5; i++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+}
+
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+  await settle();
+}
+
+async function renderWithFakeTimers() {
+  vi.useFakeTimers();
+  render(<TestAttendanceTab schoolUdise="24120100101" />);
+  await settle();
+}
+
+describe("TestAttendanceTab — refresh", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fetches again every 15 minutes while the running month is open", async () => {
+    mockFetch.mockResolvedValueOnce(ok(monthData)).mockResolvedValue(ok(monthDataLater));
+    await renderWithFakeTimers();
+    expect(tile("Submitted")).toHaveTextContent("1 of 4");
+
+    await advance(FIFTEEN_MINUTES - 1000);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    await advance(1000);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(tile("Submitted")).toHaveTextContent("2 of 4");
+
+    await advance(FIFTEEN_MINUTES);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not fetch again on a closed month", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    await renderWithFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "October" }));
+
+    await advance(4 * FIFTEEN_MINUTES);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fetch again on All year", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    await renderWithFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "All year" }));
+
+    await advance(4 * FIFTEEN_MINUTES);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fetch again when no Monthly Test is running", async () => {
+    mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z", [july, october])));
+    await renderWithFakeTimers();
+
+    await advance(4 * FIFTEEN_MINUTES);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches again when Refresh is pressed", async () => {
+    mockFetch.mockResolvedValueOnce(ok(monthData)).mockResolvedValue(ok(monthDataLater));
+    await renderWithFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await settle();
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(tile("Submitted")).toHaveTextContent("2 of 4");
+    expect(screen.queryByText("Loading Test Attendance…")).not.toBeInTheDocument();
+  });
+
+  it("keeps the current page on screen while Refresh is fetching", async () => {
+    let finish: (value: unknown) => void = () => {};
+    mockFetch.mockResolvedValueOnce(ok(monthData)).mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    await renderWithFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await settle();
+
+    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeDisabled();
+    expect(tile("Submitted")).toHaveTextContent("1 of 4");
+    finish(ok(monthDataLater));
+    await settle();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+    expect(tile("Submitted")).toHaveTextContent("2 of 4");
+  });
+
+  it("keeps the selected period and filters after a re-fetch", async () => {
+    mockFetch.mockResolvedValueOnce(ok(monthData)).mockResolvedValue(ok(monthDataLater));
+    await renderWithFakeTimers();
+    fireEvent.click(filterButton("Exam Preparing For", "Not set"));
+    expect(tile("Yet to start")).toHaveTextContent("1 of 1");
+
+    await advance(FIFTEEN_MINUTES);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "November live" })).toHaveAttribute("aria-pressed", "true");
+    expect(filterButton("Exam Preparing For", "Not set")).toHaveAttribute("aria-pressed", "true");
+    // Arun, the only Not set Student, has since submitted.
+    expect(tile("Submitted")).toHaveTextContent("1 of 1");
+    expect(tile("Yet to start")).toHaveTextContent("0 of 1");
+  });
+
+  it("keeps a filter that a re-fetch leaves nobody in, still shown as selected", async () => {
+    const withoutNotSet = { ...monthDataLater, students: monthStudents.filter((s) => s.examPreparingFor != null) };
+    mockFetch.mockResolvedValueOnce(ok(monthData)).mockResolvedValue(ok(withoutNotSet));
+    await renderWithFakeTimers();
+    fireEvent.click(filterButton("Exam Preparing For", "Not set"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await settle();
+
+    expect(filterButton("Exam Preparing For", "Not set")).toHaveAttribute("aria-pressed", "true");
+    expect(tile("Submitted")).toHaveTextContent("0 of 0");
+  });
+
+  it("shows a Monthly Test that closed while the page was open as closed after the next fetch, and stops fetching", async () => {
+    // 22 Nov, 12:05 am IST: November closed at 11:55 pm.
+    const closedNovember = {
+      ...monthData,
+      monthlyTests: [october, { ...november, grades: [11], state: "closed" }],
+      serverTime: "2026-11-21T18:35:00.000Z",
+    };
+    mockFetch.mockResolvedValueOnce(ok(monthData)).mockResolvedValue(ok(closedNovember));
+    await renderWithFakeTimers();
+
+    await advance(FIFTEEN_MINUTES);
+
+    expect(screen.getByRole("button", { name: "November" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("November tests have closed.")).toBeInTheDocument();
+    expect(tile("Absent")).toHaveTextContent("2 of 4");
+    await advance(4 * FIFTEEN_MINUTES);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the error panel with Retry, never zeros, when a re-fetch fails", async () => {
+    mockFetch.mockResolvedValueOnce(ok(monthData)).mockResolvedValueOnce(failed(500)).mockResolvedValue(ok(monthDataLater));
+    await renderWithFakeTimers();
+
+    await advance(FIFTEEN_MINUTES);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load Test Attendance");
+    expect(screen.queryByRole("region", { name: "Submitted" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await settle();
+
+    expect(screen.getByRole("button", { name: "November live" })).toHaveAttribute("aria-pressed", "true");
+    expect(tile("Submitted")).toHaveTextContent("2 of 4");
+  });
+});
+
+describe("TestAttendanceTab — last refreshed", () => {
+  it.each([
+    // 2:15 pm IST, same IST day as the server time (2:20 pm IST).
+    ["today", "2026-11-18T08:45:00.000Z", "Last refreshed today at 2:15 pm"],
+    // 17 Nov, 11:05 pm IST.
+    ["yesterday", "2026-11-17T17:35:00.000Z", "Last refreshed yesterday at 11:05 pm"],
+    // 15 Nov, 9:00 am IST.
+    ["an earlier date", "2026-11-15T03:30:00.000Z", "Last refreshed on 15 Nov at 9:00 am"],
+    ["unknown", null, "Last refreshed: unknown"],
+  ])("shows when the attendance data was last refreshed next to the closing text: %s", async (_label, lastRefreshed, text) => {
+    mockFetch.mockResolvedValue(ok({ ...monthData, lastRefreshed, serverTime: "2026-11-18T08:50:00.000Z" }));
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+  });
+
+  it("shows no last-refreshed time or Refresh button on a closed month", async () => {
+    mockFetch.mockResolvedValue(ok({ ...monthData, lastRefreshed: "2026-11-18T08:45:00.000Z" }));
+
+    await openMonth("October");
+
+    expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
   });
 });

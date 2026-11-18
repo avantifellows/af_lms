@@ -4,7 +4,11 @@
 // School's Test Attendance from the read endpoint; the response shape and the
 // rules come from the client-safe rules module. A failed load shows an error
 // with Retry, never zeros.
-import { useCallback, useEffect, useState } from "react";
+//
+// It opens on the running Monthly Test (else All year), chosen once from the
+// first load. While the selected period is a running Monthly Test it fetches
+// again every 15 minutes and on Refresh; the period and filters stay set.
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Card } from "@/components/ui";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
@@ -12,8 +16,10 @@ import MonthPage from "@/components/test-attendance/MonthPage";
 import {
   ALL_STUDENTS,
   closingTimeText,
+  defaultPeriod,
   examPreparingForOptions,
   filterStudents,
+  lastRefreshedText,
   type TestAttendanceFilters,
   type TestAttendanceMonthlyTest,
   type TestAttendanceResponse,
@@ -22,7 +28,10 @@ import {
 type LoadState =
   | { status: "loading" }
   | { status: "failed" }
-  | { status: "loaded"; data: TestAttendanceResponse };
+  | { status: "loaded"; data: TestAttendanceResponse; refreshing: boolean };
+
+/** How often a running Monthly Test's page fetches again. The warehouse table changes every 15 minutes. */
+const REFRESH_EVERY_MS = 15 * 60 * 1000;
 
 /** "All year", or a Monthly Test key. Component state only; not in the URL. */
 type Period = "all" | string;
@@ -87,9 +96,14 @@ function Filters({
   filters: TestAttendanceFilters;
   onChange: (filters: TestAttendanceFilters) => void;
 }) {
+  const available = examPreparingForOptions(students);
+  // A fetch can leave nobody in the selected group ("Not set"); keep it offered
+  // so the selection stays visible rather than no option showing pressed.
+  const selected = filters.examPreparingFor;
+  const values = selected === "all" || available.includes(selected) ? available : [...available, selected];
   const examOptions: { value: TestAttendanceFilters["examPreparingFor"]; label: string }[] = [
     { value: "all", label: "All" },
-    ...examPreparingForOptions(students).map((value) => ({ value, label: value })),
+    ...values.map((value) => ({ value, label: value })),
   ];
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -109,45 +123,89 @@ function Filters({
   );
 }
 
-function MonthBanner({ test, serverTime }: { test: TestAttendanceMonthlyTest; serverTime: string }) {
-  const text =
-    test.state === "running"
-      ? `${test.name} tests are running. They close ${closingTimeText(test.closesAt, serverTime)}`
-      : `${test.name} tests have closed.`;
+function MonthBanner({
+  test,
+  data,
+  refreshing,
+  onRefresh,
+}: {
+  test: TestAttendanceMonthlyTest;
+  data: TestAttendanceResponse;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  if (test.state === "closed") {
+    return (
+      <Card elevation="sm" className="p-4">
+        <p className="text-sm font-medium text-text-primary">{test.name} tests have closed.</p>
+      </Card>
+    );
+  }
+  const refreshed = lastRefreshedText(data.lastRefreshed, data.serverTime);
   return (
-    <Card elevation="sm" className="p-4">
-      <p className="text-sm font-medium text-text-primary">{text}</p>
+    <Card elevation="sm" className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
+      <p className="text-sm font-medium text-text-primary">
+        {test.name} tests are running. They close {closingTimeText(test.closesAt, data.serverTime)}
+      </p>
+      <p className="text-xs text-text-muted">
+        {refreshed === "unknown" ? "Last refreshed: unknown" : `Last refreshed ${refreshed}`}
+      </p>
+      <Button variant="secondary" size="sm" onClick={onRefresh} disabled={refreshing}>
+        {refreshing ? "Refreshing…" : "Refresh"}
+      </Button>
     </Card>
   );
 }
 
 export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [attempt, setAttempt] = useState(0);
-  const [period, setPeriod] = useState<Period>("all");
+  // Null until the first successful load picks the default; a later fetch never changes it.
+  const [period, setPeriod] = useState<Period | null>(null);
   const [filters, setFilters] = useState<TestAttendanceFilters>(ALL_STUDENTS);
+  // Only the latest request may set state, and none after unmount.
+  const latestRequest = useRef(0);
+
+  const load = useCallback(async () => {
+    const request = ++latestRequest.current;
+    try {
+      const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/test-attendance`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = (await response.json()) as TestAttendanceResponse;
+      if (request !== latestRequest.current) return;
+      setPeriod((current) => current ?? defaultPeriod(data.monthlyTests));
+      setState({ status: "loaded", data, refreshing: false });
+    } catch {
+      if (request === latestRequest.current) setState({ status: "failed" });
+    }
+  }, [schoolUdise]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/test-attendance`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = (await response.json()) as TestAttendanceResponse;
-        if (!cancelled) setState({ status: "loaded", data });
-      } catch {
-        if (!cancelled) setState({ status: "failed" });
-      }
-    })();
+    const requests = latestRequest;
+    void load();
     return () => {
-      cancelled = true;
+      requests.current++;
     };
-  }, [schoolUdise, attempt]);
+  }, [load]);
 
   const retry = useCallback(() => {
     setState({ status: "loading" });
-    setAttempt((value) => value + 1);
-  }, []);
+    void load();
+  }, [load]);
+
+  // Keeps the page on screen while it fetches again.
+  const refresh = useCallback(() => {
+    setState((current) => (current.status === "loaded" ? { ...current, refreshing: true } : current));
+    void load();
+  }, [load]);
+
+  const loaded = state.status === "loaded" ? state.data : null;
+  const runningSelected = loaded?.monthlyTests.some((test) => test.key === period && test.state === "running") ?? false;
+  // A timer only while a running Monthly Test is selected; each fetch restarts it.
+  useEffect(() => {
+    if (!runningSelected) return;
+    const timer = setTimeout(refresh, REFRESH_EVERY_MS);
+    return () => clearTimeout(timer);
+  }, [runningSelected, loaded, refresh]);
 
   if (state.status === "loading") {
     return <p className="py-8 text-center text-sm text-text-muted">Loading Test Attendance…</p>;
@@ -176,7 +234,7 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
       )}
       {selected ? (
         <>
-          <MonthBanner test={selected} serverTime={data.serverTime} />
+          <MonthBanner test={selected} data={data} refreshing={state.refreshing} onRefresh={refresh} />
           {/* Keyed so a newly opened month starts on its default list filter. */}
           <MonthPage key={selected.key} test={selected} students={students} />
         </>

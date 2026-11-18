@@ -18,7 +18,9 @@ vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/test-set-list", () => ({ getNvsTestSets: mockGetNvsTestSets }));
 vi.mock("@/lib/bigquery", () => ({ getBigQueryClient: () => ({ query: mockBigQuery }) }));
 
-import { GET } from "./route";
+// The route keeps warehouse reads in an in-process cache, so each test loads a
+// fresh copy of it.
+let GET: typeof import("./route").GET;
 
 const email = "viewer@avantifellows.org";
 
@@ -85,14 +87,16 @@ function row(role: string, overrides: Record<string, unknown> = {}) {
 const isRosterRead = (sql: string) => sql.includes("group_user");
 const isSessionRead = (sql: string) => /FROM\s+session\b/.test(sql);
 
-async function get() {
-  return GET(new NextRequest("http://localhost/api/school/JNV001/test-attendance"), {
-    params: Promise.resolve({ udise: "JNV001" }),
+async function get(udise = "JNV001") {
+  return GET(new NextRequest(`http://localhost/api/school/${udise}/test-attendance`), {
+    params: Promise.resolve({ udise }),
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetAllMocks();
+  vi.resetModules();
+  ({ GET } = await import("./route"));
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-11-18T08:30:00.000Z"));
   school = jnvSchool;
@@ -209,6 +213,7 @@ describe("GET /api/school/[udise]/test-attendance — success", () => {
         { userId: "12", name: "Ravi Das", studentId: "NVS003", grade: 11, examPreparingFor: null, attendance: {} },
         { userId: "14", name: "Maya Iyer", studentId: "NVS002", grade: 12, examPreparingFor: "Medical", attendance: {} },
       ],
+      lastRefreshed: null,
       serverTime: "2026-11-18T08:30:00.000Z",
     });
   });
@@ -222,6 +227,7 @@ describe("GET /api/school/[udise]/test-attendance — success", () => {
     expect(await response.json()).toEqual({
       monthlyTests: [],
       students: [],
+      lastRefreshed: null,
       serverTime: "2026-11-18T08:30:00.000Z",
     });
   });
@@ -380,22 +386,24 @@ describe("GET /api/school/[udise]/test-attendance — Monthly Tests", () => {
 // and quiz, `submitted` null when the warehouse does not know.
 const bqRow = (user_id: string, quiz_id: string, submitted: boolean | null) => ({ user_id, quiz_id, submitted });
 
+// Server time 2026-11-18T08:30:00Z = 18 Nov 2026, 2:00 pm IST.
+// October (closed): Grade 11 Engineering and NDA Papers, a Grade 12 Paper.
+// November (running): Grade 11 only.
+function useOctoberAndNovember() {
+  mockGetNvsTestSets.mockResolvedValue([
+    { label: "October", quizIds: ["oct-g11-eng", "oct-g11-nda", "oct-g12"] },
+    { label: "November", quizIds: ["nov-g11"] },
+  ]);
+  sessionRows = [
+    sessionRow("oct-g11-eng", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
+    sessionRow("oct-g11-nda", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
+    sessionRow("oct-g12", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "12"),
+    sessionRow("nov-g11", "2026-11-17 05:00:00", "2026-11-21 23:55:00", "11"),
+  ];
+}
+
 describe("GET /api/school/[udise]/test-attendance — attendance", () => {
-  beforeEach(() => {
-    // Server time 2026-11-18T08:30:00Z = 18 Nov 2026, 2:00 pm IST.
-    // October (closed): Grade 11 Engineering and NDA Papers, a Grade 12 Paper.
-    // November (running): Grade 11 only.
-    mockGetNvsTestSets.mockResolvedValue([
-      { label: "October", quizIds: ["oct-g11-eng", "oct-g11-nda", "oct-g12"] },
-      { label: "November", quizIds: ["nov-g11"] },
-    ]);
-    sessionRows = [
-      sessionRow("oct-g11-eng", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
-      sessionRow("oct-g11-nda", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
-      sessionRow("oct-g12", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "12"),
-      sessionRow("nov-g11", "2026-11-17 05:00:00", "2026-11-21 23:55:00", "11"),
-    ];
-  });
+  beforeEach(useOctoberAndNovember);
 
   it("returns each listed Student's mark for every Monthly Test they are counted for", async () => {
     mockBigQuery.mockResolvedValue([
@@ -443,8 +451,9 @@ describe("GET /api/school/[udise]/test-attendance — attendance", () => {
   it("asks the warehouse only about the listed Students and the opened Monthly Tests' Papers", async () => {
     await get();
 
-    expect(mockBigQuery).toHaveBeenCalledTimes(1);
-    const params = mockBigQuery.mock.calls[0][0].params;
+    const attendanceReads = mockBigQuery.mock.calls.filter(([options]) => options.params.userIds);
+    expect(attendanceReads).toHaveLength(1);
+    const params = attendanceReads[0][0].params;
     expect([...params.userIds].sort()).toEqual(["10", "12", "14"]);
     expect([...params.quizIds].sort()).toEqual(["nov-g11", "oct-g11-eng", "oct-g11-nda", "oct-g12"]);
   });
@@ -460,6 +469,114 @@ describe("GET /api/school/[udise]/test-attendance — attendance", () => {
     const logged = JSON.stringify(consoleError.mock.calls);
     expect(logged).toContain("Access Denied");
     expect(logged).not.toContain("Nisha");
+    consoleError.mockRestore();
+  });
+});
+
+// The warehouse stub: the attendance table's last-modified time comes from the
+// dataset's table metadata; any other query is the attendance read.
+const isLastRefreshedRead = (sql: string) => sql.includes("__TABLES__");
+const warehouseCalls = (read: (sql: string) => boolean) =>
+  mockBigQuery.mock.calls.filter(([options]) => read(String(options.query))).length;
+const isAttendanceRead = (sql: string) => !isLastRefreshedRead(sql);
+
+describe("GET /api/school/[udise]/test-attendance — last refreshed", () => {
+  beforeEach(useOctoberAndNovember);
+
+  it("returns when the attendance table was last rebuilt, with the server time the response was built", async () => {
+    mockBigQuery.mockImplementation(async (options: { query: string }) =>
+      isLastRefreshedRead(options.query) ? [[{ last_refreshed: "2026-11-18T08:15:42.000Z" }]] : [[]],
+    );
+
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.lastRefreshed).toBe("2026-11-18T08:15:42.000Z");
+    expect(body.serverTime).toBe("2026-11-18T08:30:00.000Z");
+  });
+
+  it("still returns the data, with the time unknown, when the last-refreshed lookup fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockBigQuery.mockImplementation(async (options: { query: string }) => {
+      if (isLastRefreshedRead(options.query)) throw new Error("Access Denied: __TABLES__");
+      return [[bqRow("10", "nov-g11", true)]];
+    });
+
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.lastRefreshed).toBeNull();
+    expect(body.students[0]).toMatchObject({ userId: "10", attendance: { october: "not_opened", november: "submitted" } });
+    consoleError.mockRestore();
+  });
+
+  it("marks the time unknown when the table metadata has no row for the attendance table", async () => {
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).lastRefreshed).toBeNull();
+  });
+});
+
+describe("GET /api/school/[udise]/test-attendance — 60-second warehouse cache", () => {
+  beforeEach(() => {
+    useOctoberAndNovember();
+    mockBigQuery.mockImplementation(async (options: { query: string }) =>
+      isLastRefreshedRead(options.query)
+        ? [[{ last_refreshed: "2026-11-18T08:15:42.000Z" }]]
+        : [[bqRow("10", "nov-g11", true)]],
+    );
+  });
+
+  it("reads the warehouse once for two requests for one School inside 60 seconds", async () => {
+    await get();
+    vi.setSystemTime(new Date("2026-11-18T08:30:59.000Z"));
+
+    const response = await get();
+
+    expect(warehouseCalls(isAttendanceRead)).toBe(1);
+    expect(warehouseCalls(isLastRefreshedRead)).toBe(1);
+    const body = await response.json();
+    expect(body.lastRefreshed).toBe("2026-11-18T08:15:42.000Z");
+    expect(body.students[0].attendance).toEqual({ october: "not_opened", november: "submitted" });
+    // The server time is still the time this response was built.
+    expect(body.serverTime).toBe("2026-11-18T08:30:59.000Z");
+  });
+
+  it("reads the warehouse again for a request 60 seconds later", async () => {
+    await get();
+    vi.setSystemTime(new Date("2026-11-18T08:31:00.000Z"));
+
+    await get();
+
+    expect(warehouseCalls(isAttendanceRead)).toBe(2);
+    expect(warehouseCalls(isLastRefreshedRead)).toBe(2);
+  });
+
+  it("reads the warehouse again for another School", async () => {
+    permissionRow = row("pmu_manager", { school_codes: ["JNV001", "JNV002"] });
+    await get();
+    school = { ...jnvSchool, id: "10", code: "JNV002" };
+
+    await get("JNV002");
+
+    expect(warehouseCalls(isAttendanceRead)).toBe(2);
+  });
+
+  it("does not keep a failed attendance read", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementationOnce(() => {});
+    mockBigQuery.mockImplementationOnce(async () => {
+      throw new Error("Access Denied: Table fact_student_test_attendance");
+    });
+    const first = await get();
+    expect(first.status).toBe(500);
+
+    const second = await get();
+
+    expect(second.status).toBe(200);
+    expect((await second.json()).students[0].attendance).toEqual({ october: "not_opened", november: "submitted" });
     consoleError.mockRestore();
   });
 });

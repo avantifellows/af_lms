@@ -18,7 +18,7 @@ import {
   type TestAttendanceResponse,
   type TestSet,
 } from "@/lib/test-attendance-rules";
-import { readPaperAttendance } from "@/lib/test-attendance-warehouse";
+import { readSchoolAttendance } from "@/lib/test-attendance-warehouse";
 import { getNvsTestSets } from "@/lib/test-set-list";
 
 /** The test set list and the windows of its Papers. Throws when a source fails. */
@@ -83,6 +83,7 @@ async function loadStudentsAndJoiningDates(schoolId: string | number) {
  * The tab's data for one School. The caller must already have run the gate.
  * Only the listed Students are sent, and the warehouse is asked only about
  * them. A failed source throws: the route answers with an error, never zeros.
+ * Only a failed last-refreshed lookup is tolerated, as an unknown time.
  */
 export async function loadTestAttendance(
   schoolId: string | number,
@@ -92,10 +93,11 @@ export async function loadTestAttendance(
     loadStudentsAndJoiningDates(schoolId),
     loadTestSets(),
   ]);
-  const attendance = await readPaperAttendance(
+  const { attendance, lastRefreshed } = await readSchoolAttendance(
+    schoolId,
     attendanceQuizIds(testSets, papers, now),
     students.map((student) => student.userId),
   );
   const data = testAttendanceFrom({ testSets, papers, students, attendance, joinedOn, now });
-  return { ...data, serverTime: now.toISOString() };
+  return { ...data, lastRefreshed, serverTime: now.toISOString() };
 }

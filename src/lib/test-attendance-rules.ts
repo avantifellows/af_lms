@@ -84,6 +84,8 @@ export interface TestAttendanceStudent extends ListedStudent {
 export interface TestAttendanceResponse {
   monthlyTests: TestAttendanceMonthlyTest[];
   students: TestAttendanceStudent[];
+  /** When the warehouse attendance table was last rebuilt (UTC ISO); null when unknown. */
+  lastRefreshed: string | null;
   /** When the server built the response (UTC ISO). */
   serverTime: string;
 }
@@ -321,18 +323,48 @@ const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 const istClock = (iso: string) => new Date(Date.parse(iso) + IST_OFFSET_MS);
 const istDayNumber = (iso: string) => Math.floor((Date.parse(iso) + IST_OFFSET_MS) / 86_400_000);
 
+/** An instant in IST, relative to `now`: "today at 2:15 pm", "tomorrow at …", "yesterday at …" or "on 21 Nov at …". */
+function istDayAndTime(iso: string, now: string): string {
+  const clock = istClock(iso);
+  const hours = clock.getUTCHours();
+  const time = `${hours % 12 || 12}:${String(clock.getUTCMinutes()).padStart(2, "0")} ${hours < 12 ? "am" : "pm"}`;
+  const days = istDayNumber(iso) - istDayNumber(now);
+  const day =
+    days === 0
+      ? "today"
+      : days === 1
+        ? "tomorrow"
+        : days === -1
+          ? "yesterday"
+          : `on ${clock.getUTCDate()} ${MONTH_SHORT[clock.getUTCMonth()]}`;
+  return `${day} at ${time}`;
+}
+
 /**
  * When a running Monthly Test closes, in IST, relative to `now`: "today at
  * 11:55 pm", "tomorrow at 11:55 pm" or "on 21 Nov at 11:55 pm".
  */
 export function closingTimeText(closesAt: string, now: string): string {
-  const clock = istClock(closesAt);
-  const hours = clock.getUTCHours();
-  const time = `${hours % 12 || 12}:${String(clock.getUTCMinutes()).padStart(2, "0")} ${hours < 12 ? "am" : "pm"}`;
-  const days = istDayNumber(closesAt) - istDayNumber(now);
-  const day =
-    days === 0 ? "today" : days === 1 ? "tomorrow" : `on ${clock.getUTCDate()} ${MONTH_SHORT[clock.getUTCMonth()]}`;
-  return `${day} at ${time}`;
+  return istDayAndTime(closesAt, now);
+}
+
+/**
+ * When the attendance data was last refreshed, in IST, relative to `now`:
+ * "today at 2:15 pm", "yesterday at 11:05 pm", "on 15 Nov at 9:00 am", or
+ * "unknown" when the lookup failed.
+ */
+export function lastRefreshedText(lastRefreshed: string | null | undefined, now: string): string {
+  return lastRefreshed ? istDayAndTime(lastRefreshed, now) : "unknown";
+}
+
+/**
+ * The period the tab opens on: the running Monthly Test (the one that opened
+ * last if two are running), otherwise "all" (All year).
+ */
+export function defaultPeriod(monthlyTests: Pick<TestAttendanceMonthlyTest, "key" | "opensAt" | "state">[]): string {
+  const running = monthlyTests.filter((test) => test.state === "running");
+  if (running.length === 0) return "all";
+  return running.reduce((latest, test) => (Date.parse(test.opensAt) > Date.parse(latest.opensAt) ? test : latest)).key;
 }
 
 /** A Student's Exam Preparing For group: one of the five, or "Not set". */
