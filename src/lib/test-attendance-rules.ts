@@ -181,6 +181,19 @@ export function monthlyTestsFrom(
   return openedMonthlyTests(testSets, papers, now).map(withoutQuizIds);
 }
 
+/**
+ * The opened Monthly Tests with the quiz ids of their usable Papers: the same
+ * Papers the tab reads attendance for. Server-side only (the pre-launch data
+ * check); the response never carries quiz ids.
+ */
+export function monthlyTestsWithPapers(
+  testSets: TestSet[],
+  papers: PaperWindow[],
+  now: Date,
+): Array<TestAttendanceMonthlyTest & { quizIds: string[] }> {
+  return openedMonthlyTests(testSets, papers, now);
+}
+
 /** The quiz ids whose attendance the tab needs: the usable Papers of the opened Monthly Tests. */
 export function attendanceQuizIds(testSets: TestSet[], papers: PaperWindow[], now: Date): string[] {
   return [...new Set(openedMonthlyTests(testSets, papers, now).flatMap((test) => test.quizIds))];

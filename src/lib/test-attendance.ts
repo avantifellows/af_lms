@@ -48,7 +48,7 @@ async function loadListedStudents(schoolId: string | number): Promise<ListedStud
  * between NVS batches does not drop earlier Monthly Tests. A Student with no
  * dated enrollment has no entry. Throws when the read fails.
  */
-async function readNvsJoiningDates(userIds: string[]): Promise<Map<string, string>> {
+export async function readNvsJoiningDates(userIds: string[]): Promise<Map<string, string>> {
   const joinedOn = new Map<string, string>();
   if (userIds.length === 0) return joinedOn;
   const rows = await query<{ user_id: string; start_date: string | null }>(
