@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Card } from "@/components/ui";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import AllYearPage from "@/components/test-attendance/AllYearPage";
 import MonthPage from "@/components/test-attendance/MonthPage";
 import {
   ALL_STUDENTS,
@@ -238,6 +239,8 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
           {/* Keyed so a newly opened month starts on its default list filter. */}
           <MonthPage key={selected.key} test={selected} students={students} />
         </>
+      ) : data.monthlyTests.length > 0 ? (
+        <AllYearPage monthlyTests={data.monthlyTests} students={students} />
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -248,11 +251,9 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
               </Card>
             </section>
           </div>
-          {data.monthlyTests.length === 0 && (
-            <Card elevation="sm" className="p-6 text-center">
-              <p className="text-sm text-text-muted">No Monthly Tests yet</p>
-            </Card>
-          )}
+          <Card elevation="sm" className="p-6 text-center">
+            <p className="text-sm text-text-muted">No Monthly Tests yet</p>
+          </Card>
         </>
       )}
     </div>

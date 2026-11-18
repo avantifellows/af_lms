@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  allYearStudents,
+  allYearTiles,
   attendanceStatus,
+  attendedText,
+  countedTestsLine,
   ALL_STUDENTS,
   examPreparingFor,
   examPreparingForOptions,
   filterStudents,
+  followUpFor,
   monthGroupRows,
   monthStudents,
   monthTiles,
   monthlyTestsFrom,
   percentText,
+  tagWindow,
   testAttendanceFrom,
   type ListedStudent,
   type PaperAttendance,
@@ -662,5 +668,379 @@ describe("examPreparingForOptions", () => {
       "CA",
       "NDA",
     ]);
+  });
+});
+
+// All year (#527). Monthly Tests as the endpoint returns them: ordered by closing time.
+const monthly = (key: string, name: string, state: "running" | "closed" = "closed") => ({
+  key,
+  name,
+  shortName: name.slice(0, 3),
+  opensAt: "2026-01-01T00:00:00.000Z",
+  closesAt: "2026-01-02T00:00:00.000Z",
+  state,
+  grades: [11, 12],
+});
+const jul = monthly("july", "July");
+const aug = monthly("august", "August");
+const sep = monthly("september", "September");
+const oct = monthly("october", "October");
+const nov = monthly("november", "November", "running");
+
+describe("tagWindow", () => {
+  it("is the last 3 closed Monthly Tests, oldest first", () => {
+    expect(tagWindow([jul, aug, sep, oct, nov]).map((t) => t.key)).toEqual(["august", "september", "october"]);
+  });
+
+  it("never counts a running Monthly Test", () => {
+    expect(tagWindow([sep, oct, nov]).map((t) => t.key)).toEqual(["september", "october"]);
+  });
+
+  it.each([
+    [[], []],
+    [[nov], []],
+    [[oct], ["october"]],
+    [[sep, oct], ["september", "october"]],
+    [[aug, sep, oct], ["august", "september", "october"]],
+  ])("holds fewer tests early in the year: %#", (tests, keys) => {
+    expect(tagWindow(tests).map((t) => t.key)).toEqual(keys);
+  });
+});
+
+const window3 = [aug, sep, oct];
+const marks = (attendance: TestAttendanceStudent["attendance"]): TestAttendanceStudent => ({
+  userId: "1",
+  name: "Asha Roy",
+  studentId: "NVS1",
+  grade: 11,
+  examPreparingFor: "Engineering",
+  attendance,
+});
+const tagOf = (attendance: TestAttendanceStudent["attendance"], window = window3) =>
+  followUpFor(marks(attendance), window).tag;
+
+describe("followUpFor — tags", () => {
+  it("gives no tag for exactly 1 Absent", () => {
+    expect(tagOf({ august: "not_opened", september: "submitted", october: "submitted" })).toBeNull();
+  });
+
+  it("gives the Follow Up Tag for exactly 2 Absent", () => {
+    expect(tagOf({ august: "not_opened", september: "submitted", october: "not_opened" })).toBe("follow_up");
+  });
+
+  it("gives the Follow Up Tag for 3 Absent", () => {
+    expect(tagOf({ august: "not_opened", september: "not_opened", october: "not_opened" })).toBe("follow_up");
+  });
+
+  it("gives no tag for exactly 1 Opened, not submitted", () => {
+    expect(tagOf({ august: "submitted", september: "opened", october: "submitted" })).toBeNull();
+  });
+
+  it("gives the Not Submitting Tag for exactly 2 Opened, not submitted", () => {
+    expect(tagOf({ august: "opened", september: "submitted", october: "opened" })).toBe("not_submitting");
+  });
+
+  it("gives the Not Submitting Tag for 2 Opened, not submitted and 1 Absent", () => {
+    expect(tagOf({ august: "not_opened", september: "opened", october: "opened" })).toBe("not_submitting");
+  });
+
+  it("gives no tag for one miss plus one non-submission", () => {
+    expect(tagOf({ august: "not_opened", september: "opened", october: "submitted" })).toBeNull();
+  });
+
+  it("never tags a Student counted for one Monthly Test of the window", () => {
+    expect(tagOf({ october: "not_opened" })).toBeNull();
+    expect(tagOf({ october: "opened" })).toBeNull();
+  });
+
+  it("judges a Student only on the window's tests they are counted for", () => {
+    // Not counted for August; Absent in September and October.
+    expect(tagOf({ september: "not_opened", october: "not_opened" })).toBe("follow_up");
+  });
+
+  it("never counts a running Monthly Test or one before the window", () => {
+    // Absent in July (before the window) and November (running); Absent once in the window.
+    const window = tagWindow([jul, aug, sep, oct, nov]);
+    expect(
+      tagOf({ july: "not_opened", august: "submitted", september: "submitted", october: "not_opened", november: "not_opened" }, window),
+    ).toBeNull();
+  });
+
+  it("gives no tag when no Monthly Test has closed", () => {
+    expect(tagOf({ november: "not_opened" }, [])).toBeNull();
+  });
+});
+
+const noteOf = (attendance: TestAttendanceStudent["attendance"], window = window3) => {
+  const { note, tone } = followUpFor(marks(attendance), window);
+  return { note, tone };
+};
+
+describe("followUpFor — notes", () => {
+  it("gives no note to a Student with no miss and no non-submission", () => {
+    expect(noteOf({ august: "submitted", september: "submitted", october: "submitted" })).toEqual({ note: null, tone: null });
+  });
+
+  it("names a single miss in red", () => {
+    expect(noteOf({ august: "submitted", september: "submitted", october: "not_opened" })).toEqual({
+      note: "Missed Oct",
+      tone: "red",
+    });
+  });
+
+  it("names a single non-submission in amber", () => {
+    expect(noteOf({ august: "submitted", september: "opened", october: "submitted" })).toEqual({
+      note: "Not submitted Sep",
+      tone: "amber",
+    });
+  });
+
+  it("puts misses first, then non-submissions, and is red when it has a miss", () => {
+    expect(noteOf({ august: "not_opened", september: "submitted", october: "opened" })).toEqual({
+      note: "Missed Aug · Not submitted Oct",
+      tone: "red",
+    });
+  });
+
+  it("names the months of a Not Submitting Tag in calendar order, in amber", () => {
+    expect(noteOf({ august: "submitted", september: "opened", october: "opened" })).toEqual({
+      note: "Not submitted Sep, Oct",
+      tone: "amber",
+    });
+  });
+
+  it("is red for a Not Submitting Tag with a miss", () => {
+    expect(noteOf({ august: "opened", september: "not_opened", october: "opened" })).toEqual({
+      note: "Missed Sep · Not submitted Aug, Oct",
+      tone: "red",
+    });
+  });
+
+  it("names only the window's tests", () => {
+    const window = tagWindow([jul, aug, sep, oct, nov]);
+    expect(
+      noteOf({ july: "not_opened", august: "submitted", september: "submitted", october: "submitted", november: "not_opened" }, window),
+    ).toEqual({ note: null, tone: null });
+  });
+});
+
+const patternOf = (attendance: TestAttendanceStudent["attendance"]) => {
+  const { tag, pattern, note, tone } = followUpFor(marks(attendance), window3);
+  return { tag, pattern, note, tone };
+};
+
+describe("followUpFor — Follow Up patterns", () => {
+  it("1: missed every counted test", () => {
+    expect(patternOf({ august: "not_opened", september: "not_opened", october: "not_opened" })).toEqual({
+      tag: "follow_up",
+      pattern: 1,
+      note: "Missed Aug, Sep, Oct",
+      tone: "red",
+    });
+  });
+
+  it("1: missed every counted test when counted for two", () => {
+    expect(patternOf({ september: "not_opened", october: "not_opened" })).toEqual({
+      tag: "follow_up",
+      pattern: 1,
+      note: "Missed Sep, Oct",
+      tone: "red",
+    });
+  });
+
+  it("1: missed the latest two in a row", () => {
+    expect(patternOf({ august: "submitted", september: "not_opened", october: "not_opened" })).toEqual({
+      tag: "follow_up",
+      pattern: 1,
+      note: "Missed Sep, Oct in a row",
+      tone: "red",
+    });
+  });
+
+  it("1: missed the latest two in a row after opening and not submitting the first", () => {
+    expect(patternOf({ august: "opened", september: "not_opened", october: "not_opened" })).toEqual({
+      tag: "follow_up",
+      pattern: 1,
+      note: "Missed Sep, Oct in a row · Not submitted Aug",
+      tone: "red",
+    });
+  });
+
+  it("2: missed the first and the last of three", () => {
+    expect(patternOf({ august: "not_opened", september: "submitted", october: "not_opened" })).toEqual({
+      tag: "follow_up",
+      pattern: 2,
+      note: "Missed Aug and Oct",
+      tone: "red",
+    });
+  });
+
+  it("2: missed the first and the last of three, with the middle opened, not submitted", () => {
+    expect(patternOf({ august: "not_opened", september: "opened", october: "not_opened" })).toEqual({
+      tag: "follow_up",
+      pattern: 2,
+      note: "Missed Aug and Oct · Not submitted Sep",
+      tone: "red",
+    });
+  });
+
+  it("3: missed the first two and attended the latest", () => {
+    expect(patternOf({ august: "not_opened", september: "not_opened", october: "submitted" })).toEqual({
+      tag: "follow_up",
+      pattern: 3,
+      note: "Missed Aug, Sep · attended Oct",
+      tone: "red",
+    });
+  });
+
+  it("3: says Not submitted instead of attended when the latest was opened, not submitted", () => {
+    expect(patternOf({ august: "not_opened", september: "not_opened", october: "opened" })).toEqual({
+      tag: "follow_up",
+      pattern: 3,
+      note: "Missed Aug, Sep · Not submitted Oct",
+      tone: "red",
+    });
+  });
+
+  it("has no pattern without the Follow Up Tag", () => {
+    expect(patternOf({ august: "opened", september: "opened", october: "submitted" }).pattern).toBeNull();
+    expect(patternOf({ august: "not_opened", september: "submitted", october: "submitted" }).pattern).toBeNull();
+  });
+});
+
+// The All year list, written out by hand. Window: Aug, Sep, Oct.
+const yearStudent = (
+  userId: string,
+  name: string,
+  grade: number,
+  attendance: TestAttendanceStudent["attendance"],
+  examPreparingFor: TestAttendanceStudent["examPreparingFor"] = "Engineering",
+): TestAttendanceStudent => ({ userId, name, studentId: `NVS${userId}`, grade, examPreparingFor, attendance });
+const yearFixture = [
+  yearStudent("1", "Zoya Ali", 11, { august: "submitted", september: "submitted", october: "submitted" }),
+  yearStudent("2", "Kiran Das", 12, { august: "not_opened", september: "not_opened", october: "submitted" }), // pattern 3
+  yearStudent("3", "Lata Sen", 11, { august: "not_opened", september: "submitted", october: "not_opened" }), // pattern 2
+  yearStudent("4", "Mohan Roy", 12, { august: "submitted", september: "not_opened", october: "not_opened" }), // pattern 1
+  yearStudent("5", "Neel Jha", 11, { august: "opened", september: "submitted", october: "opened" }), // Not Submitting
+  yearStudent("6", "Asha Bose", 11, { august: "not_opened", september: "not_opened", october: "not_opened" }), // pattern 1
+  yearStudent("7", "Bala Nair", 11, { august: "submitted", september: "opened", october: "submitted" }), // note only
+  yearStudent("8", "Omar Khan", 11, { october: "not_opened" }), // joined late: counted for one
+  yearStudent("9", "Pia Shah", 12, {}, null), // counted for none
+  yearStudent("10", "Ravi Iyer", 12, { august: "opened", september: "opened", october: "not_opened" }, "Medical"), // Not Submitting
+];
+const yearNames = (rows: { student: TestAttendanceStudent }[]) => rows.map((row) => row.student.name);
+
+describe("allYearStudents", () => {
+  it("lists Follow Up by pattern, then Not Submitting, then everyone else; grade then name within each", () => {
+    expect(yearNames(allYearStudents(yearFixture, window3))).toEqual([
+      "Asha Bose", // Follow Up 1, Grade 11
+      "Mohan Roy", // Follow Up 1, Grade 12
+      "Lata Sen", // Follow Up 2
+      "Kiran Das", // Follow Up 3
+      "Neel Jha", // Not Submitting, Grade 11
+      "Ravi Iyer", // Not Submitting, Grade 12
+      "Bala Nair", // the rest, Grade 11
+      "Omar Khan",
+      "Zoya Ali",
+      "Pia Shah", // Grade 12
+    ]);
+  });
+
+  it("filters to Need follow-up", () => {
+    expect(yearNames(allYearStudents(yearFixture, window3, "follow_up"))).toEqual([
+      "Asha Bose",
+      "Mohan Roy",
+      "Lata Sen",
+      "Kiran Das",
+    ]);
+  });
+
+  it("filters to Not submitting", () => {
+    expect(yearNames(allYearStudents(yearFixture, window3, "not_submitting"))).toEqual(["Neel Jha", "Ravi Iyer"]);
+  });
+
+  it("gives each row its tag, note and Attended over the window", () => {
+    const rows = allYearStudents(yearFixture, window3);
+    const row = (name: string) => {
+      const found = rows.find((r) => r.student.name === name)!;
+      return { tag: found.followUp.tag, note: found.followUp.note, attended: attendedText(found.attended, found.counted) };
+    };
+    expect(row("Kiran Das")).toEqual({ tag: "follow_up", note: "Missed Aug, Sep · attended Oct", attended: "1 of 3 (33%)" });
+    expect(row("Neel Jha")).toEqual({ tag: "not_submitting", note: "Not submitted Aug, Oct", attended: "3 of 3 (100%)" });
+    expect(row("Bala Nair")).toEqual({ tag: null, note: "Not submitted Sep", attended: "3 of 3 (100%)" });
+    expect(row("Omar Khan")).toEqual({ tag: null, note: "Missed Oct", attended: "0 of 1 (0%)" });
+    expect(row("Ravi Iyer")).toEqual({ tag: "not_submitting", note: "Missed Oct · Not submitted Aug, Sep", attended: "2 of 3 (67%)" });
+    expect(row("Pia Shah")).toEqual({ tag: null, note: null, attended: "—" });
+  });
+});
+
+describe("allYearTiles", () => {
+  it("counts Enrolled, sittings over the window and Need follow-up for the fixture", () => {
+    // Sittings: eight Students counted for all three tests, Omar for one, Pia for none = 25.
+    // Attended: Zoya 3, Kiran 1, Lata 1, Mohan 1, Neel 3, Asha 0, Bala 3, Omar 0, Ravi 2 = 14.
+    // Opened, not submitted: Neel 2, Bala 1, Ravi 2 = 5. Follow Up: Asha, Mohan, Lata, Kiran.
+    expect(allYearTiles(yearFixture, window3)).toEqual({
+      enrolled: 10,
+      sittings: 25,
+      attended: 14,
+      openedNotSubmitted: 5,
+      followUp: 4,
+    });
+  });
+
+  it("has no sittings when no Monthly Test has closed", () => {
+    expect(allYearTiles(yearFixture, [])).toEqual({
+      enrolled: 10,
+      sittings: 0,
+      attended: 0,
+      openedNotSubmitted: 0,
+      followUp: 0,
+    });
+  });
+
+  it("applies the Grade filter to the tiles and the list", () => {
+    const grade12 = filterStudents(yearFixture, { grade: 12, examPreparingFor: "all" });
+    // Kiran, Mohan, Pia, Ravi. Sittings 3 + 3 + 0 + 3; attended 1 + 1 + 2; opened, not submitted: Ravi 2.
+    expect(allYearTiles(grade12, window3)).toEqual({
+      enrolled: 4,
+      sittings: 9,
+      attended: 4,
+      openedNotSubmitted: 2,
+      followUp: 2,
+    });
+    expect(yearNames(allYearStudents(grade12, window3))).toEqual(["Mohan Roy", "Kiran Das", "Ravi Iyer", "Pia Shah"]);
+  });
+
+  it("applies the Exam Preparing For filter to the tiles and the list", () => {
+    const notSet = filterStudents(yearFixture, { grade: "all", examPreparingFor: "Not set" });
+    expect(allYearTiles(notSet, window3)).toEqual({
+      enrolled: 1,
+      sittings: 0,
+      attended: 0,
+      openedNotSubmitted: 0,
+      followUp: 0,
+    });
+    expect(yearNames(allYearStudents(notSet, window3))).toEqual(["Pia Shah"]);
+  });
+});
+
+describe("countedTestsLine", () => {
+  const rules = "Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.";
+
+  it("names the counted tests and the running one that is added once it closes", () => {
+    expect(countedTestsLine([jul, aug, sep, oct, nov])).toBe(
+      `Counts tests that have closed: Aug, Sep, Oct. November is added once it closes. ${rules}`,
+    );
+  });
+
+  it("names only the counted tests when none is running", () => {
+    expect(countedTestsLine([sep, oct])).toBe(`Counts tests that have closed: Sep, Oct. ${rules}`);
+  });
+
+  it("names two running tests", () => {
+    const retest = monthly("retest", "Retest", "running");
+    expect(countedTestsLine([oct, nov, retest])).toBe(
+      `Counts tests that have closed: Oct. November and Retest are added once they close. ${rules}`,
+    );
   });
 });

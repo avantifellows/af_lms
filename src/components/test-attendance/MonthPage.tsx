@@ -22,7 +22,7 @@ import {
 
 const PAGE_SIZE = 25;
 
-function Tile({ name, children }: { name: string; children: React.ReactNode }) {
+export function Tile({ name, children }: { name: string; children: React.ReactNode }) {
   return (
     <section aria-label={name}>
       <Card elevation="sm" className="h-full p-4">
