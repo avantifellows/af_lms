@@ -9,7 +9,12 @@
 // whole run; it never turns into empty difference lists.
 // `scripts/check-test-attendance.ts` wires the real, read-only sources.
 
-import type { PaperWindow, TestAttendanceResponse, TestSet } from "@/types/test-attendance";
+import type {
+  ListedStudentDiagnostics,
+  PaperWindow,
+  TestAttendanceResponse,
+  TestSet,
+} from "@/types/test-attendance";
 import { examPreparingFor, istClock, openedMonthlyTests } from "./test-attendance-rules";
 
 /** One submitted result in the warehouse: the Student submitted the quiz. */
@@ -25,10 +30,12 @@ export interface CheckSources {
   testSets(): Promise<TestSet[]>;
   /** Paper windows from `session` for these quiz ids. */
   paperWindows(quizIds: string[]): Promise<PaperWindow[]>;
-  /** The tab's data for one School: the tab's own loader. */
-  schoolAttendance(schoolId: string, now: Date): Promise<TestAttendanceResponse>;
-  /** The tab's listed Students at one School, with their raw Exam Preparing For and whether they have a joining date. */
-  schoolListing(schoolId: string): Promise<Array<{ userId: string; rawExamPreparingFor: string | null; hasJoiningDate: boolean }>>;
+  /**
+   * One School, from a single read of its roster and joining dates: the tab's
+   * data (the tab's own loader) and, for the same listed Students, their raw
+   * Exam Preparing For and whether they have a joining date.
+   */
+  school(schoolId: string, now: Date): Promise<{ data: TestAttendanceResponse; diagnostics: ListedStudentDiagnostics[] }>;
   /** Submitted results in the warehouse for these quiz ids. */
   submittedResults(quizIds: string[]): Promise<SubmittedResult[]>;
 }
@@ -74,33 +81,8 @@ export interface CheckReport {
   };
 }
 
-type ListingRow = Awaited<ReturnType<CheckSources["schoolListing"]>>[number];
-
 /** Schools read at once: enough to finish a few hundred Schools in minutes without crowding the database. */
-const SCHOOL_CONCURRENCY = 4;
-
-/**
- * Runs `work` over `items`, at most `limit` at a time. After the first
- * failure no new item starts; it waits for the running ones to settle, then
- * rejects with that failure.
- */
-async function eachWithConcurrency<T>(items: T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
-  let next = 0;
-  let failure: { error: unknown } | null = null;
-  const worker = async () => {
-    while (failure == null && next < items.length) {
-      const item = items[next];
-      next += 1;
-      try {
-        await work(item);
-      } catch (error) {
-        failure ??= { error };
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  if (failure != null) throw (failure as { error: unknown }).error;
-}
+const SCHOOL_BATCH = 4;
 
 const byNumber = (a: string, b: string) => Number(a) - Number(b) || a.localeCompare(b);
 
@@ -112,15 +94,18 @@ export async function runTestAttendanceCheck(sources: CheckSources, now: Date): 
   const schools = await sources.nvsSchools();
   if (schools.length === 0) throw new Error("No NVS (JNV) Schools found; is this the right database?");
   const marks = new Map<string, Record<string, string>>();
-  const listing: ListingRow[] = [];
-  await eachWithConcurrency(schools, SCHOOL_CONCURRENCY, async (school) => {
-    const [data, listed] = await Promise.all([
-      sources.schoolAttendance(school.id, now),
-      sources.schoolListing(school.id),
-    ]);
-    for (const student of data.students) marks.set(student.userId, student.attendance);
-    listing.push(...listed);
-  });
+  const listing: ListedStudentDiagnostics[] = [];
+  // A few Schools at a time. Each batch settles before the next starts; the
+  // first failure stops the run, so it is never reported as clean.
+  for (let start = 0; start < schools.length; start += SCHOOL_BATCH) {
+    const batch = schools.slice(start, start + SCHOOL_BATCH);
+    const read = await Promise.allSettled(batch.map((school) => sources.school(school.id, now)));
+    for (const result of read) {
+      if (result.status === "rejected") throw result.reason;
+      for (const student of result.value.data.students) marks.set(student.userId, student.attendance);
+      listing.push(...result.value.diagnostics);
+    }
+  }
 
   const results = await sources.submittedResults([...new Set(closed.flatMap((test) => test.quizIds))]);
 
@@ -204,7 +189,7 @@ function paperRows(testSets: TestSet[], papers: PaperWindow[]): CheckReport["pap
   return { quizIds: quizIds.length, incomplete, switchedOff };
 }
 
-function unrecognisedExamPreparingFor(listing: ListingRow[]): CheckReport["examPreparingFor"] {
+function unrecognisedExamPreparingFor(listing: ListedStudentDiagnostics[]): CheckReport["examPreparingFor"] {
   const counts = new Map<string, number>();
   for (const row of listing) {
     const value = row.rawExamPreparingFor?.trim() ?? "";

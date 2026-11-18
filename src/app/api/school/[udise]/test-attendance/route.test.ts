@@ -581,8 +581,9 @@ describe("GET /api/school/[udise]/test-attendance — 60-second warehouse cache"
   });
 });
 
-// NVS batch enrollment rows of the current academic year as the joining-date
-// read returns them: `start_date` as YYYY-MM-DD, current or ended.
+// NVS batch enrollment rows of the current academic year, current or ended,
+// `start_date` as YYYY-MM-DD. The joining-date read takes the earliest per
+// Student in SQL (MIN … GROUP BY); the stub below does the same.
 const enrollmentRow = (user_id: string, start_date: string | null, is_current: boolean) => ({
   user_id,
   start_date,
@@ -614,7 +615,13 @@ describe("GET /api/school/[udise]/test-attendance — joining dates", () => {
       if (isSessionRead(sql)) return sessionRows;
       if (isJoiningRead(sql)) {
         const asked = (params[0] as unknown[]).map(String);
-        return enrollmentRows.filter((r) => asked.includes(r.user_id));
+        const earliest = new Map<string, string>();
+        for (const r of enrollmentRows) {
+          if (!asked.includes(r.user_id) || r.start_date == null) continue;
+          const seen = earliest.get(r.user_id);
+          if (seen == null || r.start_date < seen) earliest.set(r.user_id, r.start_date);
+        }
+        return [...earliest].map(([user_id, start_date]) => ({ user_id, start_date }));
       }
       return [];
     });

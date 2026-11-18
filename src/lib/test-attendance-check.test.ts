@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   formatCheckReport,
@@ -45,13 +45,30 @@ function response(students: TestAttendanceStudent[]): TestAttendanceResponse {
   return { monthlyTests: [OCTOBER], students, lastRefreshed: null, serverTime: NOW.toISOString() };
 }
 
-/** Sources for one School with the given tab answer and warehouse results. */
-function sources(overrides: Partial<CheckSources> & Pick<CheckSources, "schoolAttendance" | "submittedResults">): CheckSources {
+type Diagnostics = Awaited<ReturnType<CheckSources["school"]>>["diagnostics"];
+
+/**
+ * Sources with the given tab answer and warehouse results. A School's tab
+ * data and its listing diagnostics are given apart here and arrive together,
+ * as the real source reads them, from one `school` call.
+ */
+function sources({
+  schoolAttendance,
+  schoolListing = async () => [],
+  ...overrides
+}: Partial<Omit<CheckSources, "school">> & {
+  schoolAttendance: (schoolId: string, now: Date) => Promise<TestAttendanceResponse>;
+  schoolListing?: (schoolId: string) => Promise<Diagnostics>;
+  submittedResults: CheckSources["submittedResults"];
+}): CheckSources {
   return {
     nvsSchools: async () => [{ id: "1", code: "70001" }],
     testSets: async () => TEST_SETS,
     paperWindows: async () => PAPERS,
-    schoolListing: async () => [],
+    school: async (schoolId, now) => {
+      const [data, diagnostics] = await Promise.all([schoolAttendance(schoolId, now), schoolListing(schoolId)]);
+      return { data, diagnostics };
+    },
     ...overrides,
   };
 }
@@ -198,6 +215,44 @@ describe("runTestAttendanceCheck: a source that cannot be read fails the run", (
       NOW,
     );
     await expect(run).rejects.toThrow("No NVS (JNV) Schools found");
+  });
+});
+
+describe("runTestAttendanceCheck: reading the Schools", () => {
+  const nineSchools = async () => Array.from({ length: 9 }, (_, i) => ({ id: String(i + 1), code: `7000${i + 1}` }));
+
+  it("reads each School once, for both the comparison and the listing checks", async () => {
+    const school = vi.fn(async (schoolId: string) => ({
+      data: response([student(`${schoolId}01`, { october: "submitted" })]),
+      diagnostics: [{ userId: `${schoolId}01`, rawExamPreparingFor: "Commerce", hasJoiningDate: false }],
+    }));
+
+    const report = await runTestAttendanceCheck(
+      { ...sources({ schoolAttendance: async () => response([]), submittedResults: async () => [] }), nvsSchools: nineSchools, school },
+      NOW,
+    );
+
+    expect(school).toHaveBeenCalledTimes(9);
+    expect(school.mock.calls.map(([schoolId]) => schoolId)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    expect(report.listedStudents).toBe(9);
+    expect(report.monthlyTests[0].counted).toBe(9);
+    expect(report.noJoiningDate).toBe(9);
+    expect(report.examPreparingFor.unrecognised).toBe(9);
+  });
+
+  it("starts no more Schools after one fails, and fails the run", async () => {
+    const school = vi.fn(async (schoolId: string) => {
+      if (schoolId === "2") throw new Error("Unrecognized name: has_submitted");
+      return { data: response([]), diagnostics: [] };
+    });
+
+    const run = runTestAttendanceCheck(
+      { ...sources({ schoolAttendance: async () => response([]), submittedResults: async () => [] }), nvsSchools: nineSchools, school },
+      NOW,
+    );
+
+    await expect(run).rejects.toThrow("Unrecognized name: has_submitted");
+    expect(school.mock.calls.map(([schoolId]) => schoolId)).toEqual(["1", "2", "3", "4"]);
   });
 });
 

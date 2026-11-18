@@ -108,3 +108,14 @@ export interface PaperAttendance {
   quizId: string;
   submitted: boolean | null;
 }
+
+/**
+ * What the pre-launch data check needs about one listed Student, beyond the
+ * tab's data: the raw Exam Preparing For value and whether the Student has an
+ * NVS joining date. Never part of the tab's response.
+ */
+export interface ListedStudentDiagnostics {
+  userId: string;
+  rawExamPreparingFor: string | null;
+  hasJoiningDate: boolean;
+}

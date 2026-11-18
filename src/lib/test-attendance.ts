@@ -1,14 +1,20 @@
 // Server loader for the Test Attendance tab (#517): the single entry point the
 // Test Attendance routes call. Server-only: it ties the PMU test set list, the
 // Paper windows (`session`), the School roster and the warehouse attendance
-// read to the client-safe `test-attendance-rules` module, which owns the rules
-// and the response shape.
+// read to the client-safe `test-attendance-rules` module, which owns the
+// rules. The response shape lives in `@/types/test-attendance`.
 
 import { CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID } from "@/lib/constants";
 import { query } from "@/lib/db";
 import { getSchoolRoster } from "@/lib/school-students";
 import { readPaperWindows } from "@/lib/test-attendance-papers";
-import type { ListedStudent, PaperWindow, TestAttendanceResponse, TestSet } from "@/types/test-attendance";
+import type {
+  ListedStudent,
+  ListedStudentDiagnostics,
+  PaperWindow,
+  TestAttendanceResponse,
+  TestSet,
+} from "@/types/test-attendance";
 import {
   attendanceQuizIds,
   examPreparingFor,
@@ -25,18 +31,6 @@ async function loadTestSets(): Promise<{ testSets: TestSet[]; papers: PaperWindo
   return { testSets, papers };
 }
 
-/** The canonical School roster narrowed by the tab's listing rule. */
-async function loadListedStudents(schoolId: string | number): Promise<ListedStudent[]> {
-  const { students } = await getSchoolRoster(schoolId);
-  return students.filter(isTestAttendanceStudent).map((student) => ({
-    userId: String(student.user_id),
-    name: [student.first_name, student.last_name].filter(Boolean).join(" "),
-    studentId: student.student_id ?? null,
-    grade: Number(student.grade),
-    examPreparingFor: examPreparingFor(student.stream),
-  }));
-}
-
 /**
  * When each Student joined NVS: the earliest `start_date` among their batch
  * enrollments (current or ended) in JNV NVS batches for the current academic
@@ -45,34 +39,68 @@ async function loadListedStudents(schoolId: string | number): Promise<ListedStud
  * dated enrollment has no entry. Throws when the read fails.
  */
 export async function readNvsJoiningDates(userIds: string[]): Promise<Map<string, string>> {
-  const joinedOn = new Map<string, string>();
-  if (userIds.length === 0) return joinedOn;
-  const rows = await query<{ user_id: string; start_date: string | null }>(
+  if (userIds.length === 0) return new Map();
+  const rows = await query<{ user_id: string; start_date: string }>(
     `SELECT er.user_id::text AS user_id,
-            to_char(er.start_date, 'YYYY-MM-DD') AS start_date
+            to_char(MIN(er.start_date), 'YYYY-MM-DD') AS start_date
        FROM enrollment_record er
        JOIN batch b ON b.id = er.group_id
       WHERE er.group_type = 'batch'
         AND er.user_id = ANY($1::bigint[])
         AND er.academic_year = $2
         AND b.program_id = $3
-        AND er.start_date IS NOT NULL`,
+        AND er.start_date IS NOT NULL
+      GROUP BY er.user_id`,
     [userIds, CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID],
   );
-  for (const row of rows) {
-    if (!row.start_date) continue;
-    const userId = String(row.user_id);
-    const earliest = joinedOn.get(userId);
-    if (earliest == null || row.start_date < earliest) joinedOn.set(userId, row.start_date);
-  }
-  return joinedOn;
+  return new Map(rows.map((row) => [String(row.user_id), row.start_date]));
 }
 
-/** The tab's Students and when each joined NVS. Throws when either read fails. */
-async function loadStudentsAndJoiningDates(schoolId: string | number) {
-  const students = await loadListedStudents(schoolId);
-  const joinedOn = await readNvsJoiningDates(students.map((student) => student.userId));
-  return { students, joinedOn };
+/**
+ * One read of the School roster, narrowed by the tab's listing rule, and when
+ * each listed Student joined NVS. Throws when either read fails.
+ */
+async function loadListedRoster(schoolId: string | number) {
+  const { students } = await getSchoolRoster(schoolId);
+  const roster = students.filter(isTestAttendanceStudent);
+  const joinedOn = await readNvsJoiningDates(roster.map((student) => String(student.user_id)));
+  return { roster, joinedOn };
+}
+
+/**
+ * The tab's data for one School, plus, from the same roster read, what the
+ * pre-launch data check needs about each listed Student. Only the check reads
+ * `diagnostics`; the routes call `loadTestAttendance`, which drops it.
+ */
+export async function loadSchoolTestAttendance(
+  schoolId: string | number,
+  now: Date = new Date(),
+): Promise<{ data: TestAttendanceResponse; diagnostics: ListedStudentDiagnostics[] }> {
+  const [{ roster, joinedOn }, { testSets, papers }] = await Promise.all([
+    loadListedRoster(schoolId),
+    loadTestSets(),
+  ]);
+  const students: ListedStudent[] = roster.map((student) => ({
+    userId: String(student.user_id),
+    name: [student.first_name, student.last_name].filter(Boolean).join(" "),
+    studentId: student.student_id ?? null,
+    grade: Number(student.grade),
+    examPreparingFor: examPreparingFor(student.stream),
+  }));
+  const { attendance, lastRefreshed } = await readSchoolAttendance(
+    schoolId,
+    attendanceQuizIds(testSets, papers, now),
+    students.map((student) => student.userId),
+  );
+  const data = testAttendanceFrom({ testSets, papers, students, attendance, joinedOn, now });
+  return {
+    data: { ...data, lastRefreshed, serverTime: now.toISOString() },
+    diagnostics: roster.map((student) => ({
+      userId: String(student.user_id),
+      rawExamPreparingFor: student.stream ?? null,
+      hasJoiningDate: joinedOn.has(String(student.user_id)),
+    })),
+  };
 }
 
 /**
@@ -85,15 +113,5 @@ export async function loadTestAttendance(
   schoolId: string | number,
   now: Date = new Date(),
 ): Promise<TestAttendanceResponse> {
-  const [{ students, joinedOn }, { testSets, papers }] = await Promise.all([
-    loadStudentsAndJoiningDates(schoolId),
-    loadTestSets(),
-  ]);
-  const { attendance, lastRefreshed } = await readSchoolAttendance(
-    schoolId,
-    attendanceQuizIds(testSets, papers, now),
-    students.map((student) => student.userId),
-  );
-  const data = testAttendanceFrom({ testSets, papers, students, attendance, joinedOn, now });
-  return { ...data, lastRefreshed, serverTime: now.toISOString() };
+  return (await loadSchoolTestAttendance(schoolId, now)).data;
 }
