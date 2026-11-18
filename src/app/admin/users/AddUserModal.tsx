@@ -391,7 +391,8 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="program_manager">Program Manager - School visits + student management</option>
       <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
       <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
-      <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students, performance + Test Attendance</option>
+      {/* Short, so the selected option is not cut off; the role description says the rest. */}
+      <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS Schools</option>
       <option value={PMU_GOVT_SCHOOL_USER_ROLE}>PMU Govt School User - One JNV NVS School</option>
       <option value={BLENDED_MENTOR_ROLE}>Blended Learning Mentor - Own Mentees only</option>
       <option value={BLENDED_ADMIN_ROLE}>Blended Learning Admin - All Mentors + Mentor Flags</option>

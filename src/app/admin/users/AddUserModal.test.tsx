@@ -906,6 +906,8 @@ describe("AddUserModal — PMU roles", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
 
     await user.selectOptions(roleSelect, "pmu_manager");
+    // The option label is short enough to show in full once selected; the description carries the detail.
+    expect(screen.getByRole("option", { name: "PMU Manager - JNV NVS Schools" })).toHaveProperty("selected", true);
     expect(
       screen.getByText("PMU Managers can view and manage JNV NVS students, view performance and view Test Attendance in their assigned JNV Schools")
     ).toBeInTheDocument();
