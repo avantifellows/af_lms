@@ -89,8 +89,8 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   teacher: "Teachers can view and manage students in their assigned schools",
   holistic_mentorship_admin: `Holistic Mentorship Admins can manage ${HOLISTIC_PROGRAM_LABELS_TEXT} mentorship`,
   admin: "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only",
-  pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
-  pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
+  pmu_manager: "PMU Managers can view and manage JNV NVS students, view performance and view Test Attendance in their assigned JNV Schools",
+  pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students, view performance and view Test Attendance in their one JNV School",
   blended_mentor: "Blended Learning Mentors can see and log Conversations with only their own Mentees. They have no other LMS access",
   blended_admin: "Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, play Call Recordings and read their transcripts, and manage Resources and Common Action Items. Only Mentors log. They have no other LMS access",
   alumni_manager: "Alumni Managers can view and update alumni of their assigned schools only — no access to students or any other feature",
@@ -391,7 +391,7 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="program_manager">Program Manager - School visits + student management</option>
       <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
       <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
-      <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students + performance</option>
+      <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students, performance + Test Attendance</option>
       <option value={PMU_GOVT_SCHOOL_USER_ROLE}>PMU Govt School User - One JNV NVS School</option>
       <option value={BLENDED_MENTOR_ROLE}>Blended Learning Mentor - Own Mentees only</option>
       <option value={BLENDED_ADMIN_ROLE}>Blended Learning Admin - All Mentors + Mentor Flags</option>

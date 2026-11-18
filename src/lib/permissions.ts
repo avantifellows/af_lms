@@ -53,14 +53,17 @@ export type Feature =
   | "quiz_sessions"
   | "teacher_feedback"
   | "blended_learning"
-  | "alumni";
+  | "alumni"
+  | "test_attendance";
 
 // Feature access levels
 export type FeatureAccess = "none" | "view" | "edit";
 
 // Feature permission matrix: feature → role → access level
-// PMU roles (ADR 0007) get students + performance only; every other feature
-// is "none" at every level, whatever their program context says.
+// PMU roles (ADR 0007) get students, performance and test_attendance only;
+// every other feature is "none" at every level, whatever their program
+// context says. test_attendance (#517) is view-only and NVS-only by design:
+// the School page and its API add the JNV and NVS-roster checks.
 // Blended Learning roles get blended_learning only; every other feature is
 // "none" (and the shared permission lookup denies them anyway).
 // alumni_manager (ADR 0008) gets alumni only — never students.
@@ -81,6 +84,8 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
   blended_learning: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "edit", blended_admin: "edit", alumni_manager: "none" },
   alumni: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "edit" },
+  // Not NVS-gated: it exists for NVS-only users. No edit level, so read_only keeps view.
+  test_attendance: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "view", pmu_govt_school_user: "view", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")

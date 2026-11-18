@@ -480,6 +480,40 @@ describe("CentrePage → RosterPage (centre scope)", () => {
     },
   );
 
+  // Test Attendance (#517) is a School-page tab only, even on a JNV NVS Centre
+  // of a JNV School with listed Students and a viewer who has the feature.
+  it("never shows the Test Attendance tab on a Centre page", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+      "@/lib/permissions",
+    );
+    setupCentre(
+      { program_id: 64, program_name: "JNV NVS", school: { ...SCHOOL, af_school_category: "JNV" } },
+      { email: "admin@avantifellows.org", level: 3, role: "admin", school_codes: null, program_ids: [1, 64], scope: undefined },
+    );
+    mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+    mockGetCentreStudents.mockResolvedValue({
+      students: [
+        {
+          group_user_id: "gu-nvs",
+          user_id: "u-nvs",
+          first_name: "Nisha",
+          last_name: "Rao",
+          grade: 11,
+          status: "active",
+          program_id: 64,
+          program_name: "JNV NVS",
+          student_program_ids: [64],
+        },
+      ],
+      issues: [],
+    });
+
+    await renderCentre();
+
+    expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
+    expect(screen.queryByTestId("tab-test_attendance")).not.toBeInTheDocument();
+  });
+
   it("sends the holistic-mentorship admin to their console instead of the centre", async () => {
     setupCentre({}, {
       email: "holistic@example.com",

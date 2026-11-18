@@ -9,6 +9,7 @@ export const ROSTER_TAB_IDS = [
   "enrollment",
   "curriculum",
   "performance",
+  "test_attendance",
   "quiz_sessions",
   "teacher_feedback",
   "mentorship",

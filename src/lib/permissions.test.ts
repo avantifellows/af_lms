@@ -1393,6 +1393,7 @@ describe("PMU roles (JNV NVS pinned)", () => {
       pm_dashboard: "none",
       quiz_sessions: "none",
       teacher_feedback: "none",
+      test_attendance: "view",
     };
     const EXPECTED_READ_ONLY: Record<string, FeatureAccess> = {
       ...EXPECTED,
@@ -1451,4 +1452,38 @@ describe("alumni feature (admin-only first release)", () => {
       expect(getFeatureAccess(makePermission({ role, level: 3 }), "alumni").access).toBe("none");
     },
   );
+});
+
+describe("test_attendance feature (Test Attendance tab, #517)", () => {
+  // Literal expectations from the PRD: view for Admin and both PMU roles,
+  // none for every other role. No edit level, so read_only changes nothing.
+  const EXPECTED: Array<[UserPermission["role"], FeatureAccess]> = [
+    ["admin", "view"],
+    ["pmu_manager", "view"],
+    ["pmu_govt_school_user", "view"],
+    ["teacher", "none"],
+    ["program_manager", "none"],
+    ["program_admin", "none"],
+    ["holistic_mentorship_admin", "none"],
+    ["blended_mentor", "none"],
+    ["blended_admin", "none"],
+    ["alumni_manager", "none"],
+  ];
+
+  it.each(EXPECTED.flatMap(([role, access]) => [false, true].map((readOnly) => [role, readOnly, access] as const)))(
+    "%s (read_only %s) → %s",
+    (role, readOnly, access) => {
+      const permission = makePermission({ role, level: 3, read_only: readOnly, school_codes: null });
+      expect(getFeatureAccess(permission, "test_attendance")).toEqual({
+        access,
+        canView: access !== "none",
+        canEdit: false,
+      });
+    },
+  );
+
+  it("is not NVS-gated: an NVS-only PMU Govt School User keeps view", () => {
+    const permission = makePermission({ role: "pmu_govt_school_user", program_ids: [PROGRAM_IDS.NVS] });
+    expect(getFeatureAccess(permission, "test_attendance").access).toBe("view");
+  });
 });
