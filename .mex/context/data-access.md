@@ -1,6 +1,6 @@
 ---
 name: data-access
-description: The five data backends and the reads-vs-writes split — when to use Postgres directly, the DB Service proxy, BigQuery, DynamoDB, or S3. Load before any read or write.
+description: The data backends and the reads-vs-writes split — when to use Postgres directly, the DB Service proxy, BigQuery, DynamoDB, S3, or the one Firestore read. Load before any read or write.
 triggers:
   - "database"
   - "query"
@@ -10,6 +10,7 @@ triggers:
   - "bigquery"
   - "dynamodb"
   - "s3"
+  - "firestore"
   - "fetch"
   - "sql"
 edges:
@@ -21,12 +22,12 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-10
+last_updated: 2026-11-18
 ---
 
 # Data Access
 
-Five backends. Picking the wrong one for a write is a real bug — read this before touching data.
+Six backends (Firestore is one read-only document). Picking the wrong one for a write is a real bug — read this before touching data.
 
 ## 1. PostgreSQL — `query()` (the default)
 `import { query } from "@/lib/db"` → `query<RowType>(sql, params)`. Returns `rows`.
@@ -102,6 +103,12 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 ## 5. S3 — document files
 `src/lib/s3.ts` (`@aws-sdk/client-s3` + presigner). Student document uploads/reads via presigned URLs; bucket shared with prod (`S3_DOCS_*`). Document **metadata** writes still proxy through the DB Service.
 
+## 6. Firestore — PMU test set list (read-only, one document)
+`src/lib/test-set-list.ts`, `getNvsTestSets()` → `{label, quizIds}[]` in list order, or `"unavailable"`. This is the LMS's only Firestore read (#517, ADR 0012). It reads `pmu_live_tracking_sessions/nvs` (field `test_sets: [{label, quiz_ids, current}]`, kept by the PMU team for Live Tracking) through the Firestore REST API. Auth uses `google-auth-library` (now a direct dependency) with the BigQuery service account (`GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_APPLICATION_CREDENTIALS`, scope `datastore`). The Firestore SDK is not a dependency. The reader trims labels, trims and de-duplicates quiz ids, drops sets with no label or no ids, and ignores `current`. It caches a good read in process for 5 minutes (`ttlCache`) and doesn't keep a failed one. Nothing else may know the list lives in Firestore, so a future PMU calendar can replace this module.
+- **Paper windows** (`src/lib/test-attendance-papers.ts`, `readPaperWindows(quizIds)`): Postgres `session` rows matched on `platform_id = ANY($1::text[])`. `start_time`/`end_time` hold IST wall clock: they're read as `::text` and converted with `dbIstTimestampToUtcIso`, never `new Date()`. An unreadable time is null. For several rows with one quiz id, the switched-on rows (`is_active IS NOT FALSE`, as the quiz-session list reads it) give the earliest opening, the latest closing and the grade (`meta_data->>'grade'`). The rules (`monthlyTestsFrom` in `test-attendance-rules.ts`) skip a switched-off Paper, a quiz id with no row and a Paper missing either time.
+- Production check, 18 Nov 2026 (read-only): all 49 quiz ids in the list (July 7, August/September/October 14 each) have exactly one `session` row (`platform = 'quiz'`, `platform_id` = quiz id, `meta_data.grade` always set, all `system_wide_mandated`). August's seven Grade 11 Papers (26–30 Aug) are switched off (`is_active = false`), so August is a Grade 12-only Monthly Test.
+- If the list or the `session` read fails, `loadTestAttendance` throws and the route answers 500. The tab shows its error panel, never zeros. The e2e server sets `GOOGLE_SERVICE_ACCOUNT_JSON=" "`, so it's always unavailable there.
+
 (SNS — `src/lib/sns.ts` — publishes session-creation messages, not a data store.)
 
 ## Decision table
@@ -113,6 +120,7 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 | Quiz analytics read | BigQuery (`bigquery.ts`) |
 | Performance deep-dive read | DynamoDB (`dynamodb.ts`) |
 | Document file bytes | S3 (`s3.ts`) |
+| NVS Monthly Test list (PMU test set list) | Firestore REST (`test-set-list.ts`) — the only Firestore read |
 
 ## Gotchas
 - **Never write students/batches/quiz-sessions directly to Postgres** — it bypasses the DB Service's invariants. Read them direct; write them through the Service.

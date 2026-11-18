@@ -9,7 +9,9 @@ import {
 
 // Test Attendance tab (#517): NVS Schools only. A PMU Govt School User at a
 // JNV School with listed NVS Students sees the tab right after Performance;
-// the e2e teacher opens the same School page without it.
+// the e2e teacher opens the same School page without it. The e2e server has no
+// Google access (GOOGLE_SERVICE_ACCOUNT_JSON is " "), so the PMU test set list
+// cannot be read and the tab must show its error panel, never zeros.
 test.describe("Test Attendance tab", () => {
   const pool = getTestPool();
 
@@ -32,9 +34,11 @@ test.describe("Test Attendance tab", () => {
     expect(tabNames).toEqual(["Enrollment", "Performance", "Test Attendance"]);
 
     await tabs.getByRole("tab", { name: "Test Attendance" }).click();
-    const enrolled = page.getByRole("region", { name: "Enrolled" });
-    await expect(enrolled).toContainText("2");
-    await expect(page.getByText("No Monthly Tests yet")).toBeVisible();
+    const failed = page.getByRole("alert").filter({ hasText: "Couldn't load Test Attendance" });
+    await expect(failed).toBeVisible();
+    await expect(failed.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Enrolled" })).toHaveCount(0);
+    await expect(page.getByText("No Monthly Tests yet")).toHaveCount(0);
 
     await teacherPage.goto(`/school/${TEST_ATTENDANCE_SCHOOL_CODE}`);
     const teacherTabs = teacherPage.getByRole("tablist", { name: "School sections" });

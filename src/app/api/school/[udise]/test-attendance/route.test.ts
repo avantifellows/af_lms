@@ -1,17 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-// The read route through the real gate and permission layer: only the session
-// and the Postgres `query()` boundary are stubbed, so the matrix, read_only,
-// the PMU pin (ADR 0007), School scope and the roster loader run as in
-// production.
-const { mockQuery, mockGetServerSession } = vi.hoisted(() => ({
+// The read route through the real gate and permission layer: only the session,
+// the Postgres `query()` boundary and the PMU test set list (Firestore) are
+// stubbed, so the matrix, read_only, the PMU pin (ADR 0007), School scope, the
+// roster loader, the Paper windows read and the rules run as in production.
+const { mockQuery, mockGetServerSession, mockGetNvsTestSets } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockGetServerSession: vi.fn(),
+  mockGetNvsTestSets: vi.fn(),
 }));
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
+vi.mock("@/lib/test-set-list", () => ({ getNvsTestSets: mockGetNvsTestSets }));
 
 import { GET } from "./route";
 
@@ -61,6 +63,7 @@ const mixedRoster = [
 let permissionRow: Record<string, unknown> | null;
 let school: Record<string, unknown> | null;
 let roster: Record<string, unknown>[];
+let sessionRows: Record<string, unknown>[];
 
 function row(role: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -77,6 +80,7 @@ function row(role: string, overrides: Record<string, unknown> = {}) {
 }
 
 const isRosterRead = (sql: string) => sql.includes("group_user");
+const isSessionRead = (sql: string) => /FROM\s+session\b/.test(sql);
 
 async function get() {
   return GET(new NextRequest("http://localhost/api/school/JNV001/test-attendance"), {
@@ -90,12 +94,15 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-11-18T08:30:00.000Z"));
   school = jnvSchool;
   roster = mixedRoster;
+  sessionRows = [];
   permissionRow = row("pmu_govt_school_user");
   mockGetServerSession.mockResolvedValue({ user: { email } });
+  mockGetNvsTestSets.mockResolvedValue([]);
   mockQuery.mockImplementation(async (sql: string) => {
     if (sql.includes("FROM user_permission")) return permissionRow ? [permissionRow] : [];
     if (sql.includes("FROM school WHERE")) return school ? [school] : [];
     if (sql.includes("program_dropout_audits")) return roster;
+    if (isSessionRead(sql)) return sessionRows;
     return [];
   });
 });
@@ -107,6 +114,8 @@ afterEach(() => {
 function expectNoRosterRead() {
   const sqls = mockQuery.mock.calls.map(([sql]) => String(sql));
   expect(sqls.filter(isRosterRead)).toEqual([]);
+  expect(sqls.filter(isSessionRead)).toEqual([]);
+  expect(mockGetNvsTestSets).not.toHaveBeenCalled();
 }
 
 describe("GET /api/school/[udise]/test-attendance — gate", () => {
@@ -228,6 +237,136 @@ describe("GET /api/school/[udise]/test-attendance — success", () => {
     const logged = JSON.stringify(consoleError.mock.calls);
     expect(logged).toContain("connection reset");
     expect(logged).not.toContain("Nisha");
+    consoleError.mockRestore();
+  });
+});
+
+// `session` rows as Postgres returns them for `start_time::text`: IST wall
+// clock. Hand conversions (IST = UTC + 5:30) are written next to each expected
+// value below.
+const sessionRow = (platform_id: string, start_time: string | null, end_time: string | null, grade: string | null, is_active: boolean | null = true) => ({
+  platform_id,
+  start_time,
+  end_time,
+  grade,
+  is_active,
+});
+
+describe("GET /api/school/[udise]/test-attendance — Monthly Tests", () => {
+  beforeEach(() => {
+    // Server time 2026-11-18T08:30:00Z = 18 Nov 2026, 2:00 pm IST.
+    mockGetNvsTestSets.mockResolvedValue([
+      { label: "October", quizIds: ["oct-g11", "oct-g12"] },
+      { label: "July", quizIds: ["jul-g12"] },
+      { label: "August", quizIds: ["aug-g12-a", "aug-g12-b", "aug-g11"] },
+      { label: "November", quizIds: ["nov-g11"] },
+      { label: "December", quizIds: ["dec-g12"] },
+      { label: "Mock", quizIds: ["no-row"] },
+    ]);
+    sessionRows = [
+      sessionRow("jul-g12", "2026-07-22 05:00:00", "2026-07-28 23:45:00", "12"),
+      sessionRow("aug-g12-a", "2026-08-19 05:00:00", "2026-08-24 23:55:00", "12"),
+      sessionRow("aug-g12-b", "2026-08-19 05:00:00", "2026-08-24 23:55:00", "12"),
+      // Switched off, as August's Grade 11 Papers are in production.
+      sessionRow("aug-g11", "2026-08-26 05:00:00", "2026-08-30 23:55:00", "11", false),
+      // Three rows for one quiz id: the switched-off one is ignored; the two
+      // switched-on ones give the earliest opening and the latest closing.
+      sessionRow("oct-g11", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
+      sessionRow("oct-g11", "2026-10-07 05:00:00", "2026-10-12 23:55:00", "11"),
+      sessionRow("oct-g11", "2026-10-01 05:00:00", "2026-10-20 23:55:00", "11", false),
+      // No opening time: skipped, so October has no Grade 12.
+      sessionRow("oct-g12", null, "2026-10-10 23:55:00", "12"),
+      sessionRow("nov-g11", "2026-11-17 05:00:00", "2026-11-21 23:55:00", "11"),
+      sessionRow("dec-g12", "2026-12-08 05:00:00", "2026-12-12 23:55:00", "12"),
+    ];
+  });
+
+  it("returns the Monthly Tests that have opened, ordered by closing time, with times in UTC", async () => {
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.monthlyTests).toEqual([
+      {
+        key: "july",
+        name: "July",
+        shortName: "Jul",
+        opensAt: "2026-07-21T23:30:00.000Z", // 22 Jul 05:00 IST
+        closesAt: "2026-07-28T18:15:00.000Z", // 28 Jul 23:45 IST
+        state: "closed",
+        grades: [12],
+      },
+      {
+        key: "august",
+        name: "August",
+        shortName: "Aug",
+        opensAt: "2026-08-18T23:30:00.000Z", // 19 Aug 05:00 IST
+        closesAt: "2026-08-24T18:25:00.000Z", // 24 Aug 23:55 IST
+        state: "closed",
+        grades: [12],
+      },
+      {
+        key: "october",
+        name: "October",
+        shortName: "Oct",
+        opensAt: "2026-10-05T23:30:00.000Z", // 6 Oct 05:00 IST
+        closesAt: "2026-10-12T18:25:00.000Z", // 12 Oct 23:55 IST
+        state: "closed",
+        grades: [11],
+      },
+      {
+        key: "november",
+        name: "November",
+        shortName: "Nov",
+        opensAt: "2026-11-16T23:30:00.000Z", // 17 Nov 05:00 IST
+        closesAt: "2026-11-21T18:25:00.000Z", // 21 Nov 23:55 IST
+        state: "running",
+        grades: [11],
+      },
+    ]);
+    expect(body.students).toHaveLength(3);
+  });
+
+  it("skips a Paper whose time cannot be read", async () => {
+    mockGetNvsTestSets.mockResolvedValue([{ label: "October", quizIds: ["oct-g11", "oct-g12"] }]);
+    sessionRows = [
+      sessionRow("oct-g11", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
+      sessionRow("oct-g12", "2026-10-01 05:00:00", "not a time", "12"),
+    ];
+
+    const response = await get();
+
+    expect((await response.json()).monthlyTests).toEqual([
+      expect.objectContaining({ closesAt: "2026-10-10T18:25:00.000Z", grades: [11] }),
+    ]);
+  });
+
+  it("answers 500 when the PMU test set list is unavailable", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetNvsTestSets.mockResolvedValue("unavailable");
+
+    const response = await get();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Failed to load Test Attendance" });
+    consoleError.mockRestore();
+  });
+
+  it("answers 500 when the session read fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM user_permission")) return [permissionRow];
+      if (sql.includes("FROM school WHERE")) return [school];
+      if (sql.includes("program_dropout_audits")) return roster;
+      if (isSessionRead(sql)) throw new Error("statement timeout");
+      return [];
+    });
+
+    const response = await get();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Failed to load Test Attendance" });
+    expect(JSON.stringify(consoleError.mock.calls)).toContain("statement timeout");
     consoleError.mockRestore();
   });
 });
