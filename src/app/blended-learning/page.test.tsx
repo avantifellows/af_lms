@@ -136,9 +136,7 @@ describe("BlendedLearningPage", () => {
 
     render(await BlendedLearningPage());
 
-    expect(mockListMentees).toHaveBeenCalledWith({ access: MENTOR, mentorUserId: null, today: "2026-10-22" });
-    // Supervising no one, they get no "whose students" switch.
-    expect(screen.queryByRole("navigation", { name: "Whose students" })).not.toBeInTheDocument();
+    expect(mockListMentees).toHaveBeenCalledWith({ access: MENTOR, today: "2026-10-22" });
     expect(screen.getByRole("heading", { level: 1, name: "My Students" })).toBeInTheDocument();
     expect(screen.getByText(/student · 2026-2027/)).toHaveTextContent("1 student · 2026-2027");
     expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
@@ -189,36 +187,50 @@ describe("BlendedLearningPage", () => {
       mockListMentees.mockResolvedValue({ talkToFirst: [IRA], everyoneElse: [] });
     });
 
-    it("opens on their own list, which they log for, with a switch to the supervised Mentor's", async () => {
+    const CARDS = [
+      { mentorUserId: 9001, name: "Synthetic Lead", assigned: 1, grade12: 1, grade13: 0, talkedLast7: 0, notSpoken30Plus: 1 },
+      { mentorUserId: 9002, name: "Synthetic Reportee", assigned: 2, grade12: 1, grade13: 1, talkedLast7: 1, notSpoken30Plus: 0 },
+    ];
+
+    it("lands on the Team tab: their own card and their reportees', with the admin cards' stats", async () => {
+      mockListMentorCards.mockResolvedValue(CARDS);
+
       render(await BlendedLearningPage());
 
-      expect(mockListMentees).toHaveBeenCalledWith({ access: SUPERVISOR, mentorUserId: null, today: "2026-10-22" });
-      const whose = screen.getByRole("navigation", { name: "Whose students" });
-      expect(within(whose).getByRole("link", { name: "My students" })).toHaveAttribute("aria-current", "page");
-      expect(within(whose).getByRole("link", { name: "Synthetic Reportee's students" })).toHaveAttribute(
-        "href",
-        "/blended-learning?mentor=9002"
-      );
+      expect(mockListMentorCards).toHaveBeenCalledWith(SUPERVISOR, "2026-10-22");
+      expect(mockListMentees).not.toHaveBeenCalled();
+      expect(screen.getByRole("heading", { level: 1, name: "Team" })).toBeInTheDocument();
+      const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+      expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
+        "Team",
+        "My Students",
+        "Flags",
+        "Resources",
+      ]);
+      expect(within(tabs).getByRole("link", { name: "Team" })).toHaveAttribute("aria-current", "page");
+      expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("href", "/blended-learning?tab=students");
+      const cards = within(screen.getByRole("list", { name: "Mentors" })).getAllByRole("link");
+      // Their own card opens their own list; a reportee's, that Mentor's page.
+      expect(cards[0]).toHaveTextContent("Synthetic LeadYou");
+      expect(cards[0]).toHaveAttribute("href", "/blended-learning?tab=students");
+      expect(cards[1]).toHaveTextContent("Synthetic Reportee");
+      expect(cards[1]).toHaveAttribute("href", "/blended-learning/mentors/9002");
+      expect(within(cards[1]).getByText("Assigned").nextSibling).toHaveTextContent("2");
+      // The old "whose students" switch is gone.
+      expect(screen.queryByRole("navigation", { name: "Whose students" })).not.toBeInTheDocument();
+    });
+
+    it("keeps their own list, which they log for, under My Students", async () => {
+      render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "students", mentor: "9002" }) }));
+
+      // A Mentor id in the URL never opens a reportee's list here.
+      expect(mockListMentees).toHaveBeenCalledWith({ access: SUPERVISOR, today: "2026-10-22" });
+      expect(mockListMentorCards).not.toHaveBeenCalled();
+      expect(screen.getByRole("heading", { level: 1, name: "My Students" })).toBeInTheDocument();
+      const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+      expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("aria-current", "page");
       expect(screen.queryByRole("note")).not.toBeInTheDocument();
       expect(screen.getAllByRole("link", { name: "New log for Ira Attempt" }).length).toBeGreaterThan(0);
-    });
-
-    it("shows the supervised Mentor's list view only: no logging", async () => {
-      render(await BlendedLearningPage({ searchParams: Promise.resolve({ mentor: "9002" }) }));
-
-      expect(mockListMentees).toHaveBeenCalledWith({ access: SUPERVISOR, mentorUserId: 9002, today: "2026-10-22" });
-      const whose = screen.getByRole("navigation", { name: "Whose students" });
-      expect(within(whose).getByRole("link", { name: "Synthetic Reportee's students" })).toHaveAttribute("aria-current", "page");
-      expect(screen.getByRole("note")).toHaveTextContent("View only. Synthetic Reportee mentors these students");
-      expect(screen.getAllByRole("link", { name: "View Ira Attempt" }).length).toBeGreaterThan(0);
-      expect(screen.queryByRole("link", { name: /^New log for / })).not.toBeInTheDocument();
-    });
-
-    it("ignores a Mentor they don't supervise and shows their own list", async () => {
-      render(await BlendedLearningPage({ searchParams: Promise.resolve({ mentor: "9003" }) }));
-
-      expect(mockListMentees).toHaveBeenCalledWith({ access: SUPERVISOR, mentorUserId: null, today: "2026-10-22" });
-      expect(screen.queryByRole("note")).not.toBeInTheDocument();
     });
 
     it("filters the Flags tab by their own or the supervised Mentor's Students, ignoring any other Mentor", async () => {

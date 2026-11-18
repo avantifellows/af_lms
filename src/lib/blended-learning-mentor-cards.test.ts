@@ -52,6 +52,44 @@ describe("listMentorCards", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  describe("for a team lead", () => {
+    const TEAM_LEAD: BlendedLearningAccess = {
+      kind: "mentor", role: "blended_mentor", readOnly: false,
+      actorEmail: "lead@test.local", mentorUserId: 9009, supervisedMentorUserIds: [9002, 9003],
+    };
+    const LEAD = { id: 9009, name: "Zed Lead" };
+
+    // The names query, then the Mappings query (narrowed to the team).
+    function givenTeam(names: { id: number; name: string }[], rows: ReturnType<typeof mapping>[]) {
+      mockQuery.mockImplementation(async (sql: string) => (sql.includes("FROM \"user\" mentor\n") ? names : rows) as never);
+    }
+
+    it("reads only their own and their reportees' Mappings", async () => {
+      givenTeam([], []);
+
+      await listMentorCards(TEAM_LEAD, TODAY);
+
+      const mappings = mockQuery.mock.calls.find(([sql]) => sql.includes("blended_learning_mentor_mentee_mappings"));
+      expect(mappings?.[1]).toEqual(["2026-2027", [9009, 9002, 9003], null]);
+      expect(mappings?.[0]).toContain("NOT EXISTS (SELECT 1 FROM student dropout_student");
+    });
+
+    it("puts their own card first, then reportees A–Z, each shown even with no Mentees", async () => {
+      givenTeam(
+        [LEAD, { id: 9003, name: "Anita" }, { id: 9002, name: "Lokesh" }],
+        [mapping(501, LEAD), mapping(601, LOKESH, { grade: 13, lastConversationOn: "2026-09-01" })]
+      );
+
+      const cards = await listMentorCards(TEAM_LEAD, TODAY);
+
+      expect(cards).toEqual([
+        { mentorUserId: 9009, name: "Zed Lead", assigned: 1, grade12: 1, grade13: 0, talkedLast7: 1, notSpoken30Plus: 0 },
+        { mentorUserId: 9003, name: "Anita", assigned: 0, grade12: 0, grade13: 0, talkedLast7: 0, notSpoken30Plus: 0 },
+        { mentorUserId: 9002, name: "Lokesh", assigned: 1, grade12: 0, grade13: 1, talkedLast7: 0, notSpoken30Plus: 1 },
+      ]);
+    });
+  });
+
   it("gives no cards when no Mentor has an active Mapping", async () => {
     mockQuery.mockResolvedValue([]);
     expect(await listMentorCards(READ_ONLY_ADMIN, TODAY)).toEqual([]);

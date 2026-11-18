@@ -92,8 +92,10 @@ export async function getBlendedLearningAccess(
 // manages drafts), and only their own Mentees (canAccessBlendedStudent,
 // lockMappingInScope); a Blended Learning Admin views them. The Manage page
 // (Resources and Common Action Items) is the one thing an admin edits, and
-// only when not read-only; Mentors never. Recordings and Mentor cards are for
-// Blended Learning Admins (including read-only ones). Everyone sees flags: an
+// only when not read-only; Mentors never. Recordings and every Mentor's cards
+// (view_mentors) are for Blended Learning Admins (including read-only ones); a
+// team lead gets only their own and their reportees' cards (isTeamLead,
+// listMentorCards). Everyone sees flags: an
 // admin every flag, a Mentor only those on their own Students
 // (blended-learning-flags).
 export function canBlendedLearning(
@@ -145,6 +147,13 @@ export function viewableMentorUserIds(access: BlendedLearningAccess): number[] |
   if (access.kind === "admin") return null;
   if (access.mentorUserId == null) return [];
   return [access.mentorUserId, ...(access.supervisedMentorUserIds ?? [])];
+}
+
+// A team lead: a Mentor who supervises at least one other Mentor. They land
+// on cards for themselves and their reportees (listMentorCards) instead of
+// their own list, which moves to a My Students tab.
+export function isTeamLead(access: BlendedLearningAccess): boolean {
+  return access.kind === "mentor" && access.mentorUserId != null && (access.supervisedMentorUserIds?.length ?? 0) > 0;
 }
 
 // The supervised Mentor the viewer asked for, or null when `mentorUserId` is

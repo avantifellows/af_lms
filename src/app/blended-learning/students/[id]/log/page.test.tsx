@@ -281,6 +281,16 @@ describe("LogEntryPage", () => {
     expect(formProps()).toMatchObject({ listGroup: null });
   });
 
+  it("points the saved confirmation's way back at the Mentor's own list: a team lead's My Students tab", async () => {
+    signedInAs(MENTOR);
+    await renderPage();
+    expect(formProps()).toMatchObject({ studentsHref: "/blended-learning" });
+
+    signedInAs({ ...MENTOR, actorEmail: "lead@test.local", supervisedMentorUserIds: [9002] });
+    await renderPage();
+    expect(formProps()).toMatchObject({ studentsHref: "/blended-learning?tab=students" });
+  });
+
   it("prefills a Mentor's form from a ready draft and its notes, leaving out its tags", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "ready" } });

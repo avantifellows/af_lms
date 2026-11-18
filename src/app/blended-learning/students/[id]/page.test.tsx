@@ -259,12 +259,21 @@ describe("MenteeDetailPage", () => {
       await renderPage("502");
       expect(screen.getByRole("link", { name: "Back to Reportee's students" })).toHaveAttribute(
         "href",
-        "/blended-learning?mentor=9002"
+        "/blended-learning/mentors/9002"
       );
 
       await renderPage("502", "flags");
       expect(screen.getByRole("link", { name: "Back to flags" })).toHaveAttribute("href", "/blended-learning?tab=flags");
     });
+  });
+
+  it("sends a team lead back to their My Students tab from their own Mentee", async () => {
+    signedInAs({ ...MENTOR, actorEmail: "lead@test.local", supervisedMentorUserIds: [9002] });
+
+    await renderPage();
+
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning?tab=students");
   });
 
   it("sends an admin who came from the Flags tab back to it", async () => {

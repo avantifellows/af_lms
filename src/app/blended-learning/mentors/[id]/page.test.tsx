@@ -142,6 +142,38 @@ describe("MentorPage", () => {
     expect(screen.getByRole("main")).not.toHaveTextContent(/\byou\b/i);
   });
 
+  describe("a team lead (a Mentor who supervises Mentor 9002)", () => {
+    const TEAM_LEAD = { ...MENTOR, actorEmail: "lead@test.local", mentorUserId: 9003, supervisedMentorUserIds: [9002] };
+
+    it("shows a reportee's list view only, back to the Team tab", async () => {
+      signedInAs(TEAM_LEAD);
+
+      await renderPage("9002");
+
+      expect(mockListMentorCards).toHaveBeenCalledWith(TEAM_LEAD, "2026-10-22");
+      expect(mockListMentees).toHaveBeenCalledWith({ access: TEAM_LEAD, mentorUserId: 9002, today: "2026-10-22" });
+      expect(screen.getByRole("heading", { level: 1, name: "Lokesh" })).toBeInTheDocument();
+      expect(screen.getByRole("note")).toHaveTextContent("View only. Lokesh mentors these students");
+      expect(screen.getByRole("link", { name: /Team/ })).toHaveAttribute("href", "/blended-learning");
+      expect(screen.getAllByRole("link", { name: "View Ira Attempt" }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole("link", { name: /^New log/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Draft ready to review" })).not.toBeInTheDocument();
+    });
+
+    it("sends them to their My Students tab for their own id", async () => {
+      signedInAs(TEAM_LEAD);
+      await expect(renderPage("9003")).rejects.toThrow("REDIRECT:/blended-learning?tab=students");
+      expect(mockListMentorCards).not.toHaveBeenCalled();
+    });
+
+    it("shows the not-found page for a Mentor outside their team", async () => {
+      signedInAs(TEAM_LEAD);
+      await expect(renderPage("9001")).rejects.toThrow("NOT_FOUND");
+      expect(mockListMentorCards).not.toHaveBeenCalled();
+      expect(mockListMentees).not.toHaveBeenCalled();
+    });
+  });
+
   it("shows an LMS admin the Mentor's list inside the dashboard, Blended Learning tab selected", async () => {
     const access = { ...BLENDED_ADMIN, role: "admin", actorEmail: "admin@avantifellows.org" };
     signedInAs(access);

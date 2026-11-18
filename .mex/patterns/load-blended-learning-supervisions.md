@@ -23,11 +23,16 @@ last_updated: 2026-11-18
 ## Context
 A **Supervision** (`blended_learning_mentor_supervisions`, db-service migration
 `20261112120442`) lets a team-lead Mentor (`supervisor_user_id`) view another Mentor's
-(`mentor_user_id`) Students for one academic year: that Mentor's Mentee list (switch on
-`/blended-learning`, `?mentor=<id>`), their Mentees' pages and notes, and their flags in the
-Flags tab. View only: logging, drafts, uploads and every other write stay with the mapped
-Mentor (and Blended Learning Admins as before). Both people must be live `blended_mentor`
-`user_permission` rows. There is no in-app editing; the program lead asks, an operator loads it.
+(`mentor_user_id`) Students for one academic year: the team lead lands on Team cards for
+themselves and that Mentor, whose card opens their Mentee list (`/blended-learning/mentors/<id>`),
+their Mentees' pages and notes, and their flags in the Flags tab. View only: logging, drafts,
+uploads and every other write stay with the mapped Mentor (and Blended Learning Admins as before).
+Both people must be live `blended_mentor` `user_permission` rows.
+
+**Prefer the app:** since 2026-11-18 a Blended Learning Admin who may manage adds and ends team
+leads in the Manage page's **Team leads** section (rows carry `assignment_source`/`end_source`
+`af_lms_manage_ui` and the admin's email). Use this script for bulk loads, or when nobody with the
+Manage tab is available; it writes through the same `insertSupervision`/`endSupervision`.
 
 `scripts/load-blended-learning-supervisions.ts` (`npm run blended:load-supervisions`), logic and
 tests in `src/lib/blended-learning-supervisions-load.ts`. Pairs are given as emails on the command

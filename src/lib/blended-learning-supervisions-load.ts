@@ -132,7 +132,15 @@ async function planPair(pair: SupervisionPair, action: SupervisionLoadAction): P
   return { ...base, outcome, menteeCount: count };
 }
 
-async function insertSupervision(client: PoolClient, pair: PairReport, by: string, reason: string | null) {
+// A running Supervision's pair, and who starts or ends one: the actor's
+// email, where the change came from and an optional free-text reason.
+export type SupervisionIds = { supervisorUserId: number | null; mentorUserId: number | null };
+export type SupervisionAudit = { by: string; source: string; reason: string | null };
+
+// Starts a Supervision for the current academic year; 0 when the pair already
+// runs one (the active-pair unique index), else 1. Shared with the Manage
+// page's Team leads (blended-learning-team-leads).
+export async function insertSupervision(client: PoolClient, pair: SupervisionIds, audit: SupervisionAudit) {
   const result = await client.query(
     `INSERT INTO blended_learning_mentor_supervisions
        (supervisor_user_id, mentor_user_id, academic_year, started_at,
@@ -140,29 +148,31 @@ async function insertSupervision(client: PoolClient, pair: PairReport, by: strin
      VALUES ($1, $2, $3, date_trunc('second', now() AT TIME ZONE 'UTC'), $4, $5, $6)
      ON CONFLICT (supervisor_user_id, mentor_user_id, academic_year) WHERE ended_at IS NULL DO NOTHING
      RETURNING id`,
-    [pair.supervisorUserId, pair.mentorUserId, CURRENT_ACADEMIC_YEAR, by, SOURCE, reason]
+    [pair.supervisorUserId, pair.mentorUserId, CURRENT_ACADEMIC_YEAR, audit.by, audit.source, audit.reason]
   );
   return result.rows.length;
 }
 
-async function endSupervision(client: PoolClient, pair: PairReport, by: string, reason: string | null) {
+// Ends the pair's running current-year Supervision; 0 when none runs, else 1.
+export async function endSupervision(client: PoolClient, pair: SupervisionIds, audit: SupervisionAudit) {
   const result = await client.query(
     `UPDATE blended_learning_mentor_supervisions
      SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
          ended_by_email = $4, end_source = $5, end_reason = $6, end_audit_reason = $7, updated_at = now()
      WHERE supervisor_user_id = $1 AND mentor_user_id = $2 AND academic_year = $3 AND ended_at IS NULL
      RETURNING id`,
-    [pair.supervisorUserId, pair.mentorUserId, CURRENT_ACADEMIC_YEAR, by, SOURCE, END_REASON, reason]
+    [pair.supervisorUserId, pair.mentorUserId, CURRENT_ACADEMIC_YEAR, audit.by, audit.source, END_REASON, audit.reason]
   );
   return result.rows.length;
 }
 
 async function writePairs(pairs: PairReport[], by: string, reason: string | null): Promise<number> {
+  const audit: SupervisionAudit = { by, source: SOURCE, reason };
   return withTransaction(async (client) => {
     let written = 0;
     for (const pair of pairs) {
-      if (pair.outcome === "insert") written += await insertSupervision(client, pair, by, reason);
-      if (pair.outcome === "end") written += await endSupervision(client, pair, by, reason);
+      if (pair.outcome === "insert") written += await insertSupervision(client, pair, audit);
+      if (pair.outcome === "end") written += await endSupervision(client, pair, audit);
     }
     return written;
   });

@@ -8,9 +8,13 @@ const {
   mockListResources,
   mockListCommonActionItems,
   mockListTargetMentors,
+  mockListTeamLeadLinks,
+  mockListBlendedMentorOptions,
   mockLoadDashboardChrome,
   mockRedirect,
 } = vi.hoisted(() => ({
+  mockListTeamLeadLinks: vi.fn(),
+  mockListBlendedMentorOptions: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
   mockCountNewFlags: vi.fn(),
@@ -40,6 +44,10 @@ vi.mock("@/lib/blended-learning-common-action-items", () => ({
   listCommonActionItems: mockListCommonActionItems,
   listTargetMentors: mockListTargetMentors,
 }));
+vi.mock("@/lib/blended-learning-team-leads", () => ({
+  listTeamLeadLinks: mockListTeamLeadLinks,
+  listBlendedMentorOptions: mockListBlendedMentorOptions,
+}));
 vi.mock("@/lib/dashboard-chrome", () => ({ loadDashboardChrome: mockLoadDashboardChrome }));
 
 import ManagePage from "./page";
@@ -67,6 +75,18 @@ beforeEach(() => {
   mockListResources.mockResolvedValue([{ id: 1, title: "Mentor Toolkit", url: "https://example.org/toolkit" }]);
   mockListCommonActionItems.mockResolvedValue([]);
   mockListTargetMentors.mockResolvedValue([{ userId: 77, name: "Faizan Khan", students: 3 }]);
+  mockListTeamLeadLinks.mockResolvedValue([
+    {
+      id: 4,
+      teamLead: { userId: 78, name: "Synthetic Lead" },
+      reportee: { userId: 77, name: "Synthetic Reportee" },
+      startedOn: "2026-11-12",
+    },
+  ]);
+  mockListBlendedMentorOptions.mockResolvedValue([
+    { userId: 78, name: "Synthetic Lead" },
+    { userId: 77, name: "Synthetic Reportee" },
+  ]);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ count: 3 }))));
 });
 
@@ -88,6 +108,14 @@ describe("ManagePage", () => {
     expect(screen.getByRole("form", { name: "New program action item" })).toBeInTheDocument();
     expect(mockListCommonActionItems).toHaveBeenCalledWith(access);
     expect(mockListTargetMentors).toHaveBeenCalledWith(access);
+    // Team leads: who leads whom, and a form to add one.
+    expect(screen.getByRole("heading", { level: 2, name: "Team leads" })).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Team leads" })).getByRole("listitem")).toHaveTextContent(
+      "Synthetic LeadleadsSynthetic Reportee"
+    );
+    expect(screen.getByRole("form", { name: "Add a team lead" })).toBeInTheDocument();
+    expect(mockListTeamLeadLinks).toHaveBeenCalledWith(access);
+    expect(mockListBlendedMentorOptions).toHaveBeenCalledWith(access);
   });
 
   it.each([

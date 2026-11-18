@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui";
 import {
   canBlendedLearning,
-  supervisedMentor,
+  isTeamLead,
   viewableMentorUserIds,
   type BlendedLearningAccess,
 } from "@/lib/blended-learning-access";
@@ -32,8 +32,7 @@ import { FilteredMenteeList } from "./FilteredMenteeList";
 import { FlagsFeed, type FlagsView } from "./FlagsFeed";
 import { MarkFlagsSeen } from "./MarkFlagsSeen";
 import { MentorCards } from "./MentorCards";
-import { SECTION_TAB_TITLE, SectionTabs, type SectionTab } from "./SectionTabs";
-import { SupervisedMentorSwitch } from "./SupervisedMentorSwitch";
+import { myStudentsHref, sectionTabTitle, SectionTabs, type SectionTab } from "./SectionTabs";
 
 type SearchParam = string | string[] | undefined;
 type LandingTab = Exclude<SectionTab, "resources" | "manage">;
@@ -45,21 +44,7 @@ type SearchParams = {
   since?: SearchParam;
 };
 
-// The Mentee list a Mentor sees: their own, or (for a supervisor) a Mentor's
-// they supervise, view only.
-type MenteesRead = { list: MenteeList; supervised: SupervisedMentor[]; viewing: SupervisedMentor | null };
-
-function MentorMenteeList({
-  list,
-  canLog,
-  today,
-  whose,
-}: {
-  list: MenteeList;
-  canLog: boolean;
-  today: string;
-  whose: string;
-}) {
+function MentorMenteeList({ list, canLog, today }: { list: MenteeList; canLog: boolean; today: string }) {
   const total = list.talkToFirst.length + list.everyoneElse.length;
   return (
     <>
@@ -70,7 +55,7 @@ function MentorMenteeList({
       {total === 0 ? (
         <Card elevation="sm" className="p-4 sm:p-6">
           <p className="text-sm text-text-secondary">
-            No students are mapped to {whose} for {CURRENT_ACADEMIC_YEAR}.
+            No students are mapped to you for {CURRENT_ACADEMIC_YEAR}.
           </p>
         </Card>
       ) : (
@@ -85,26 +70,16 @@ type FlagsRead = { view: FlagsView; newVisit: boolean };
 // The landing's data for the open tab; only its reads run.
 type Landing = {
   tab: LandingTab;
-  mentees: MenteesRead | null;
+  mentees: MenteeList | null;
   cards: MentorCard[];
   flags: FlagsRead | null;
   newFlags: number;
 };
 
-function MenteesView({ access, mentees, today }: { access: BlendedLearningAccess; mentees: MenteesRead; today: string }) {
-  const { list, supervised, viewing } = mentees;
-  return (
-    <>
-      {supervised.length > 0 && <SupervisedMentorSwitch mentors={supervised} viewing={viewing} />}
-      <MentorMenteeList
-        list={list}
-        // A supervised Mentor's Mentees are view only.
-        canLog={viewing === null && canBlendedLearning(access, "log")}
-        today={today}
-        whose={viewing ? viewing.name : "you"}
-      />
-    </>
-  );
+// A team lead's own card, which opens their own list under My Students.
+function ownCard(access: BlendedLearningAccess) {
+  if (!isTeamLead(access) || access.mentorUserId == null) return null;
+  return { mentorUserId: access.mentorUserId, href: myStudentsHref(true) };
 }
 
 function LandingView({
@@ -117,18 +92,20 @@ function LandingView({
   today: string;
 }) {
   const { tab, mentees, cards, flags, newFlags } = landing;
+  const teamLead = isTeamLead(access);
   return (
     <div className="space-y-5">
       {/* The header's name isn't a heading, so the open tab names the page. */}
-      <h1 className="sr-only">{SECTION_TAB_TITLE[tab]}</h1>
+      <h1 className="sr-only">{sectionTabTitle(tab, teamLead)}</h1>
       <SectionTabs
         kind={access.kind}
         current={tab}
         newFlags={newFlags}
         canManage={canBlendedLearning(access, "manage")}
+        teamLead={teamLead}
       />
-      {mentees && <MenteesView access={access} mentees={mentees} today={today} />}
-      {tab === "mentors" && <MentorCards cards={cards} />}
+      {mentees && <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />}
+      {tab === "mentors" && <MentorCards cards={cards} own={ownCard(access)} />}
       {flags && (
         <>
           <FlagsFeed view={flags.view} />
@@ -197,32 +174,22 @@ async function flagsMentorOptions(access: BlendedLearningAccess): Promise<Superv
   return [{ mentorUserId: access.mentorUserId, name: "My students" }, ...supervised];
 }
 
-// A Mentor's own Mentee list, or the supervised Mentor's in `mentor`.
-async function readMentees(
-  access: BlendedLearningAccess,
-  params: SearchParams,
-  today: string
-): Promise<MenteesRead> {
-  const mentorUserId = supervisedMentor(access, positiveId(single(params.mentor)));
-  const [list, supervised] = await Promise.all([
-    listMentees({ access, mentorUserId, today }),
-    listSupervisedMentors(access),
-  ]);
-  const viewing = supervised.find((mentor) => mentor.mentorUserId === mentorUserId) ?? null;
-  return { list, supervised, viewing };
-}
-
-// Flags when asked for, else the viewer's first tab.
+// Flags when asked for, else the viewer's first tab: an admin's Mentors, a
+// team lead's Team (Mentor cards) unless they asked for My Students, and a
+// Mentor's My Students.
 function landingTab(access: BlendedLearningAccess, params: SearchParams): LandingTab {
-  if (single(params.tab) === "flags") return "flags";
-  return access.kind === "admin" ? "mentors" : "students";
+  const asked = single(params.tab);
+  if (asked === "flags") return "flags";
+  if (access.kind === "admin") return "mentors";
+  return isTeamLead(access) && asked !== "students" ? "mentors" : "students";
 }
 
 async function readLanding(access: BlendedLearningAccess, params: SearchParams, today: string): Promise<Landing> {
   const tab = landingTab(access, params);
   const [mentees, cards, flags] = await Promise.all([
-    tab === "students" ? readMentees(access, params, today) : null,
-    tab === "mentors" && canBlendedLearning(access, "view_mentors") ? listMentorCards(access, today) : [],
+    tab === "students" ? listMentees({ access, today }) : null,
+    // An admin's every Mentor, or a team lead's own and reportees' cards.
+    tab === "mentors" ? listMentorCards(access, today) : [],
     tab === "flags" ? readFlags(access, params) : null,
   ]);
   const newFlags = flags ? flags.view.page.newCount : await countNewFlags(access);
@@ -230,10 +197,11 @@ async function readLanding(access: BlendedLearningAccess, params: SearchParams, 
 }
 
 // Landing page for the Blended Learning section, under the section's tabs: a
-// Mentor's own Student list (My Students; a supervisor can switch to a
-// supervised Mentor's, view only) or, for a Blended Learning Admin, the Mentor
-// cards; then Flags (a Mentor's own and supervised Mentors' Students' only).
-// Resources is its own page.
+// Mentor's own Student list (My Students); for a team lead, cards for
+// themselves and the Mentors they supervise (Team; their own list moves to My
+// Students, a reportee's opens view only); for a Blended Learning Admin, every
+// Mentor's card; then Flags (a Mentor's own and supervised Mentors' Students'
+// only). Resources is its own page.
 export default async function BlendedLearningPage({
   searchParams,
 }: {

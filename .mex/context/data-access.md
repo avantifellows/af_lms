@@ -602,12 +602,21 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
   `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings.
 - Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
-  `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the list switch and the
-  Flags tab's Mentor filter. Written only by the operator script
+  `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
+  filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an
+  array of Mentor ids). Written by the operator script
   (`src/lib/blended-learning-supervisions-load.ts`: dry run on a read-only connection; apply = one
-  transaction, `ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; `--end` sets the end columns).
+  transaction, `ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; `--end` sets the end columns) and,
+  since 2026-11-18, by the Manage page's **Team leads** section (`src/lib/blended-learning-team-leads.ts`,
+  `POST /api/blended-learning/team-leads` and `POST /api/blended-learning/team-leads/[id]/end`, both
+  `manage`): it reuses the loader's exported `insertSupervision`/`endSupervision` with
+  `assignment_source`/`end_source` `af_lms_manage_ui` and the admin's email in
+  `assigned_by_email`/`ended_by_email` (`end_reason` `supervision_ended`). Both people must be
+  Blended Learning Mentors (an active current-year Mapping, or a live `blended_mentor` permission
+  resolved to its `user` id); self-supervision is a 422, a running pair a 409.
 - e2e: `BLENDED_SUPERVISOR` (one own Mentee, `SUPERVISOR_MENTEE`) supervises Mentor B and has an
   ended Supervision of Mentor A; `e2e/tests/blended-learning-supervisor.spec.ts` asserts on them.
+  The Manage spec makes Mentor D lead Mentor C inside one test and ends it before finishing.
 
 ## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
 

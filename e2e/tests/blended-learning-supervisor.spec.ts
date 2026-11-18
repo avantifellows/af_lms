@@ -4,6 +4,7 @@ import { getTestPool } from "../helpers/db";
 import {
   BLENDED_MENTOR_A,
   BLENDED_MENTOR_B,
+  BLENDED_MENTOR_C,
   BLENDED_SUPERVISOR,
   FEED_FLAGS,
   MENTEES,
@@ -13,14 +14,14 @@ import {
 } from "../helpers/blended-learning-fixtures";
 
 // A team-lead Mentor (BLENDED_SUPERVISOR) against the real fixture DDL: they
-// log for their own Mentee (Lata), view Mentor B's Mentees (Sana, Tara) and
-// flags read-only through a running Supervision (never a dropout of theirs),
-// and see nothing of Mentor A's, whose Supervision has ended. Writes are
-// refused server-side.
+// land on Team cards for themselves and Mentor B, log for their own Mentee
+// (Lata) under My Students, view Mentor B's Mentees (Sana, Tara) and flags
+// read-only through a running Supervision (never a dropout of theirs), and
+// see nothing of Mentor A's, whose Supervision has ended. Writes are refused
+// server-side.
 
 const { mentorB: tara, reassignedToB: sana } = OTHER_STUDENTS;
 const { attemptLatest: ira } = MENTEES;
-const B_LIST = `${BLENDED_MENTOR_B.name}'s students`;
 
 async function withPool<T>(fn: (pool: ReturnType<typeof getTestPool>) => Promise<T>): Promise<T> {
   const pool = getTestPool();
@@ -72,8 +73,8 @@ async function firstConversation(id: number): Promise<number> {
   });
 }
 
-function whose(page: Page) {
-  return page.getByRole("navigation", { name: "Whose students" });
+function teamCards(page: Page) {
+  return page.getByRole("list", { name: "Mentors" }).getByRole("link");
 }
 
 test.describe("Blended Learning supervisor view", () => {
@@ -81,30 +82,49 @@ test.describe("Blended Learning supervisor view", () => {
     await signInAs(page, BLENDED_SUPERVISOR);
   });
 
-  test("a supervisor's own list is theirs to log for, with a switch to the supervised Mentor's", async ({ page }) => {
+  test("a team lead lands on Team: their own card first, then their reportee's, with the admin cards' stats", async ({ page }) => {
     await page.goto("/blended-learning");
 
+    await expect(page.getByRole("heading", { level: 1, name: "Team" })).toBeAttached();
+    // The Flags badge counts the supervised Mentor's Students' new flags too (Tara's two).
+    const tabs = page.getByRole("navigation", { name: "Mentor views" });
+    await expect(tabs.getByRole("link")).toHaveText(["Team", "My Students", "Flags2 new", "Resources"]);
+    await expect(tabs.getByRole("link", { name: "Team" })).toHaveAttribute("aria-current", "page");
+    // Mentor A's Supervision has ended: no card for them.
+    await expect(teamCards(page)).toHaveCount(2);
+    await expect(teamCards(page).nth(0)).toContainText(`${BLENDED_SUPERVISOR.name}You`);
+    await expect(teamCards(page).nth(0)).toContainText("Assigned1");
+    await expect(teamCards(page).nth(1)).toContainText(BLENDED_MENTOR_B.name);
+    await expect(teamCards(page).nth(1)).toContainText("Assigned2");
+    await expect(page.getByRole("navigation", { name: "Whose students" })).toHaveCount(0);
+  });
+
+  test("their own card opens their own list under My Students, theirs to log for", async ({ page }) => {
+    await page.goto("/blended-learning");
+    await teamCards(page).nth(0).click();
+
+    await expect(page).toHaveURL(/\/blended-learning\?tab=students$/);
     await expect(page.getByRole("heading", { level: 1, name: "My Students" })).toBeAttached();
-    await expect(whose(page).getByRole("link", { name: "My students" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("navigation", { name: "Mentor views" }).getByRole("link", { name: "My Students" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
     await expect(page.getByText(/^1 student · \d{4}-\d{4}$/)).toBeVisible();
     await expect(page.getByRole("link", { name: `New log for ${fullName(SUPERVISOR_MENTEE)}` }).first()).toBeVisible();
     await expect(page.getByRole("note")).toHaveCount(0);
     await expect(page.getByText(fullName(tara))).toHaveCount(0);
-    // A Mentor's tabs: no Mentors (admin stats) and no Manage. The Flags badge
-    // counts the supervised Mentor's Students' new flags too (Tara's two).
-    await expect(page.getByRole("navigation", { name: "Mentor views" }).getByRole("link")).toHaveText([
-      "My Students",
-      "Flags2 new",
-      "Resources",
-    ]);
+
+    // Their own Mentor page is the same list.
+    await page.goto(`/blended-learning/mentors/${await mentorId(BLENDED_SUPERVISOR.email)}`);
+    await expect(page).toHaveURL(/\/blended-learning\?tab=students$/);
   });
 
-  test("the supervised Mentor's list is view only", async ({ page }) => {
+  test("a reportee's card opens that Mentor's list, view only", async ({ page }) => {
     await page.goto("/blended-learning");
-    await whose(page).getByRole("link", { name: B_LIST }).click();
+    await teamCards(page).filter({ hasText: BLENDED_MENTOR_B.name }).click();
 
-    await expect(page).toHaveURL(new RegExp(`/blended-learning\\?mentor=${await mentorId(BLENDED_MENTOR_B.email)}$`));
-    await expect(whose(page).getByRole("link", { name: B_LIST })).toHaveAttribute("aria-current", "page");
+    await expect(page).toHaveURL(new RegExp(`/blended-learning/mentors/${await mentorId(BLENDED_MENTOR_B.email)}$`));
+    await expect(page.getByRole("heading", { level: 1, name: BLENDED_MENTOR_B.name })).toBeVisible();
     await expect(page.getByRole("note")).toContainText(`View only. ${BLENDED_MENTOR_B.name} mentors these students`);
     await expect(page.getByText(/^2 students · \d{4}-\d{4}$/)).toBeVisible();
     for (const mentee of [tara, sana]) {
@@ -112,6 +132,7 @@ test.describe("Blended Learning supervisor view", () => {
     }
     await expect(page.getByRole("link", { name: /^New log for / })).toHaveCount(0);
     await expect(page.getByText(fullName(SUPERVISOR_MENTEE))).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Team" })).toHaveAttribute("href", "/blended-learning");
   });
 
   test("a supervised Mentor's dropout is hidden from the supervisor too", async ({ page }) => {
@@ -122,7 +143,10 @@ test.describe("Blended Learning supervisor view", () => {
       return result.rows[0].status;
     });
     try {
-      await page.goto(`/blended-learning?mentor=${await mentorId(BLENDED_MENTOR_B.email)}`);
+      await page.goto("/blended-learning");
+      await expect(teamCards(page).nth(1)).toContainText("Assigned1");
+
+      await page.goto(`/blended-learning/mentors/${await mentorId(BLENDED_MENTOR_B.email)}`);
       await expect(page.getByText(/^1 student · \d{4}-\d{4}$/)).toBeVisible();
       await expect(page.getByRole("link", { name: `View ${fullName(tara)}` }).first()).toBeVisible();
       await expect(page.getByText(fullName(sana))).toHaveCount(0);
@@ -135,11 +159,11 @@ test.describe("Blended Learning supervisor view", () => {
   });
 
   test("an ended Supervision or an unsupervised Mentor shows nothing of theirs", async ({ page }) => {
-    await page.goto(`/blended-learning?mentor=${await mentorId(BLENDED_MENTOR_A.email)}`);
-
-    // Falls back to the supervisor's own list.
-    await expect(whose(page).getByRole("link", { name: "My students" })).toHaveAttribute("aria-current", "page");
-    await expect(whose(page).getByRole("link")).toHaveCount(2);
+    // Mentor A's Supervision ended; Mentor C was never theirs.
+    for (const mentor of [BLENDED_MENTOR_A, BLENDED_MENTOR_C]) {
+      const response = await page.goto(`/blended-learning/mentors/${await mentorId(mentor.email)}`);
+      expect(response?.status()).toBe(404);
+    }
     await expect(page.getByText(fullName(ira))).toHaveCount(0);
 
     const response = await page.goto(`/blended-learning/students/${await studentId(ira)}`);
@@ -148,7 +172,8 @@ test.describe("Blended Learning supervisor view", () => {
 
   test("a supervised Mentor's Mentee's page is view only, and its log page sends them back", async ({ page }) => {
     const taraId = await studentId(tara);
-    await page.goto(`/blended-learning?mentor=${await mentorId(BLENDED_MENTOR_B.email)}`);
+    const mentorBId = await mentorId(BLENDED_MENTOR_B.email);
+    await page.goto(`/blended-learning/mentors/${mentorBId}`);
     await page.getByRole("link", { name: `View ${fullName(tara)}` }).first().click();
 
     await expect(page).toHaveURL(new RegExp(`/blended-learning/students/${taraId}$`));
@@ -158,11 +183,19 @@ test.describe("Blended Learning supervisor view", () => {
     await expect(page.getByRole("link", { name: "Log conversation" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^Back to .*'s students$/ })).toHaveAttribute(
       "href",
-      `/blended-learning?mentor=${await mentorId(BLENDED_MENTOR_B.email)}`
+      `/blended-learning/mentors/${mentorBId}`
     );
 
     await page.goto(`/blended-learning/students/${taraId}/log`);
     await expect(page).toHaveURL(new RegExp(`/blended-learning/students/${taraId}$`));
+  });
+
+  test("their own Mentee's page goes back to My Students", async ({ page }) => {
+    await page.goto(`/blended-learning/students/${await studentId(SUPERVISOR_MENTEE)}`);
+
+    await expect(page.getByRole("note")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Log conversation" }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning?tab=students");
   });
 
   test("the server refuses a supervisor's writes for a supervised Mentor's Mentee, and serves the reads", async ({ page }) => {
@@ -203,29 +236,31 @@ test.describe("Blended Learning supervisor view", () => {
     await expect(feed.getByText("No Mentor Flags match these filters.")).toBeVisible();
   });
 
-  test("a supervisor gets no Manage page and no Mentor pages", async ({ page }) => {
+  test("a supervisor gets no Manage page", async ({ page }) => {
     await page.goto("/blended-learning/manage");
-    await expect(page).toHaveURL(/\/blended-learning$/);
-
-    await page.goto(`/blended-learning/mentors/${await mentorId(BLENDED_MENTOR_B.email)}`);
     await expect(page).toHaveURL(/\/blended-learning$/);
   });
 
-  test("the switch fits a 360 px phone", async ({ page }) => {
+  test("the Team cards and a reportee's list fit a 360 px phone", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
-    await page.goto(`/blended-learning?mentor=${await mentorId(BLENDED_MENTOR_B.email)}`);
-
-    await expect(page.getByRole("note")).toBeVisible();
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    expect(overflow).toBeLessThanOrEqual(0);
+    for (const path of ["/blended-learning", `/blended-learning/mentors/${await mentorId(BLENDED_MENTOR_B.email)}`]) {
+      await page.goto(path);
+      await expect(page.getByRole("heading", { level: 1 })).toBeAttached();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+    }
   });
 });
 
-test("a Mentor who supervises no one gets no switch", async ({ page }) => {
+test("a Mentor who supervises no one lands on My Students, with no Team tab or Mentor pages", async ({ page }) => {
   await signInAs(page, BLENDED_MENTOR_B);
   await page.goto("/blended-learning");
 
   await expect(page.getByRole("heading", { level: 1, name: "My Students" })).toBeAttached();
-  await expect(page.getByRole("navigation", { name: "Whose students" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Mentor views" }).getByRole("link", { name: "Team" })).toHaveCount(0);
+  await expect(page.getByRole("list", { name: "Mentors" })).toHaveCount(0);
   await expect(page.getByText(fullName(SUPERVISOR_MENTEE))).toHaveCount(0);
+
+  await page.goto(`/blended-learning/mentors/${await mentorId(BLENDED_SUPERVISOR.email)}`);
+  await expect(page).toHaveURL(/\/blended-learning$/);
 });
