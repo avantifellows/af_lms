@@ -24,11 +24,10 @@ import {
 } from "@/types/test-attendance";
 import {
   ALL_STUDENTS,
-  closingTimeText,
   defaultPeriod,
   examPreparingForOptions,
   filterStudents,
-  lastRefreshedText,
+  istDayAndTime,
   type TestAttendanceFilters,
 } from "@/lib/test-attendance-rules";
 
@@ -153,14 +152,15 @@ function MonthBanner({
       </Card>
     );
   }
-  const refreshed = lastRefreshedText(data.lastRefreshed, data.serverTime);
   return (
     <Card elevation="sm" className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
       <p className="text-sm font-medium text-text-primary">
-        {test.name} tests are running. They close {closingTimeText(test.closesAt, data.serverTime)}
+        {test.name} tests are running. They close {istDayAndTime(test.closesAt, data.serverTime)}
       </p>
       <p className="text-xs text-text-muted">
-        {refreshed === "unknown" ? "Last refreshed: unknown" : `Last refreshed ${refreshed}`}
+        {data.lastRefreshed
+          ? `Last refreshed ${istDayAndTime(data.lastRefreshed, data.serverTime)}`
+          : "Last refreshed: unknown"}
       </p>
       <Button variant="secondary" onClick={onRefresh} disabled={refreshing}>
         {refreshing ? "Refreshing…" : "Refresh"}

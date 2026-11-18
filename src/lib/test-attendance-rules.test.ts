@@ -5,6 +5,7 @@ import type {
   PaperAttendance,
   PaperWindow,
   TestAttendanceStudent,
+  TestSet,
 } from "@/types/test-attendance";
 import {
   allYearColumns,
@@ -23,12 +24,15 @@ import {
   monthGroupRows,
   monthStudents,
   monthTiles,
-  monthlyTestsFrom,
   percentText,
   schoolWindow,
   testAttendanceFrom,
   windowMark,
 } from "./test-attendance-rules";
+
+/** The Monthly Tests as the response carries them. */
+const monthlyTestsFrom = (testSets: TestSet[], papers: PaperWindow[], now: Date) =>
+  testAttendanceFrom({ testSets, papers, students: [], attendance: [], now }).monthlyTests;
 
 describe("examPreparingFor", () => {
   it.each([
@@ -1228,10 +1232,10 @@ describe("attendanceChart", () => {
     // September: all five; Bala, Chetan submitted, Asha, Esha opened. 4 of 5.
     // November (so far): all five; Asha, Dia submitted, Chetan opened. 3 of 5.
     expect(attendanceChart(chartTests, chartFixture)).toEqual([
-      { key: "july", shortName: "Jul", running: false, counted: 2, attended: 1, submitted: 1, openedNotSubmitted: 0, percent: "50%", submittedShare: 50, openedShare: 0 },
-      { key: "august", shortName: "Aug", running: false, counted: 5, attended: 4, submitted: 3, openedNotSubmitted: 1, percent: "80%", submittedShare: 60, openedShare: 20 },
-      { key: "september", shortName: "Sep", running: false, counted: 5, attended: 4, submitted: 2, openedNotSubmitted: 2, percent: "80%", submittedShare: 40, openedShare: 40 },
-      { key: "november", shortName: "Nov", running: true, counted: 5, attended: 3, submitted: 2, openedNotSubmitted: 1, percent: "60%", submittedShare: 40, openedShare: 20 },
+      { key: "july", shortName: "Jul", running: false, counted: 2, attended: 1, openedNotSubmitted: 0, percent: "50%", submittedShare: 50, openedShare: 0 },
+      { key: "august", shortName: "Aug", running: false, counted: 5, attended: 4, openedNotSubmitted: 1, percent: "80%", submittedShare: 60, openedShare: 20 },
+      { key: "september", shortName: "Sep", running: false, counted: 5, attended: 4, openedNotSubmitted: 2, percent: "80%", submittedShare: 40, openedShare: 40 },
+      { key: "november", shortName: "Nov", running: true, counted: 5, attended: 3, openedNotSubmitted: 1, percent: "60%", submittedShare: 40, openedShare: 20 },
     ]);
   });
 
@@ -1251,7 +1255,7 @@ describe("attendanceChart", () => {
   it("shows a dash and an empty bar for a Monthly Test nobody kept is counted for", () => {
     const grade11 = filterStudents(chartFixture, { grade: 11, examPreparingFor: "all" });
     expect(attendanceChart(chartTests, grade11)[0]).toEqual({
-      key: "july", shortName: "Jul", running: false, counted: 0, attended: 0, submitted: 0, openedNotSubmitted: 0, percent: "—", submittedShare: 0, openedShare: 0,
+      key: "july", shortName: "Jul", running: false, counted: 0, attended: 0, openedNotSubmitted: 0, percent: "—", submittedShare: 0, openedShare: 0,
     });
   });
 

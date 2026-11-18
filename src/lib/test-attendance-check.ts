@@ -10,7 +10,7 @@
 // `scripts/check-test-attendance.ts` wires the real, read-only sources.
 
 import type { PaperWindow, TestAttendanceResponse, TestSet } from "@/types/test-attendance";
-import { examPreparingFor, monthlyTestsWithPapers } from "./test-attendance-rules";
+import { examPreparingFor, istClock, openedMonthlyTests } from "./test-attendance-rules";
 
 /** One submitted result in the warehouse: the Student submitted the quiz. */
 export interface SubmittedResult {
@@ -108,7 +108,7 @@ export async function runTestAttendanceCheck(sources: CheckSources, now: Date): 
   const testSets = await sources.testSets();
   if (testSets === "unavailable") throw new Error("PMU test set list unavailable");
   const papers = await sources.paperWindows([...new Set(testSets.flatMap((set) => set.quizIds))]);
-  const closed = monthlyTestsWithPapers(testSets, papers, now).filter((test) => test.state === "closed");
+  const closed = openedMonthlyTests(testSets, papers, now).filter((test) => test.state === "closed");
 
   const schools = await sources.nvsSchools();
   if (schools.length === 0) throw new Error("No NVS (JNV) Schools found; is this the right database?");
@@ -218,10 +218,7 @@ function unrecognisedExamPreparingFor(listing: ListingRow[]): CheckReport["examP
   return { unrecognised: values.reduce((sum, v) => sum + v.count, 0), values };
 }
 
-const IST_OFFSET_MS = 330 * 60 * 1000;
-
-const istMinute = (iso: string) =>
-  `${new Date(Date.parse(iso) + IST_OFFSET_MS).toISOString().slice(0, 16).replace("T", " ")} IST`;
+const istMinute = (iso: string) => `${istClock(iso).toISOString().slice(0, 16).replace("T", " ")} IST`;
 
 const idList = (ids: string[]) => (ids.length > 0 ? ids.join(", ") : "none");
 

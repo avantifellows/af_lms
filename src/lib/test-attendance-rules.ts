@@ -84,21 +84,30 @@ function usablePapers(set: TestSet, papers: Map<string, PaperWindow>) {
     );
 }
 
+/** The earliest of these UTC ISO times, skipping nulls; null when there is none. */
+export const earliestTime = (times: (string | null)[]) =>
+  times.reduce<string | null>((min, t) => (t != null && (min == null || Date.parse(t) < Date.parse(min)) ? t : min), null);
+
+/** The latest of these UTC ISO times, skipping nulls; null when there is none. */
+export const latestTime = (times: (string | null)[]) =>
+  times.reduce<string | null>((max, t) => (t != null && (max == null || Date.parse(t) > Date.parse(max)) ? t : max), null);
+
 /** An opened Monthly Test with the quiz ids of its usable Papers. */
 type OpenedMonthlyTest = TestAttendanceMonthlyTest & { quizIds: string[] };
 
 /** The Monthly Test as the response carries it: no quiz ids. */
-const withoutQuizIds = (test: OpenedMonthlyTest): TestAttendanceMonthlyTest => ({
-  key: test.key,
-  name: test.name,
-  shortName: test.shortName,
-  opensAt: test.opensAt,
-  closesAt: test.closesAt,
-  state: test.state,
-  grades: test.grades,
-});
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose
+const withoutQuizIds = ({ quizIds, ...test }: OpenedMonthlyTest): TestAttendanceMonthlyTest => test;
 
-function openedMonthlyTests(testSets: TestSet[], papers: PaperWindow[], now: Date): OpenedMonthlyTest[] {
+/**
+ * The Monthly Tests that have opened by `now`, ordered by closing time, with
+ * the quiz ids of their usable Papers (the Papers the tab reads attendance
+ * for; the response never carries them). A Monthly Test is one test set list
+ * entry with at least one usable Paper (switched on, both times known); it
+ * runs from its earliest Paper opening until its latest Paper closing and is
+ * closed from then on.
+ */
+export function openedMonthlyTests(testSets: TestSet[], papers: PaperWindow[], now: Date): OpenedMonthlyTest[] {
   const byQuizId = new Map(papers.map((p) => [p.quizId, p]));
   const nowMs = now.getTime();
   const keys = new Set<string>([ALL_YEAR_KEY]);
@@ -107,8 +116,8 @@ function openedMonthlyTests(testSets: TestSet[], papers: PaperWindow[], now: Dat
     const key = keyFor(set.label, keys);
     const usable = usablePapers(set, byQuizId);
     if (usable.length === 0) continue;
-    const opensAt = usable.reduce((min, p) => (Date.parse(p.opensAt) < Date.parse(min) ? p.opensAt : min), usable[0].opensAt);
-    const closesAt = usable.reduce((max, p) => (Date.parse(p.closesAt) > Date.parse(max) ? p.closesAt : max), usable[0].closesAt);
+    const opensAt = earliestTime(usable.map((p) => p.opensAt))!;
+    const closesAt = latestTime(usable.map((p) => p.closesAt))!;
     if (nowMs < Date.parse(opensAt)) continue;
     const grades = [...new Set(usable.flatMap((p) => (p.grade == null ? [] : [p.grade])))].sort((a, b) => a - b);
     tests.push({
@@ -125,33 +134,6 @@ function openedMonthlyTests(testSets: TestSet[], papers: PaperWindow[], now: Dat
   return tests.sort((a, b) => Date.parse(a.closesAt) - Date.parse(b.closesAt));
 }
 
-/**
- * The Monthly Tests that have opened by `now`, ordered by closing time. A
- * Monthly Test is one test set list entry with at least one usable Paper
- * (switched on, both times known); it runs from its earliest Paper opening
- * until its latest Paper closing and is closed from then on.
- */
-export function monthlyTestsFrom(
-  testSets: TestSet[],
-  papers: PaperWindow[],
-  now: Date,
-): TestAttendanceMonthlyTest[] {
-  return openedMonthlyTests(testSets, papers, now).map(withoutQuizIds);
-}
-
-/**
- * The opened Monthly Tests with the quiz ids of their usable Papers: the same
- * Papers the tab reads attendance for. Server-side only (the pre-launch data
- * check); the response never carries quiz ids.
- */
-export function monthlyTestsWithPapers(
-  testSets: TestSet[],
-  papers: PaperWindow[],
-  now: Date,
-): Array<TestAttendanceMonthlyTest & { quizIds: string[] }> {
-  return openedMonthlyTests(testSets, papers, now);
-}
-
 /** The quiz ids whose attendance the tab needs: the usable Papers of the opened Monthly Tests. */
 export function attendanceQuizIds(testSets: TestSet[], papers: PaperWindow[], now: Date): string[] {
   return [...new Set(openedMonthlyTests(testSets, papers, now).flatMap((test) => test.quizIds))];
@@ -159,8 +141,11 @@ export function attendanceQuizIds(testSets: TestSet[], papers: PaperWindow[], no
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 
+/** IST wall clock of a UTC instant, read through the UTC getters (or `toISOString`). */
+export const istClock = (iso: string) => new Date(Date.parse(iso) + IST_OFFSET_MS);
+
 /** The IST calendar day of a UTC instant, as `YYYY-MM-DD`. */
-const istDate = (iso: string) => new Date(Date.parse(iso) + IST_OFFSET_MS).toISOString().slice(0, 10);
+const istDate = (iso: string) => istClock(iso).toISOString().slice(0, 10);
 
 /**
  * The tab's data: the opened Monthly Tests, and each listed Student's mark for
@@ -290,12 +275,14 @@ export function monthStudents(
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** IST wall clock of a UTC instant, read through the UTC getters. */
-const istClock = (iso: string) => new Date(Date.parse(iso) + IST_OFFSET_MS);
 const istDayNumber = (iso: string) => Math.floor((Date.parse(iso) + IST_OFFSET_MS) / 86_400_000);
 
-/** An instant in IST, relative to `now`: "today at 2:15 pm", "tomorrow at …", "yesterday at …" or "on 21 Nov at …". */
-function istDayAndTime(iso: string, now: string): string {
+/**
+ * An instant in IST, relative to `now`: "today at 2:15 pm", "tomorrow at …",
+ * "yesterday at …" or "on 21 Nov at …". The tab says when a running Monthly
+ * Test closes and when the attendance data was last refreshed with it.
+ */
+export function istDayAndTime(iso: string, now: string): string {
   const clock = istClock(iso);
   const hours = clock.getUTCHours();
   const time = `${hours % 12 || 12}:${String(clock.getUTCMinutes()).padStart(2, "0")} ${hours < 12 ? "am" : "pm"}`;
@@ -309,23 +296,6 @@ function istDayAndTime(iso: string, now: string): string {
           ? "yesterday"
           : `on ${clock.getUTCDate()} ${MONTH_SHORT[clock.getUTCMonth()]}`;
   return `${day} at ${time}`;
-}
-
-/**
- * When a running Monthly Test closes, in IST, relative to `now`: "today at
- * 11:55 pm", "tomorrow at 11:55 pm" or "on 21 Nov at 11:55 pm".
- */
-export function closingTimeText(closesAt: string, now: string): string {
-  return istDayAndTime(closesAt, now);
-}
-
-/**
- * When the attendance data was last refreshed, in IST, relative to `now`:
- * "today at 2:15 pm", "yesterday at 11:05 pm", "on 15 Nov at 9:00 am", or
- * "unknown" when the lookup failed.
- */
-export function lastRefreshedText(lastRefreshed: string | null | undefined, now: string): string {
-  return lastRefreshed ? istDayAndTime(lastRefreshed, now) : "unknown";
 }
 
 /**
@@ -632,7 +602,6 @@ export interface AttendanceChartBar {
   running: boolean;
   counted: number;
   attended: number;
-  submitted: number;
   openedNotSubmitted: number;
   /** The attended share as text; "—" for a zero base. */
   percent: string;
@@ -663,7 +632,6 @@ export function attendanceChart(
       running: test.state === "running",
       counted,
       attended,
-      submitted,
       openedNotSubmitted: opened,
       percent: percentText(attended, counted),
       submittedShare: share(submitted),

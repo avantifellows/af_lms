@@ -9,6 +9,7 @@
 
 import { query } from "@/lib/db";
 import { dbIstTimestampToUtcIso } from "@/lib/quiz-session-time";
+import { earliestTime, latestTime } from "@/lib/test-attendance-rules";
 import type { PaperWindow } from "@/types/test-attendance";
 
 interface SessionRow {
@@ -33,11 +34,6 @@ function toGrade(value: string | null): number | null {
   const grade = Number(value);
   return value != null && value.trim() !== "" && Number.isInteger(grade) ? grade : null;
 }
-
-const earliest = (values: (string | null)[]) =>
-  values.reduce<string | null>((min, v) => (v != null && (min == null || Date.parse(v) < Date.parse(min)) ? v : min), null);
-const latest = (values: (string | null)[]) =>
-  values.reduce<string | null>((max, v) => (v != null && (max == null || Date.parse(v) > Date.parse(max)) ? v : max), null);
 
 /**
  * One window per quiz id that has a `session` row. When several rows share a
@@ -72,8 +68,8 @@ export async function readPaperWindows(quizIds: string[]): Promise<PaperWindow[]
     const used = on.length > 0 ? on : all;
     return {
       quizId,
-      opensAt: earliest(used.map((row) => istToUtc(row.start_time))),
-      closesAt: latest(used.map((row) => istToUtc(row.end_time))),
+      opensAt: earliestTime(used.map((row) => istToUtc(row.start_time))),
+      closesAt: latestTime(used.map((row) => istToUtc(row.end_time))),
       grade: used.map((row) => toGrade(row.grade)).find((grade) => grade != null) ?? null,
       switchedOn: on.length > 0,
     };
