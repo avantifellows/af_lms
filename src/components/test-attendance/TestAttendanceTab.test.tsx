@@ -934,3 +934,76 @@ describe("TestAttendanceTab — All year", () => {
     expect(screen.queryByRole("table", { name: "All students" })).not.toBeInTheDocument();
   });
 });
+
+// All year chart (#528), counted by hand from yearData. Omar joined in November,
+// so he is counted only for November.
+function chartBars() {
+  const chart = screen.getByRole("region", { name: "Attendance by Monthly Test" });
+  return within(chart)
+    .getAllByRole("listitem")
+    .map((bar) => Array.from(bar.children).map((line) => line.textContent));
+}
+
+describe("TestAttendanceTab — All year chart", () => {
+  it("shows a bar per closed Monthly Test oldest first, then the running one so far, each with its percentage, x of y and not-submitted count", async () => {
+    await openAllYear();
+
+    // Aug: Zoya, Bala submitted; Neel opened; Kiran, Asha absent. 3 of 5.
+    // Sep: Zoya, Neel submitted; Bala opened; Kiran, Asha absent. 3 of 5.
+    // Oct: Zoya, Kiran, Bala submitted; Neel opened; Asha absent. 4 of 5.
+    // Nov (running): Zoya, Asha, Bala submitted; Kiran, Neel, Omar not yet. 3 of 6.
+    expect(chartBars()).toEqual([
+      ["Aug", "60%", "3 of 5", "1 not submitted"],
+      ["Sep", "60%", "3 of 5", "1 not submitted"],
+      ["Oct", "80%", "4 of 5", "1 not submitted"],
+      ["Nov so far", "50%", "3 of 6", "0 not submitted"],
+    ]);
+  });
+
+  it("sits after the tiles and before the student list", async () => {
+    await openAllYear();
+    const chart = screen.getByRole("region", { name: "Attendance by Monthly Test" });
+
+    expect(tile("Need follow-up").compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chart.compareDocumentPosition(allStudentsTable()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("applies the Grade filter to every bar", async () => {
+    const user = await openAllYear();
+    await user.click(filterButton("Grade", "12"));
+
+    // Kiran (and Omar, November only). Kiran: absent Aug, Sep; submitted Oct; not yet Nov.
+    expect(chartBars()).toEqual([
+      ["Aug", "0%", "0 of 1", "0 not submitted"],
+      ["Sep", "0%", "0 of 1", "0 not submitted"],
+      ["Oct", "100%", "1 of 1", "0 not submitted"],
+      ["Nov so far", "0%", "0 of 2", "0 not submitted"],
+    ]);
+  });
+
+  it("shows a dash, never 0%, on a bar with nobody counted", async () => {
+    const user = await openAllYear();
+    await user.click(filterButton("Exam Preparing For", "CLAT"));
+
+    expect(chartBars().map(([month, percent, of]) => [month, percent, of])).toEqual([
+      ["Aug", "—", "0 of 0"],
+      ["Sep", "—", "0 of 0"],
+      ["Oct", "—", "0 of 0"],
+      ["Nov so far", "—", "0 of 0"],
+    ]);
+  });
+
+  it("shows the running month so far when no Monthly Test has closed yet", async () => {
+    await openAllYear({ ...yearData, monthlyTests: [november] });
+
+    expect(chartBars()).toEqual([["Nov so far", "50%", "3 of 6", "0 not submitted"]]);
+  });
+
+  it("shows no chart when no Monthly Test has opened", async () => {
+    mockFetch.mockResolvedValue(ok({ ...yearData, monthlyTests: [] }));
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+
+    expect(await screen.findByText("No Monthly Tests yet")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Attendance by Monthly Test" })).not.toBeInTheDocument();
+  });
+});

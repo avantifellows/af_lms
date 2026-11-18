@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   allYearStudents,
+  attendanceChart,
   allYearTiles,
   attendanceStatus,
   attendedText,
@@ -1042,5 +1043,70 @@ describe("countedTestsLine", () => {
     expect(countedTestsLine([oct, nov, retest])).toBe(
       `Counts tests that have closed: Oct. November and Retest are added once they close. ${rules}`,
     );
+  });
+});
+
+// The All year chart (#528), counted by hand. July had a Grade 12 Paper only,
+// so no Grade 11 Student is counted for it; November is running.
+const chartTests = [
+  { ...monthly("july", "July"), grades: [12] },
+  aug,
+  sep,
+  nov,
+];
+const chartFixture = [
+  yearStudent("1", "Asha Bose", 11, { august: "submitted", september: "opened", november: "submitted" }),
+  yearStudent("2", "Bala Nair", 11, { august: "not_opened", september: "submitted", november: "not_opened" }),
+  yearStudent("3", "Chetan Rao", 11, { august: "opened", september: "submitted", november: "opened" }, "Medical"),
+  yearStudent("4", "Dia Sen", 12, { july: "submitted", august: "submitted", september: "not_opened", november: "submitted" }),
+  yearStudent("5", "Esha Pal", 12, { july: "not_opened", august: "submitted", september: "opened", november: "not_opened" }, null),
+];
+
+describe("attendanceChart", () => {
+  it("has one bar per closed Monthly Test, oldest first, then the running one marked so far", () => {
+    const bars = attendanceChart(chartTests, chartFixture);
+    expect(bars.map((bar) => [bar.shortName, bar.running])).toEqual([
+      ["Jul", false],
+      ["Aug", false],
+      ["Sep", false],
+      ["Nov", true],
+    ]);
+  });
+
+  it("counts each bar over the Students counted for that Monthly Test, split into submitted and opened, not submitted", () => {
+    // July: Dia and Esha only (no Grade 11 Paper); Dia submitted. 1 of 2.
+    // August: all five; Asha, Dia, Esha submitted, Chetan opened. 4 of 5.
+    // September: all five; Bala, Chetan submitted, Asha, Esha opened. 4 of 5.
+    // November (so far): all five; Asha, Dia submitted, Chetan opened. 3 of 5.
+    expect(attendanceChart(chartTests, chartFixture)).toEqual([
+      { key: "july", shortName: "Jul", running: false, counted: 2, attended: 1, submitted: 1, openedNotSubmitted: 0, percent: "50%", submittedShare: 50, openedShare: 0 },
+      { key: "august", shortName: "Aug", running: false, counted: 5, attended: 4, submitted: 3, openedNotSubmitted: 1, percent: "80%", submittedShare: 60, openedShare: 20 },
+      { key: "september", shortName: "Sep", running: false, counted: 5, attended: 4, submitted: 2, openedNotSubmitted: 2, percent: "80%", submittedShare: 40, openedShare: 40 },
+      { key: "november", shortName: "Nov", running: true, counted: 5, attended: 3, submitted: 2, openedNotSubmitted: 1, percent: "60%", submittedShare: 40, openedShare: 20 },
+    ]);
+  });
+
+  it("counts only the Students the filters keep", () => {
+    // Grade 12: Dia and Esha. Sep: Dia absent, Esha opened. Nov: Dia submitted, Esha absent.
+    const grade12 = filterStudents(chartFixture, { grade: 12, examPreparingFor: "all" });
+    expect(
+      attendanceChart(chartTests, grade12).map((bar) => [bar.shortName, bar.percent, bar.attended, bar.counted, bar.openedNotSubmitted]),
+    ).toEqual([
+      ["Jul", "50%", 1, 2, 0],
+      ["Aug", "100%", 2, 2, 0],
+      ["Sep", "50%", 1, 2, 1],
+      ["Nov", "50%", 1, 2, 0],
+    ]);
+  });
+
+  it("shows a dash and an empty bar for a Monthly Test nobody kept is counted for", () => {
+    const grade11 = filterStudents(chartFixture, { grade: 11, examPreparingFor: "all" });
+    expect(attendanceChart(chartTests, grade11)[0]).toEqual({
+      key: "july", shortName: "Jul", running: false, counted: 0, attended: 0, submitted: 0, openedNotSubmitted: 0, percent: "—", submittedShare: 0, openedShare: 0,
+    });
+  });
+
+  it("has no bars when no Monthly Test has opened", () => {
+    expect(attendanceChart([], chartFixture)).toEqual([]);
   });
 });

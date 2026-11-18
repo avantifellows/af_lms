@@ -1,16 +1,18 @@
 "use client";
 
 // The Test Attendance tab's All year page (#517): three tiles over the tag
-// window (the last 3 closed Monthly Tests) and every listed Student, repeat
-// absentees (Follow Up) first and repeat non-submitters (Not Submitting) next.
-// Tags, notes, order and tiles come from the client-safe rules module, from the
-// response the tab already loaded.
+// window (the last 3 closed Monthly Tests), a month-by-month chart, and every
+// listed Student, repeat absentees (Follow Up) first and repeat non-submitters
+// (Not Submitting) next. Tags, notes, order, tiles and chart bars come from the
+// client-safe rules module, from the response the tab already loaded.
 import { useState } from "react";
 
 import { Card } from "@/components/ui";
+import AttendanceChart from "@/components/test-attendance/AttendanceChart";
 import { Tile } from "@/components/test-attendance/MonthPage";
 import {
   allYearStudents,
+  attendanceChart,
   allYearTiles,
   attendanceStatus,
   attendedText,
@@ -84,6 +86,7 @@ export default function AllYearPage({
   const [filter, setFilter] = useState<AllYearListFilter>("all");
   const windowTests = tagWindow(monthlyTests);
   const tiles = allYearTiles(students, windowTests);
+  const chart = <AttendanceChart bars={attendanceChart(monthlyTests, students)} />;
 
   const enrolled = (
     <Tile name="Enrolled">
@@ -95,6 +98,7 @@ export default function AllYearPage({
     return (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{enrolled}</div>
+        {chart}
         <Card elevation="sm" className="p-6 text-center">
           <p className="text-sm text-text-muted">Attendance and tags appear once a Monthly Test closes.</p>
         </Card>
@@ -121,6 +125,8 @@ export default function AllYearPage({
           <p className="text-xs text-text-secondary">{percentText(tiles.followUp, tiles.enrolled)}</p>
         </Tile>
       </div>
+
+      {chart}
 
       <Card elevation="sm" className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

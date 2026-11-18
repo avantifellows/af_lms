@@ -621,3 +621,51 @@ export function countedTestsLine(
     "Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them."
   );
 }
+
+/** One bar of the All year chart: the attended share of the Students counted for one Monthly Test. */
+export interface AttendanceChartBar {
+  key: string;
+  shortName: string;
+  /** A running Monthly Test is drawn dashed and labelled "so far". */
+  running: boolean;
+  counted: number;
+  attended: number;
+  submitted: number;
+  openedNotSubmitted: number;
+  /** The attended share as text; "—" for a zero base. */
+  percent: string;
+  /** Bar heights, as percentages of `counted`; 0 for a zero base. */
+  submittedShare: number;
+  openedShare: number;
+}
+
+/**
+ * The All year chart: one bar per closed Monthly Test, oldest first, then any
+ * running one. Each bar counts only the Students counted for its Monthly Test,
+ * out of the Students passed in (already filtered).
+ */
+export function attendanceChart(
+  monthlyTests: Pick<TestAttendanceMonthlyTest, "key" | "shortName" | "state">[],
+  students: TestAttendanceStudent[],
+): AttendanceChartBar[] {
+  const ordered = [
+    ...monthlyTests.filter((test) => test.state === "closed"),
+    ...monthlyTests.filter((test) => test.state === "running"),
+  ];
+  return ordered.map((test) => {
+    const { counted, attended, submitted, opened } = monthTiles(students, test.key);
+    const share = (n: number) => (counted === 0 ? 0 : (n / counted) * 100);
+    return {
+      key: test.key,
+      shortName: test.shortName,
+      running: test.state === "running",
+      counted,
+      attended,
+      submitted,
+      openedNotSubmitted: opened,
+      percent: percentText(attended, counted),
+      submittedShare: share(submitted),
+      openedShare: share(opened),
+    };
+  });
+}
