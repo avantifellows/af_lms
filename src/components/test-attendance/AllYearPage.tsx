@@ -60,10 +60,10 @@ function FollowUpCell({ followUp }: { followUp: FollowUp }) {
   return (
     <div className="flex flex-col items-start gap-1">
       {followUp.tag === "follow_up" && (
-        <span className="rounded-full bg-danger px-2 py-0.5 text-[11px] font-bold text-white">Follow up</span>
+        <span className="whitespace-nowrap rounded-full bg-danger px-2 py-0.5 text-[11px] font-bold text-white">Follow up</span>
       )}
       {followUp.tag === "not_submitting" && (
-        <span className="rounded-full bg-warning-border px-2 py-0.5 text-[11px] font-bold text-white">
+        <span className="whitespace-nowrap rounded-full bg-warning-border px-2 py-0.5 text-[11px] font-bold text-white">
           Not submitting
         </span>
       )}
