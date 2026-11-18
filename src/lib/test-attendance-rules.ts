@@ -108,7 +108,13 @@ export interface PaperWindow {
   switchedOn: boolean;
 }
 
-/** A URL-safe key from a list label; later duplicates get "-2", "-3", … */
+/** The period key of the All year page; never given to a Monthly Test. */
+const ALL_YEAR_KEY = "all";
+
+/**
+ * A URL-safe key from a list label; later duplicates get "-2", "-3", …. `all`
+ * is reserved for All year, so a set labelled "All" gets "all-2".
+ */
 function keyFor(label: string, taken: Set<string>): string {
   const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "test";
   let key = base;
@@ -143,7 +149,7 @@ const withoutQuizIds = (test: OpenedMonthlyTest): TestAttendanceMonthlyTest => (
 function openedMonthlyTests(testSets: TestSet[], papers: PaperWindow[], now: Date): OpenedMonthlyTest[] {
   const byQuizId = new Map(papers.map((p) => [p.quizId, p]));
   const nowMs = now.getTime();
-  const keys = new Set<string>();
+  const keys = new Set<string>([ALL_YEAR_KEY]);
   const tests: OpenedMonthlyTest[] = [];
   for (const set of testSets) {
     const key = keyFor(set.label, keys);
@@ -389,7 +395,7 @@ export function lastRefreshedText(lastRefreshed: string | null | undefined, now:
  */
 export function defaultPeriod(monthlyTests: Pick<TestAttendanceMonthlyTest, "key" | "opensAt" | "state">[]): string {
   const running = monthlyTests.filter((test) => test.state === "running");
-  if (running.length === 0) return "all";
+  if (running.length === 0) return ALL_YEAR_KEY;
   return running.reduce((latest, test) => (Date.parse(test.opensAt) > Date.parse(latest.opensAt) ? test : latest)).key;
 }
 

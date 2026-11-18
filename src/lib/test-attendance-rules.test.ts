@@ -8,6 +8,7 @@ import {
   attendanceStatus,
   attendedText,
   countedTestsLine,
+  defaultPeriod,
   ALL_STUDENTS,
   examPreparingFor,
   examPreparingForOptions,
@@ -202,6 +203,32 @@ describe("monthlyTestsFrom", () => {
       ["mock-test", "Moc"],
       ["mock-test-2", "Moc"],
     ]);
+  });
+
+  it("never gives a Monthly Test the key all, which means All year", () => {
+    const tests = monthlyTestsFrom(
+      [
+        { label: "All", quizIds: ["a"] },
+        { label: "ALL", quizIds: ["b"] },
+        { label: "All year", quizIds: ["c"] },
+        { label: "October", quizIds: ["d"] },
+      ],
+      [
+        paper("a", { closesAt: "2026-10-07T18:25:00.000Z" }),
+        paper("b", { closesAt: "2026-10-08T18:25:00.000Z" }),
+        paper("c", { closesAt: "2026-10-09T18:25:00.000Z" }),
+        paper("d", { closesAt: "2026-10-10T18:25:00.000Z" }),
+      ],
+      new Date("2026-11-18T08:30:00.000Z"),
+    );
+
+    expect(tests.map((t) => [t.key, t.name])).toEqual([
+      ["all-2", "All"],
+      ["all-3", "ALL"],
+      ["all-year", "All year"],
+      ["october", "October"],
+    ]);
+    expect(defaultPeriod(tests.map((t) => ({ ...t, state: "running" as const })))).not.toBe("all");
   });
 });
 
