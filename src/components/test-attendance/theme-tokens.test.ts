@@ -2,7 +2,9 @@
 // Tailwind class such as `bg-warning` names a colour the theme does not define,
 // so Tailwind emits nothing and the element renders transparent or in the body
 // colour. Every colour class (and `var(--color-…)`) in the tab's components that
-// names one of the theme's own colour families must name a defined token.
+// names one of the theme's own colour families must name a defined token, and
+// none may use Tailwind's built-in palette (`text-white`, `bg-red-600`): the tab
+// uses theme tokens only. The tokens are read from globals.css, not listed here.
 import { readdirSync, readFileSync } from "fs";
 import path from "path";
 
@@ -19,16 +21,20 @@ function themeColours(): Set<string> {
   return new Set([...block[1].matchAll(/--color-([a-z0-9-]+)\s*:/g)].map((m) => m[1]));
 }
 
-const UTILITY = /^(?:bg|text|border(?:-[xytrbl])?|fill|stroke|ring|outline|divide|decoration)-(.+)$/;
+const UTILITY = /^(?:bg|text|border(?:-[xytrbl])?|fill|stroke|ring|outline|divide|decoration|from|via|to|shadow|accent|caret|placeholder)-(.+)$/;
 
-/** Colour names a component refers to that belong to one of the theme's families (warning, success, accent, …). */
+/** Tailwind's built-in colours, which carry no theme token. */
+const PALETTE =
+  /^(?:white|black|(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:-\d{2,3})?)$/;
+
+/** Colour names a component refers to: the theme's families (warning, success, accent, …) and Tailwind's palette. */
 function referencedColours(source: string, families: Set<string>): string[] {
   const names = new Set<string>();
   for (const token of source.split(/[\s"'`{}()<>,;]+/)) {
     // Drop variants (hover:, md:) and an opacity suffix (/90).
     const utility = token.slice(token.lastIndexOf(":") + 1).split("/")[0];
     const match = utility.match(UTILITY);
-    if (match && families.has(match[1].split("-")[0])) names.add(match[1]);
+    if (match && (families.has(match[1].split("-")[0]) || PALETTE.test(match[1]))) names.add(match[1]);
   }
   for (const match of source.matchAll(/var\(--color-([a-z0-9-]+)\)/g)) names.add(match[1]);
   return [...names];
@@ -50,6 +56,12 @@ describe("Test Attendance colour classes", () => {
       "warning",
       "warning-text",
     ]);
+  });
+
+  it("flags Tailwind's own palette colours, and leaves sizes and other utilities alone", () => {
+    const names = referencedColours('className="text-white bg-red-600/90 border-l-4 text-xs text-[11px] border-dashed"', families);
+    expect(names).toEqual(["white", "red-600"]);
+    expect(names.filter((name) => !colours.has(name))).toEqual(["white", "red-600"]);
   });
 
   it.each(files)("%s names only colours the theme defines", (file) => {
