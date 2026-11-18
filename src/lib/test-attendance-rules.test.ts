@@ -288,6 +288,95 @@ describe("testAttendanceFrom", () => {
     ]);
   });
 
+  describe("joining date", () => {
+    // October opens 6 Oct 05:00 IST and closes 10 Oct 11:55 pm IST (18:25 UTC).
+    const marksJoined = (joinedOn: Map<string, string>) =>
+      testAttendanceFrom({
+        testSets: octoberSets,
+        papers: octoberPapers,
+        students: [listed("1", 11)],
+        attendance: [],
+        joinedOn,
+        now: after,
+      }).students.map((s) => s.attendance);
+
+    it("leaves a Student who joined the day after closing out of the Monthly Test", () => {
+      expect(marksJoined(new Map([["1", "2026-10-11"]]))).toEqual([{}]);
+    });
+
+    it.each([
+      ["before opening", "2026-09-01"],
+      ["while it was running", "2026-10-08"],
+      ["on the closing day", "2026-10-10"],
+    ])("counts a Student who joined %s", (_when, joined) => {
+      expect(marksJoined(new Map([["1", joined]]))).toEqual([{ october: "not_opened" }]);
+    });
+
+    it("counts a Student with no joining date", () => {
+      expect(marksJoined(new Map([["2", "2026-10-11"]]))).toEqual([{ october: "not_opened" }]);
+    });
+
+    it("reads the closing day in IST, not UTC", () => {
+      // Closes 11 Oct 12:30 am IST = 10 Oct 19:00 UTC: the closing day is 11 Oct.
+      const result = testAttendanceFrom({
+        testSets: [{ label: "October", quizIds: ["late"] }],
+        papers: [paper("late", { closesAt: "2026-10-10T19:00:00.000Z" })],
+        students: [listed("1", 11), listed("2", 11)],
+        attendance: [],
+        joinedOn: new Map([
+          ["1", "2026-10-11"],
+          ["2", "2026-10-12"],
+        ]),
+        now: after,
+      });
+
+      expect(result.students.map((s) => [s.userId, s.attendance])).toEqual([
+        ["1", { october: "not_opened" }],
+        ["2", {}],
+      ]);
+    });
+
+    it("drops the month page's count by the Students who joined after it closed", () => {
+      // September closes 12 Sep 11:55 pm IST, October 10 Oct 11:55 pm IST.
+      // Students 1–3 joined before September; 4 and 5 joined on 20 Sep.
+      const result = testAttendanceFrom({
+        testSets: [
+          { label: "September", quizIds: ["sep"] },
+          { label: "October", quizIds: ["oct"] },
+        ],
+        papers: [
+          paper("sep", { opensAt: "2026-09-07T23:30:00.000Z", closesAt: "2026-09-12T18:25:00.000Z" }),
+          paper("oct"),
+        ],
+        students: [listed("1", 11), listed("2", 11), listed("3", 11), listed("4", 11), listed("5", 11)],
+        attendance: [opened("1", "sep", true), opened("4", "oct", true)],
+        joinedOn: new Map([
+          ["1", "2026-06-15"],
+          ["2", "2026-06-15"],
+          ["3", "2026-06-15"],
+          ["4", "2026-09-20"],
+          ["5", "2026-09-20"],
+        ]),
+        now: after,
+      });
+
+      expect(monthTiles(result.students, "september")).toEqual({
+        counted: 3,
+        attended: 1,
+        submitted: 1,
+        opened: 0,
+        notOpened: 2,
+      });
+      expect(monthTiles(result.students, "october")).toEqual({
+        counted: 5,
+        attended: 1,
+        submitted: 1,
+        opened: 0,
+        notOpened: 4,
+      });
+    });
+  });
+
   it("keeps each Student's other fields as listed", () => {
     const result = testAttendanceFrom({
       testSets: octoberSets,

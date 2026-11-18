@@ -194,10 +194,17 @@ export interface PaperAttendance {
   submitted: boolean | null;
 }
 
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+/** The IST calendar day of a UTC instant, as `YYYY-MM-DD`. */
+const istDate = (iso: string) => new Date(Date.parse(iso) + IST_OFFSET_MS).toISOString().slice(0, 10);
+
 /**
  * The tab's data: the opened Monthly Tests, and each listed Student's mark for
  * every Monthly Test they are counted for. A Student is counted when their
- * grade is one of the Monthly Test's grades. Any Paper of the Monthly Test
+ * grade is one of the Monthly Test's grades and they joined NVS (`joinedOn`,
+ * a `YYYY-MM-DD` date by LMS user id) on or before the IST calendar day it
+ * closes. A Student with no joining date is counted. Any Paper of the Monthly Test
  * counts, whatever its grade; submitting any Paper is "submitted", opening
  * any is "opened". An unknown submitted state counts as not submitted.
  */
@@ -206,6 +213,7 @@ export function testAttendanceFrom(input: {
   papers: PaperWindow[];
   students: ListedStudent[];
   attendance: PaperAttendance[];
+  joinedOn?: ReadonlyMap<string, string>;
   now: Date;
 }): Pick<TestAttendanceResponse, "monthlyTests" | "students"> {
   const tests = openedMonthlyTests(input.testSets, input.papers, input.now);
@@ -218,8 +226,10 @@ export function testAttendanceFrom(input: {
   const students = input.students.map((student) => {
     const rows = byStudent.get(student.userId) ?? [];
     const attendance: Record<string, AttendanceMark> = {};
+    const joinedOn = input.joinedOn?.get(student.userId);
     for (const test of tests) {
       if (!test.grades.includes(student.grade)) continue;
+      if (joinedOn != null && joinedOn > istDate(test.closesAt)) continue;
       const papersOpened = rows.filter((row) => test.quizIds.includes(row.quizId));
       attendance[test.key] = papersOpened.some((row) => row.submitted === true)
         ? "submitted"
@@ -305,7 +315,6 @@ export function monthStudents(
     .map((student) => ({ student, status: attendanceStatus(test.state, student.attendance[test.key]) }));
 }
 
-const IST_OFFSET_MS = 330 * 60 * 1000;
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** IST wall clock of a UTC instant, read through the UTC getters. */

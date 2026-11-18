@@ -463,3 +463,85 @@ describe("GET /api/school/[udise]/test-attendance — attendance", () => {
     consoleError.mockRestore();
   });
 });
+
+// NVS batch enrollment rows of the current academic year as the joining-date
+// read returns them: `start_date` as YYYY-MM-DD, current or ended.
+const enrollmentRow = (user_id: string, start_date: string | null, is_current: boolean) => ({
+  user_id,
+  start_date,
+  is_current,
+});
+const isJoiningRead = (sql: string) => sql.includes("start_date");
+
+describe("GET /api/school/[udise]/test-attendance — joining dates", () => {
+  let enrollmentRows: ReturnType<typeof enrollmentRow>[];
+
+  beforeEach(() => {
+    // Server time 2026-11-18T08:30:00Z = 18 Nov 2026, 2:00 pm IST.
+    // October closed on 10 Oct at 11:55 pm IST; November is running. Both have Grade 11 and 12 Papers.
+    mockGetNvsTestSets.mockResolvedValue([
+      { label: "October", quizIds: ["oct-g11", "oct-g12"] },
+      { label: "November", quizIds: ["nov-g11", "nov-g12"] },
+    ]);
+    sessionRows = [
+      sessionRow("oct-g11", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
+      sessionRow("oct-g12", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "12"),
+      sessionRow("nov-g11", "2026-11-17 05:00:00", "2026-11-21 23:55:00", "11"),
+      sessionRow("nov-g12", "2026-11-17 05:00:00", "2026-11-21 23:55:00", "12"),
+    ];
+    enrollmentRows = [];
+    mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("FROM user_permission")) return permissionRow ? [permissionRow] : [];
+      if (sql.includes("FROM school WHERE")) return school ? [school] : [];
+      if (sql.includes("program_dropout_audits")) return roster;
+      if (isSessionRead(sql)) return sessionRows;
+      if (isJoiningRead(sql)) {
+        const asked = (params[0] as unknown[]).map(String);
+        return enrollmentRows.filter((r) => asked.includes(r.user_id));
+      }
+      return [];
+    });
+  });
+
+  it("counts a Student from their earliest NVS batch enrollment and leaves out tests that closed before they joined", async () => {
+    enrollmentRows = [
+      // Nisha: an ended NVS batch from June, then a current one from 20 Oct. June decides.
+      enrollmentRow("10", "2026-10-20", true),
+      enrollmentRow("10", "2026-06-10", false),
+      // Ravi joined NVS on 20 Oct, after October closed.
+      enrollmentRow("12", "2026-10-20", true),
+      // Maya has no dated enrollment: counted for every Monthly Test of her grade.
+    ];
+
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.students.map((s: { userId: string; attendance: unknown }) => [s.userId, s.attendance])).toEqual([
+      ["10", { october: "not_opened", november: "not_opened" }],
+      ["12", { november: "not_opened" }],
+      ["14", { october: "not_opened", november: "not_opened" }],
+    ]);
+  });
+
+  it("answers 500 and logs no Student data when the joining-date read fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM user_permission")) return [permissionRow];
+      if (sql.includes("FROM school WHERE")) return [school];
+      if (sql.includes("program_dropout_audits")) return roster;
+      if (isSessionRead(sql)) return sessionRows;
+      if (isJoiningRead(sql)) throw new Error("canceling statement due to statement timeout");
+      return [];
+    });
+
+    const response = await get();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Failed to load Test Attendance" });
+    const logged = JSON.stringify(consoleError.mock.calls);
+    expect(logged).toContain("statement timeout");
+    expect(logged).not.toContain("Nisha");
+    consoleError.mockRestore();
+  });
+});
