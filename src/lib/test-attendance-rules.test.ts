@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   attendanceStatus,
+  ALL_STUDENTS,
   examPreparingFor,
+  examPreparingForOptions,
+  filterStudents,
+  monthGroupRows,
   monthStudents,
   monthTiles,
   monthlyTestsFrom,
@@ -512,6 +516,151 @@ describe("monthStudents", () => {
     expect(names(monthStudents(monthFixture, { key: "october", state: "running" }))).toEqual([
       "Anil Rao: Yet to start",
       "Arun Mehta: Yet to start",
+    ]);
+  });
+});
+
+// A second fixture for groups and filters, counted by hand. October covers
+// grades 11 and 12. Jaya (Grade 12, NDA) has no October mark, so she is not
+// counted and her group gets no row. Farah's "Science" is not one of the five.
+const grouped = (
+  userId: string,
+  name: string,
+  grade: number,
+  examPreparingFor: string | null,
+  attendance: TestAttendanceStudent["attendance"],
+): TestAttendanceStudent => ({
+  userId,
+  name,
+  studentId: `NVS${userId}`,
+  grade,
+  examPreparingFor: examPreparingFor as TestAttendanceStudent["examPreparingFor"],
+  attendance,
+});
+const groupFixture = [
+  grouped("9", "Indu Bose", 12, "CA", { october: "not_opened" }),
+  grouped("5", "Esha Nair", 11, null, { october: "not_opened" }),
+  grouped("1", "Asha Roy", 11, "Engineering", { october: "submitted" }),
+  grouped("7", "Gita Sen", 12, "Engineering", { october: "submitted" }),
+  grouped("4", "Dina Paul", 11, "Medical", { october: "submitted" }),
+  grouped("6", "Farah Ali", 11, "Science", { october: "opened" }),
+  grouped("2", "Bala Iyer", 11, "engineering", { october: "opened" }),
+  grouped("10", "Jaya Das", 12, "NDA", { july: "submitted" }),
+  grouped("3", "Chen Lal", 11, "Engineering", { october: "not_opened" }),
+  grouped("8", "Hari Om", 12, "Engineering", { october: "submitted" }),
+];
+
+describe("monthGroupRows", () => {
+  it("has one row per grade and Exam Preparing For with a counted Student, Grade 11 first, in group order", () => {
+    expect(monthGroupRows(groupFixture, "october")).toEqual([
+      { grade: 11, examPreparingFor: "Engineering", counted: 3, attended: 2, submitted: 1, opened: 1, notOpened: 1 },
+      { grade: 11, examPreparingFor: "Medical", counted: 1, attended: 1, submitted: 1, opened: 0, notOpened: 0 },
+      { grade: 11, examPreparingFor: "Not set", counted: 2, attended: 1, submitted: 0, opened: 1, notOpened: 1 },
+      { grade: 12, examPreparingFor: "Engineering", counted: 2, attended: 2, submitted: 2, opened: 0, notOpened: 0 },
+      { grade: 12, examPreparingFor: "CA", counted: 1, attended: 0, submitted: 0, opened: 0, notOpened: 1 },
+    ]);
+  });
+
+  it("adds up to the tiles", () => {
+    // Counted: Students 1–9. Submitted: 1, 4, 7, 8. Opened only: 2, 6. Not opened: 3, 5, 9.
+    expect(monthTiles(groupFixture, "october")).toEqual({
+      counted: 9,
+      attended: 6,
+      submitted: 4,
+      opened: 2,
+      notOpened: 3,
+    });
+  });
+
+  it("has no rows when nobody is counted", () => {
+    expect(monthGroupRows(groupFixture, "september")).toEqual([]);
+  });
+});
+
+describe("filterStudents", () => {
+  const closed = { key: "october", state: "closed" as const };
+  const names = (rows: { student: TestAttendanceStudent }[]) => rows.map((row) => row.student.name);
+
+  it("keeps every Student with no filter set", () => {
+    expect(filterStudents(groupFixture, ALL_STUDENTS)).toHaveLength(10);
+  });
+
+  it("applies the Grade filter to the tiles, the group rows and the list", () => {
+    const grade12 = filterStudents(groupFixture, { grade: 12, examPreparingFor: "all" });
+
+    // Counted Grade 12: Gita, Hari (submitted), Indu (not opened). Jaya is not counted.
+    expect(monthTiles(grade12, "october")).toEqual({ counted: 3, attended: 2, submitted: 2, opened: 0, notOpened: 1 });
+    expect(monthGroupRows(grade12, "october").map((row) => `${row.grade} ${row.examPreparingFor}`)).toEqual([
+      "12 Engineering",
+      "12 CA",
+    ]);
+    expect(names(monthStudents(grade12, closed, "all"))).toEqual(["Gita Sen", "Hari Om", "Indu Bose"]);
+  });
+
+  it("applies the Exam Preparing For filter to the tiles, the group rows and the list", () => {
+    const engineering = filterStudents(groupFixture, { grade: "all", examPreparingFor: "Engineering" });
+
+    // Asha, Bala ("engineering"), Chen (Grade 11); Gita, Hari (Grade 12).
+    expect(monthTiles(engineering, "october")).toEqual({ counted: 5, attended: 4, submitted: 3, opened: 1, notOpened: 1 });
+    expect(monthGroupRows(engineering, "october").map((row) => `${row.grade} ${row.examPreparingFor}`)).toEqual([
+      "11 Engineering",
+      "12 Engineering",
+    ]);
+    expect(names(monthStudents(engineering, closed, "all"))).toEqual([
+      "Asha Roy",
+      "Bala Iyer",
+      "Chen Lal",
+      "Gita Sen",
+      "Hari Om",
+    ]);
+  });
+
+  it("puts a blank and an unrecognised Exam Preparing For under Not set", () => {
+    const notSet = filterStudents(groupFixture, { grade: "all", examPreparingFor: "Not set" });
+
+    expect(names(monthStudents(notSet, closed, "all"))).toEqual(["Esha Nair", "Farah Ali"]);
+    expect(monthTiles(notSet, "october")).toEqual({ counted: 2, attended: 1, submitted: 0, opened: 1, notOpened: 1 });
+  });
+
+  it("applies both filters together", () => {
+    const rows = monthGroupRows(filterStudents(groupFixture, { grade: 11, examPreparingFor: "Medical" }), "october");
+
+    expect(rows).toEqual([
+      { grade: 11, examPreparingFor: "Medical", counted: 1, attended: 1, submitted: 1, opened: 0, notOpened: 0 },
+    ]);
+  });
+
+  it("can leave nobody, and every count is then zero", () => {
+    const none = filterStudents(groupFixture, { grade: 12, examPreparingFor: "Medical" });
+
+    expect(monthTiles(none, "october")).toEqual({ counted: 0, attended: 0, submitted: 0, opened: 0, notOpened: 0 });
+    expect(monthGroupRows(none, "october")).toEqual([]);
+  });
+});
+
+describe("examPreparingForOptions", () => {
+  it("offers the five, then Not set when some listed Student has none", () => {
+    expect(examPreparingForOptions(groupFixture)).toEqual(["Engineering", "Medical", "CLAT", "CA", "NDA", "Not set"]);
+  });
+
+  it("offers Not set for an unrecognised value", () => {
+    expect(examPreparingForOptions([grouped("6", "Farah Ali", 11, "Science", {})])).toEqual([
+      "Engineering",
+      "Medical",
+      "CLAT",
+      "CA",
+      "NDA",
+      "Not set",
+    ]);
+  });
+
+  it("offers only the five when every listed Student has one", () => {
+    expect(examPreparingForOptions([grouped("1", "Asha Roy", 11, "Engineering", {})])).toEqual([
+      "Engineering",
+      "Medical",
+      "CLAT",
+      "CA",
+      "NDA",
     ]);
   });
 });

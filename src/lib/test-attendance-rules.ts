@@ -334,3 +334,72 @@ export function closingTimeText(closesAt: string, now: string): string {
     days === 0 ? "today" : days === 1 ? "tomorrow" : `on ${clock.getUTCDate()} ${MONTH_SHORT[clock.getUTCMonth()]}`;
   return `${day} at ${time}`;
 }
+
+/** A Student's Exam Preparing For group: one of the five, or "Not set". */
+export type ExamPreparingForGroup = ExamPreparingFor | "Not set";
+
+/** Group order: Engineering, Medical, CLAT, CA, NDA, Not set. */
+const EXAM_PREPARING_FOR_GROUPS: readonly ExamPreparingForGroup[] = [...EXAM_PREPARING_FOR, "Not set"];
+
+/** A blank or unrecognised value is "Not set", so no Student disappears from the counts. */
+export function examPreparingForGroup(student: Pick<ListedStudent, "examPreparingFor">): ExamPreparingForGroup {
+  return examPreparingFor(student.examPreparingFor) ?? "Not set";
+}
+
+/** One row of a month page's "By grade and Exam Preparing For" block. */
+export interface MonthGroupRow extends MonthTiles {
+  grade: number;
+  examPreparingFor: ExamPreparingForGroup;
+}
+
+/**
+ * A month page's group rows: one per grade and Exam Preparing For with at
+ * least one Student counted for the Monthly Test, Grade 11 first and then in
+ * group order. Each Student is in exactly one row, so the rows add up to the tiles.
+ */
+export function monthGroupRows(students: TestAttendanceStudent[], testKey: string): MonthGroupRow[] {
+  const groups = new Map<string, { grade: number; examPreparingFor: ExamPreparingForGroup; students: TestAttendanceStudent[] }>();
+  for (const student of students) {
+    if (student.attendance[testKey] == null) continue;
+    const group = examPreparingForGroup(student);
+    const id = `${student.grade}|${group}`;
+    const entry = groups.get(id) ?? { grade: student.grade, examPreparingFor: group, students: [] };
+    entry.students.push(student);
+    groups.set(id, entry);
+  }
+  return [...groups.values()]
+    .sort(
+      (a, b) =>
+        a.grade - b.grade ||
+        EXAM_PREPARING_FOR_GROUPS.indexOf(a.examPreparingFor) - EXAM_PREPARING_FOR_GROUPS.indexOf(b.examPreparingFor),
+    )
+    .map(({ grade, examPreparingFor: group, students: members }) => ({
+      grade,
+      examPreparingFor: group,
+      ...monthTiles(members, testKey),
+    }));
+}
+
+/** The tab's Grade and Exam Preparing For filters. Component state only; not in the URL. */
+export interface TestAttendanceFilters {
+  grade: "all" | 11 | 12;
+  examPreparingFor: "all" | ExamPreparingForGroup;
+}
+
+export const ALL_STUDENTS: TestAttendanceFilters = { grade: "all", examPreparingFor: "all" };
+
+/** The listed Students the filters keep. Every number and list on the tab is counted from these. */
+export function filterStudents<S extends TestAttendanceStudent>(students: S[], filters: TestAttendanceFilters): S[] {
+  return students.filter(
+    (student) =>
+      (filters.grade === "all" || student.grade === filters.grade) &&
+      (filters.examPreparingFor === "all" || examPreparingForGroup(student) === filters.examPreparingFor),
+  );
+}
+
+/** The Exam Preparing For filter's options: the five, then "Not set" only when some listed Student has none. */
+export function examPreparingForOptions(students: Pick<ListedStudent, "examPreparingFor">[]): ExamPreparingForGroup[] {
+  return students.some((student) => examPreparingForGroup(student) === "Not set")
+    ? [...EXAM_PREPARING_FOR_GROUPS]
+    : [...EXAM_PREPARING_FOR];
+}

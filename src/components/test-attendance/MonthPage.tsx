@@ -1,7 +1,7 @@
 "use client";
 
-// A Monthly Test's page on the Test Attendance tab (#517): four tiles and the
-// Students list. Every number comes from the client-safe rules module, from
+// A Monthly Test's page on the Test Attendance tab (#517): four tiles, the
+// "By grade and Exam Preparing For" block and the Students list. Every number comes from the client-safe rules module, from
 // the response the tab already loaded.
 import { useState } from "react";
 
@@ -9,9 +9,11 @@ import { Button, Card } from "@/components/ui";
 import {
   attendanceStatus,
   DEFAULT_MONTH_FILTER,
+  monthGroupRows,
   monthStudents,
   monthTiles,
   percentText,
+  type MonthGroupRow,
   type MonthListFilter,
   type TestAttendanceMonthlyTest,
   type TestAttendanceStatus,
@@ -50,6 +52,56 @@ const statusTone: Record<TestAttendanceStatus, string> = {
   Absent: "text-danger",
 };
 
+/** One row per grade and Exam Preparing For, so a principal sees which group is behind. Rows add up to the tiles. */
+function GroupBlock({ rows, label }: { rows: MonthGroupRow[]; label: (mark: "opened" | "not_opened") => TestAttendanceStatus }) {
+  return (
+    <Card elevation="sm" className="space-y-3 p-4">
+      <h3 className="text-sm font-bold text-text-primary">By grade and Exam Preparing For</h3>
+      {rows.length === 0 ? (
+        <p className="py-4 text-center text-sm text-text-muted">No Students in this list.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table aria-label="By grade and Exam Preparing For" className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
+                <th scope="col" className="py-2 pr-4 font-medium">Group</th>
+                <th scope="col" className="py-2 pr-4 font-medium">Submitted</th>
+                <th scope="col" className="py-2 pr-4 font-medium">{label("opened")}</th>
+                <th scope="col" className="py-2 font-medium">{label("not_opened")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const name = `Grade ${row.grade} · ${row.examPreparingFor}`;
+                return (
+                  <tr key={name} className="border-b border-border last:border-0">
+                    <th scope="row" className="py-2 pr-4 text-left font-medium text-text-primary">{name}</th>
+                    <td className="py-2 pr-4 text-text-primary">
+                      <span>
+                        {row.submitted} of {row.counted} ({percentText(row.submitted, row.counted)})
+                      </span>
+                      <span
+                        role="img"
+                        aria-label={`${name}: ${row.submitted} submitted, ${row.opened} ${label("opened").toLowerCase()}, of ${row.counted}`}
+                        className="mt-1 flex h-2 w-40 overflow-hidden rounded-full bg-border"
+                      >
+                        <span className="bg-success" style={{ width: `${(row.submitted / row.counted) * 100}%` }} />
+                        <span className="bg-warning" style={{ width: `${(row.opened / row.counted) * 100}%` }} />
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4 text-text-secondary">{row.opened}</td>
+                    <td className="py-2 text-text-secondary">{row.notOpened}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function MonthPage({
   test,
   students,
@@ -61,6 +113,7 @@ export default function MonthPage({
   const [showAll, setShowAll] = useState(false);
 
   const tiles = monthTiles(students, test.key);
+  const groups = monthGroupRows(students, test.key);
   const rows = monthStudents(students, test, filter);
   const shown = showAll ? rows : rows.slice(0, PAGE_SIZE);
   const label = (mark: "not_opened" | "opened" | "submitted") => attendanceStatus(test.state, mark);
@@ -84,6 +137,8 @@ export default function MonthPage({
         <CountTile name={label("opened")} x={tiles.opened} y={tiles.counted} />
         <CountTile name={label("not_opened")} x={tiles.notOpened} y={tiles.counted} />
       </div>
+
+      <GroupBlock rows={groups} label={label} />
 
       <Card elevation="sm" className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

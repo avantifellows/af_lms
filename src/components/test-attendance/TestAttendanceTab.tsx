@@ -7,9 +7,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, Card } from "@/components/ui";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import MonthPage from "@/components/test-attendance/MonthPage";
 import {
+  ALL_STUDENTS,
   closingTimeText,
+  examPreparingForOptions,
+  filterStudents,
+  type TestAttendanceFilters,
   type TestAttendanceMonthlyTest,
   type TestAttendanceResponse,
 } from "@/lib/test-attendance-rules";
@@ -66,6 +71,44 @@ function PeriodStrip({
   );
 }
 
+const GRADE_OPTIONS: { value: TestAttendanceFilters["grade"]; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: 11, label: "11" },
+  { value: 12, label: "12" },
+];
+
+/** Grade and Exam Preparing For: they apply to every number and list on the tab. */
+function Filters({
+  students,
+  filters,
+  onChange,
+}: {
+  students: TestAttendanceResponse["students"];
+  filters: TestAttendanceFilters;
+  onChange: (filters: TestAttendanceFilters) => void;
+}) {
+  const examOptions: { value: TestAttendanceFilters["examPreparingFor"]; label: string }[] = [
+    { value: "all", label: "All" },
+    ...examPreparingForOptions(students).map((value) => ({ value, label: value })),
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+      <SegmentedControl
+        label="Grade"
+        options={GRADE_OPTIONS}
+        value={filters.grade}
+        onChange={(grade) => onChange({ ...filters, grade })}
+      />
+      <SegmentedControl
+        label="Exam Preparing For"
+        options={examOptions}
+        value={filters.examPreparingFor}
+        onChange={(examPreparingFor) => onChange({ ...filters, examPreparingFor })}
+      />
+    </div>
+  );
+}
+
 function MonthBanner({ test, serverTime }: { test: TestAttendanceMonthlyTest; serverTime: string }) {
   const text =
     test.state === "running"
@@ -82,6 +125,7 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [period, setPeriod] = useState<Period>("all");
+  const [filters, setFilters] = useState<TestAttendanceFilters>(ALL_STUDENTS);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,8 +166,11 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
 
   const { data } = state;
   const selected = data.monthlyTests.find((test) => test.key === period);
+  // Filtering and counting happen here, from the response already loaded: no new request.
+  const students = filterStudents(data.students, filters);
   return (
     <div className="space-y-4">
+      <Filters students={data.students} filters={filters} onChange={setFilters} />
       {data.monthlyTests.length > 0 && (
         <PeriodStrip monthlyTests={data.monthlyTests} period={selected ? selected.key : "all"} onChange={setPeriod} />
       )}
@@ -131,7 +178,7 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
         <>
           <MonthBanner test={selected} serverTime={data.serverTime} />
           {/* Keyed so a newly opened month starts on its default list filter. */}
-          <MonthPage key={selected.key} test={selected} students={data.students} />
+          <MonthPage key={selected.key} test={selected} students={students} />
         </>
       ) : (
         <>
@@ -139,7 +186,7 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
             <section aria-label="Enrolled">
               <Card elevation="sm" className="p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Enrolled</p>
-                <p className="mt-1 text-2xl font-bold text-text-primary">{data.students.length}</p>
+                <p className="mt-1 text-2xl font-bold text-text-primary">{students.length}</p>
               </Card>
             </section>
           </div>

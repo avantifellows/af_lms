@@ -300,7 +300,7 @@ describe("TestAttendanceTab — month page", () => {
     mockFetch.mockResolvedValue(ok(monthData));
 
     const user = await openMonth("October");
-    await user.click(screen.getByRole("button", { name: "All" }));
+    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "All" }));
 
     expect(studentRows()).toEqual([
       ["Arun Mehta", "11", "Not set", "Absent"],
@@ -330,5 +330,194 @@ describe("TestAttendanceTab — month page", () => {
     expect(studentRows()).toHaveLength(30);
     expect(studentRows()[29][0]).toBe("Student 30");
     expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+  });
+});
+
+function filterButton(filter: "Grade" | "Exam Preparing For", name: string) {
+  return within(screen.getByRole("group", { name: filter })).getByRole("button", { name });
+}
+
+function groupRows() {
+  const table = screen.getByRole("table", { name: "By grade and Exam Preparing For" });
+  return within(table)
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) => [
+      within(row).getByRole("rowheader").textContent,
+      ...within(row).getAllByRole("cell").map((cell) => cell.textContent),
+    ]);
+}
+
+describe("TestAttendanceTab — filters", () => {
+  it("puts the Grade and Exam Preparing For filters above the period strip", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+
+    const strip = await screen.findByRole("group", { name: "Period" });
+    for (const name of ["Grade", "Exam Preparing For"]) {
+      const filter = screen.getByRole("group", { name });
+      expect(filter.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(within(screen.getByRole("group", { name: "Grade" })).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "All",
+      "11",
+      "12",
+    ]);
+    expect(filterButton("Grade", "All")).toHaveAttribute("aria-pressed", "true");
+    expect(filterButton("Exam Preparing For", "All")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("offers Not set when some listed Student has no Exam Preparing For", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+
+    const filter = await screen.findByRole("group", { name: "Exam Preparing For" });
+    expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "All",
+      "Engineering",
+      "Medical",
+      "CLAT",
+      "CA",
+      "NDA",
+      "Not set",
+    ]);
+  });
+
+  it("offers no Not set when every listed Student has an Exam Preparing For", async () => {
+    mockFetch.mockResolvedValue(ok({ ...monthData, students: monthStudents.filter((s) => s.examPreparingFor != null) }));
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+
+    const filter = await screen.findByRole("group", { name: "Exam Preparing For" });
+    expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "All",
+      "Engineering",
+      "Medical",
+      "CLAT",
+      "CA",
+      "NDA",
+    ]);
+  });
+
+  it("applies the Grade filter to the All year Enrolled count", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    const user = userEvent.setup();
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    await screen.findByRole("group", { name: "Grade" });
+    await user.click(filterButton("Grade", "12"));
+
+    expect(within(tile("Enrolled")).getByText("1")).toBeInTheDocument();
+  });
+
+  it("applies the Grade filter to every number and list on a month page, and keeps it when the period changes", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    const user = userEvent.setup();
+
+    render(<TestAttendanceTab schoolUdise="24120100101" />);
+    await screen.findByRole("group", { name: "Grade" });
+    await user.click(filterButton("Grade", "12"));
+    await user.click(screen.getByRole("button", { name: "October" }));
+
+    expect(filterButton("Grade", "12")).toHaveAttribute("aria-pressed", "true");
+    // Grade 12 in October: Ekta only, Absent.
+    expect(tile("Enrolled")).toHaveTextContent("1");
+    expect(tile("Enrolled")).toHaveTextContent("Attended 0 of 1");
+    expect(tile("Submitted")).toHaveTextContent("0 of 1");
+    expect(tile("Opened, not submitted")).toHaveTextContent("0 of 1");
+    expect(tile("Absent")).toHaveTextContent("1 of 1");
+    expect(studentRows()).toEqual([["Ekta Jain", "12", "CLAT", "Absent"]]);
+    expect(groupRows()).toEqual([["Grade 12 · CLAT", "0 of 1 (0%)", "0", "1"]]);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Exam Preparing For filter set when the period changes", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    const user = userEvent.setup();
+
+    await openMonth("October");
+    await user.click(filterButton("Exam Preparing For", "Not set"));
+    // Not set in October: Arun only, Absent.
+    expect(tile("Absent")).toHaveTextContent("1 of 1");
+
+    await user.click(screen.getByRole("button", { name: "November live" }));
+
+    expect(filterButton("Exam Preparing For", "Not set")).toHaveAttribute("aria-pressed", "true");
+    expect(tile("Yet to start")).toHaveTextContent("1 of 1");
+    expect(studentRows()).toEqual([["Arun Mehta", "11", "Not set", "Yet to start"]]);
+    expect(groupRows()).toEqual([["Grade 11 · Not set", "0 of 1 (0%)", "0", "1"]]);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a dash on the tiles and no group rows when the filters leave nobody counted", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    const user = userEvent.setup();
+
+    await openMonth("October");
+    await user.click(filterButton("Exam Preparing For", "CA"));
+
+    expect(tile("Submitted")).toHaveTextContent("0 of 0");
+    expect(tile("Submitted")).toHaveTextContent("—");
+    expect(tile("Submitted")).not.toHaveTextContent("0%");
+    expect(screen.queryByRole("table", { name: "By grade and Exam Preparing For" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TestAttendanceTab — by grade and Exam Preparing For", () => {
+  it("shows one row per group for a closed month, Grade 11 first, in group order", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    await openMonth("October");
+
+    const table = screen.getByRole("table", { name: "By grade and Exam Preparing For" });
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "Group",
+      "Submitted",
+      "Opened, not submitted",
+      "Absent",
+    ]);
+    expect(groupRows()).toEqual([
+      ["Grade 11 · Engineering", "1 of 1 (100%)", "0", "0"],
+      ["Grade 11 · Medical", "0 of 1 (0%)", "1", "0"],
+      ["Grade 11 · NDA", "1 of 1 (100%)", "0", "0"],
+      ["Grade 11 · Not set", "0 of 1 (0%)", "0", "1"],
+      ["Grade 12 · CLAT", "0 of 1 (0%)", "0", "1"],
+    ]);
+  });
+
+  it("shows In progress and Yet to start for a running month, with a two-part bar per row", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    await openMonth("November live");
+
+    const table = screen.getByRole("table", { name: "By grade and Exam Preparing For" });
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "Group",
+      "Submitted",
+      "In progress",
+      "Yet to start",
+    ]);
+    // November has no Grade 12 Paper, so Ekta's group has no row.
+    expect(groupRows()).toEqual([
+      ["Grade 11 · Engineering", "1 of 1 (100%)", "0", "0"],
+      ["Grade 11 · Medical", "0 of 1 (0%)", "1", "0"],
+      ["Grade 11 · NDA", "0 of 1 (0%)", "0", "1"],
+      ["Grade 11 · Not set", "0 of 1 (0%)", "0", "1"],
+    ]);
+    expect(within(table).getByRole("img", { name: "Grade 11 · Medical: 0 submitted, 1 in progress, of 1" })).toBeInTheDocument();
+  });
+
+  it("sits between the tiles and the Students list", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    await openMonth("October");
+
+    const block = screen.getByRole("table", { name: "By grade and Exam Preparing For" });
+    expect(tile("Absent").compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      block.compareDocumentPosition(screen.getByRole("table", { name: "Students" })) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
