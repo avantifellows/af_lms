@@ -154,6 +154,14 @@ _Avoid_: Present, No Test Attempt, attempt status
 A Student attended a Monthly Test if they opened any of its Papers, whether or not they submitted.
 _Avoid_: Present, appeared, took the test
 
+**Follow Up Tag**:
+A mark on a Student who was Absent in at least 2 of the last 3 closed Monthly Tests they are counted for.
+_Avoid_: At risk, needs-intervention flag, chronic absentee
+
+**Not Submitting Tag**:
+A mark on a Student who opened but did not submit in at least 2 of the last 3 closed Monthly Tests they are counted for.
+_Avoid_: Incomplete, dropout risk
+
 ### Visits & Actions
 
 **Visit**:
@@ -809,6 +817,7 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A **Paper** opened or submitted after its **Monthly Test** closed still counts towards the Student's **Test Attendance Status**
 - A grade that had no **Paper** in a **Monthly Test** is left out of that Monthly Test
 - A Student is counted only for a **Monthly Test** that closed after they joined JNV NVS; a Student who joined while it was still running is counted for it
+- A **Follow Up Tag** or **Not Submitting Tag** always needs 2 misses; a Student counted for only one **Monthly Test** is never tagged, and a running Monthly Test never counts towards a tag
 - The submitted state on the **Test Attendance Tab** is read from the warehouse attendance table at the 15-minute cadence (etl-next#238); the tab launches only once that is in production
 
 ## Example dialogue
