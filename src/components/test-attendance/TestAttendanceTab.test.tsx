@@ -1048,3 +1048,57 @@ describe("TestAttendanceTab — All year chart", () => {
     expect(screen.queryByRole("region", { name: "Attendance by Monthly Test" })).not.toBeInTheDocument();
   });
 });
+
+// Excel downloads (#530): each list downloads as it is on screen.
+describe("TestAttendanceTab — Download", () => {
+  let assign: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+  });
+
+  it("downloads a month's list with the selected period, filters and list filter", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    const user = await openMonth("November live");
+    await user.click(filterButton("Grade", "11"));
+    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "In progress" }));
+
+    await user.click(screen.getByRole("button", { name: "Download" }));
+
+    expect(assign).toHaveBeenCalledWith(
+      "/api/school/24120100101/test-attendance/export?period=november&grade=11&examPreparingFor=all&list=opened",
+    );
+  });
+
+  it("downloads a month's default list, Absent on a closed month", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+    const user = await openMonth("October");
+    await user.click(filterButton("Exam Preparing For", "Not set"));
+
+    await user.click(screen.getByRole("button", { name: "Download" }));
+
+    expect(assign).toHaveBeenCalledWith(
+      "/api/school/24120100101/test-attendance/export?period=october&grade=all&examPreparingFor=Not+set&list=not_opened",
+    );
+  });
+
+  it("downloads the All year list with the filters and list filter", async () => {
+    const user = await openAllYear();
+    await user.click(filterButton("Exam Preparing For", "Engineering"));
+    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "Need follow-up" }));
+
+    await user.click(screen.getByRole("button", { name: "Download" }));
+
+    expect(assign).toHaveBeenCalledWith(
+      "/api/school/24120100101/test-attendance/export?period=all&grade=all&examPreparingFor=Engineering&list=follow_up",
+    );
+  });
+
+  it("offers no Download when the All year page has no list yet", async () => {
+    await openAllYear({ ...yearData, monthlyTests: [november] });
+
+    expect(screen.getByText("Attendance and tags appear once a Monthly Test closes.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download" })).not.toBeInTheDocument();
+  });
+});

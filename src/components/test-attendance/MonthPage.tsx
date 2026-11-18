@@ -108,11 +108,14 @@ export default function MonthPage({
   test,
   monthlyTests,
   students,
+  onDownload,
 }: {
   test: TestAttendanceMonthlyTest;
   /** Every opened Monthly Test, for the "Previous 3 tests" window. */
   monthlyTests: TestAttendanceMonthlyTest[];
   students: TestAttendanceStudent[];
+  /** Downloads the list as it is on screen, under this list filter. */
+  onDownload: (list: MonthListFilter) => void;
 }) {
   const [filter, setFilter] = useState<MonthListFilter>(DEFAULT_MONTH_FILTER);
   const [showAll, setShowAll] = useState(false);
@@ -148,25 +151,30 @@ export default function MonthPage({
       <Card elevation="sm" className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-bold text-text-primary">Students</h3>
-          <div role="group" aria-label="Show Students" className="inline-flex flex-wrap gap-1">
-            {filters.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={filter === option.value}
-                onClick={() => {
-                  setFilter(option.value);
-                  setShowAll(false);
-                }}
-                className={`min-h-[36px] rounded-md border px-3 text-xs font-bold transition-colors ${
-                  filter === option.value
-                    ? "border-accent bg-accent text-text-on-accent"
-                    : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-3">
+            <div role="group" aria-label="Show Students" className="inline-flex flex-wrap gap-1">
+              {filters.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={filter === option.value}
+                  onClick={() => {
+                    setFilter(option.value);
+                    setShowAll(false);
+                  }}
+                  className={`min-h-[36px] rounded-md border px-3 text-xs font-bold transition-colors ${
+                    filter === option.value
+                      ? "border-accent bg-accent text-text-on-accent"
+                      : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => onDownload(filter)}>
+              Download
+            </Button>
           </div>
         </div>
 

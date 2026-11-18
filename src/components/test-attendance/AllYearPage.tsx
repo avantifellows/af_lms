@@ -7,7 +7,7 @@
 // client-safe rules module, from the response the tab already loaded.
 import { useState } from "react";
 
-import { Card } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import AttendanceChart from "@/components/test-attendance/AttendanceChart";
 import { Tile } from "@/components/test-attendance/MonthPage";
 import {
@@ -79,9 +79,12 @@ function FollowUpCell({ followUp }: { followUp: FollowUp }) {
 export default function AllYearPage({
   monthlyTests,
   students,
+  onDownload,
 }: {
   monthlyTests: TestAttendanceMonthlyTest[];
   students: TestAttendanceStudent[];
+  /** Downloads the list as it is on screen, under this list filter. */
+  onDownload: (list: AllYearListFilter) => void;
 }) {
   const [filter, setFilter] = useState<AllYearListFilter>("all");
   const windowTests = tagWindow(monthlyTests);
@@ -131,22 +134,27 @@ export default function AllYearPage({
       <Card elevation="sm" className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-bold text-text-primary">All students</h3>
-          <div role="group" aria-label="Show Students" className="inline-flex flex-wrap gap-1">
-            {LIST_FILTERS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={filter === option.value}
-                onClick={() => setFilter(option.value)}
-                className={`min-h-[36px] rounded-md border px-3 text-xs font-bold transition-colors ${
-                  filter === option.value
-                    ? "border-accent bg-accent text-text-on-accent"
-                    : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-3">
+            <div role="group" aria-label="Show Students" className="inline-flex flex-wrap gap-1">
+              {LIST_FILTERS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={filter === option.value}
+                  onClick={() => setFilter(option.value)}
+                  className={`min-h-[36px] rounded-md border px-3 text-xs font-bold transition-colors ${
+                    filter === option.value
+                      ? "border-accent bg-accent text-text-on-accent"
+                      : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => onDownload(filter)}>
+              Download
+            </Button>
           </div>
         </div>
         <p className="text-xs text-text-muted">{countedTestsLine(monthlyTests)}</p>

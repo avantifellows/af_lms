@@ -14,6 +14,7 @@ import { Button, Card } from "@/components/ui";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import AllYearPage from "@/components/test-attendance/AllYearPage";
 import MonthPage from "@/components/test-attendance/MonthPage";
+import { testAttendanceExportQuery } from "@/lib/test-attendance-export";
 import {
   ALL_STUDENTS,
   closingTimeText,
@@ -21,6 +22,8 @@ import {
   examPreparingForOptions,
   filterStudents,
   lastRefreshedText,
+  type AllYearListFilter,
+  type MonthListFilter,
   type TestAttendanceFilters,
   type TestAttendanceMonthlyTest,
   type TestAttendanceResponse,
@@ -227,6 +230,15 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
   const selected = data.monthlyTests.find((test) => test.key === period);
   // Filtering and counting happen here, from the response already loaded: no new request.
   const students = filterStudents(data.students, filters);
+  // The file holds the list on screen: this period, these filters, that list filter.
+  const download = (list: MonthListFilter | AllYearListFilter) =>
+    window.location.assign(
+      `/api/school/${encodeURIComponent(schoolUdise)}/test-attendance/export?${testAttendanceExportQuery({
+        period: selected ? selected.key : "all",
+        filters,
+        list,
+      })}`,
+    );
   return (
     <div className="space-y-4">
       <Filters students={data.students} filters={filters} onChange={setFilters} />
@@ -237,10 +249,16 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
         <>
           <MonthBanner test={selected} data={data} refreshing={state.refreshing} onRefresh={refresh} />
           {/* Keyed so a newly opened month starts on its default list filter. */}
-          <MonthPage key={selected.key} test={selected} monthlyTests={data.monthlyTests} students={students} />
+          <MonthPage
+            key={selected.key}
+            test={selected}
+            monthlyTests={data.monthlyTests}
+            students={students}
+            onDownload={download}
+          />
         </>
       ) : data.monthlyTests.length > 0 ? (
-        <AllYearPage monthlyTests={data.monthlyTests} students={students} />
+        <AllYearPage monthlyTests={data.monthlyTests} students={students} onDownload={download} />
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
