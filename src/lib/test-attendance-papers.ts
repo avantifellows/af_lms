@@ -9,7 +9,7 @@
 
 import { query } from "@/lib/db";
 import { dbIstTimestampToUtcIso } from "@/lib/quiz-session-time";
-import type { PaperWindow } from "@/lib/test-attendance-rules";
+import type { PaperWindow } from "@/types/test-attendance";
 
 interface SessionRow {
   platform_id: string;

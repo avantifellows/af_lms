@@ -4,6 +4,15 @@
 // the same rows, in the same order, as the list the user is looking at.
 
 import {
+  ALL_YEAR_LIST_FILTERS,
+  EXAM_PREPARING_FOR_GROUPS,
+  MONTH_LIST_FILTERS,
+  type AllYearListFilter,
+  type ExamPreparingForGroup,
+  type MonthListFilter,
+  type TestAttendanceResponse,
+} from "@/types/test-attendance";
+import {
   allYearColumns,
   allYearStudents,
   attendanceStatus,
@@ -12,11 +21,7 @@ import {
   monthStudents,
   filterStudents,
   windowMark,
-  type AllYearListFilter,
-  type ExamPreparingForGroup,
-  type MonthListFilter,
   type TestAttendanceFilters,
-  type TestAttendanceResponse,
 } from "./test-attendance-rules";
 
 /** "all" (All year) or a Monthly Test key. */
@@ -30,17 +35,8 @@ export interface TestAttendanceExport {
 }
 
 const GRADES: Record<string, TestAttendanceFilters["grade"]> = { all: "all", "11": 11, "12": 12 };
-const EXAM_GROUPS: readonly ("all" | ExamPreparingForGroup)[] = [
-  "all",
-  "Engineering",
-  "Medical",
-  "CLAT",
-  "CA",
-  "NDA",
-  "Not set",
-];
-const MONTH_LISTS: readonly MonthListFilter[] = ["not_opened", "opened", "submitted", "all"];
-const ALL_YEAR_LISTS: readonly AllYearListFilter[] = ["all", "follow_up", "not_submitting"];
+// The values the screen's filters offer, from the same constants.
+const EXAM_GROUPS: readonly ("all" | ExamPreparingForGroup)[] = ["all", ...EXAM_PREPARING_FOR_GROUPS];
 
 /** The export URL's query string for the list on screen. */
 export function testAttendanceExportQuery({ period, filters, list }: TestAttendanceExport): string {
@@ -71,7 +67,7 @@ export function parseTestAttendanceExport(
 
   const allYear = period === "all";
   const list = (params.get("list") ?? (allYear ? "all" : DEFAULT_MONTH_FILTER)) as MonthListFilter | AllYearListFilter;
-  const lists: readonly string[] = allYear ? ALL_YEAR_LISTS : MONTH_LISTS;
+  const lists: readonly string[] = allYear ? ALL_YEAR_LIST_FILTERS : MONTH_LIST_FILTERS;
   if (!lists.includes(list)) return { ok: false, error: `list must be one of ${lists.join(", ")}` };
 
   return { ok: true, request: { period, filters: { grade, examPreparingFor }, list } };

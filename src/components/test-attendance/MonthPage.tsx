@@ -8,6 +8,11 @@ import { useState } from "react";
 
 import { Button, Card } from "@/components/ui";
 import StudentListHeader from "@/components/test-attendance/StudentListHeader";
+import type {
+  MonthListFilter,
+  TestAttendanceMonthlyTest,
+  TestAttendanceStudent,
+} from "@/types/test-attendance";
 import {
   attendanceStatus,
   DEFAULT_MONTH_FILTER,
@@ -16,10 +21,7 @@ import {
   monthTiles,
   percentText,
   type MonthGroupRow,
-  type MonthListFilter,
-  type TestAttendanceMonthlyTest,
   type TestAttendanceStatus,
-  type TestAttendanceStudent,
 } from "@/lib/test-attendance-rules";
 
 const PAGE_SIZE = 25;

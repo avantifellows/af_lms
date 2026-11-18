@@ -8,7 +8,7 @@
 
 import { GoogleAuth } from "google-auth-library";
 
-import type { TestSet } from "@/lib/test-attendance-rules";
+import type { TestSet } from "@/types/test-attendance";
 import { ttlCache } from "@/lib/ttl-cache";
 
 const DOCUMENT_PATH = "pmu_live_tracking_sessions/nvs";

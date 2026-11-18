@@ -1,8 +1,8 @@
 "use client";
 
 // The School page's Test Attendance tab (#517, NVS Schools only). Loads the
-// School's Test Attendance from the read endpoint; the response shape and the
-// rules come from the client-safe rules module. A failed load shows an error
+// School's Test Attendance from the read endpoint; the response shape comes
+// from `@/types/test-attendance` and the rules from the client-safe rules module. A failed load shows an error
 // with Retry, never zeros.
 //
 // It opens on the running Monthly Test (else All year), chosen once from the
@@ -16,17 +16,20 @@ import AllYearPage from "@/components/test-attendance/AllYearPage";
 import MonthPage from "@/components/test-attendance/MonthPage";
 import { testAttendanceExportQuery } from "@/lib/test-attendance-export";
 import {
+  TEST_ATTENDANCE_GRADES,
+  type AllYearListFilter,
+  type MonthListFilter,
+  type TestAttendanceMonthlyTest,
+  type TestAttendanceResponse,
+} from "@/types/test-attendance";
+import {
   ALL_STUDENTS,
   closingTimeText,
   defaultPeriod,
   examPreparingForOptions,
   filterStudents,
   lastRefreshedText,
-  type AllYearListFilter,
-  type MonthListFilter,
   type TestAttendanceFilters,
-  type TestAttendanceMonthlyTest,
-  type TestAttendanceResponse,
 } from "@/lib/test-attendance-rules";
 
 type LoadState =
@@ -91,8 +94,7 @@ function PeriodStrip({
 
 const GRADE_OPTIONS: { value: TestAttendanceFilters["grade"]; label: string }[] = [
   { value: "all", label: "All" },
-  { value: 11, label: "11" },
-  { value: 12, label: "12" },
+  ...TEST_ATTENDANCE_GRADES.map((grade) => ({ value: grade, label: String(grade) })),
 ];
 
 /** Grade and Exam Preparing For: they apply to every number and list on the tab. */

@@ -8,15 +8,12 @@ import { CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID } from "@/lib/constants";
 import { query } from "@/lib/db";
 import { getSchoolRoster } from "@/lib/school-students";
 import { readPaperWindows } from "@/lib/test-attendance-papers";
+import type { ListedStudent, PaperWindow, TestAttendanceResponse, TestSet } from "@/types/test-attendance";
 import {
   attendanceQuizIds,
   examPreparingFor,
   isTestAttendanceStudent,
   testAttendanceFrom,
-  type ListedStudent,
-  type PaperWindow,
-  type TestAttendanceResponse,
-  type TestSet,
 } from "@/lib/test-attendance-rules";
 import { readSchoolAttendance } from "@/lib/test-attendance-warehouse";
 import { getNvsTestSets } from "@/lib/test-set-list";

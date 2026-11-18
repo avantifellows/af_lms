@@ -1,14 +1,29 @@
-// Test Attendance rules (#517): the response shape the School page's Test
-// Attendance tab reads, and the pure rules both the server and the browser
-// apply to it. Client-safe: no database, permission or network imports here.
+// Test Attendance rules (#517): the pure rules both the server and the
+// browser apply to the tab's data (its shapes live in `@/types/test-attendance`).
+// Client-safe: no database, permission or network imports here.
+
+import {
+  EXAM_PREPARING_FOR,
+  EXAM_PREPARING_FOR_GROUPS,
+  TEST_ATTENDANCE_GRADES,
+  type AllYearListFilter,
+  type AttendanceMark,
+  type ExamPreparingFor,
+  type ExamPreparingForGroup,
+  type FollowUpTag,
+  type ListedStudent,
+  type MonthListFilter,
+  type PaperAttendance,
+  type PaperWindow,
+  type TestAttendanceGrade,
+  type TestAttendanceMonthlyTest,
+  type TestAttendanceResponse,
+  type TestAttendanceStudent,
+  type TestSet,
+} from "@/types/test-attendance";
 
 import { PMU_PROGRAM_ID } from "./constants";
 import { studentHasCurrentProgram } from "./enrollment-stats";
-
-/** The five Exam Preparing For values the tab groups by, in group order. */
-const EXAM_PREPARING_FOR = ["Engineering", "Medical", "CLAT", "CA", "NDA"] as const;
-
-export type ExamPreparingFor = (typeof EXAM_PREPARING_FOR)[number];
 
 const BY_KEY = new Map<string, ExamPreparingFor>(
   EXAM_PREPARING_FOR.map((value) => [value.toLowerCase(), value]),
@@ -21,9 +36,6 @@ const BY_KEY = new Map<string, ExamPreparingFor>(
 export function examPreparingFor(raw: string | null | undefined): ExamPreparingFor | null {
   return BY_KEY.get(raw?.trim().toLowerCase() ?? "") ?? null;
 }
-
-/** The grades the tab lists. Grade 13 is out of scope. */
-const TEST_ATTENDANCE_GRADES: readonly number[] = [11, 12];
 
 /** The roster fields the listing rule reads. */
 export interface ListableRosterStudent {
@@ -44,68 +56,8 @@ export function isTestAttendanceStudent(student: ListableRosterStudent): boolean
     student.status !== "dropout" &&
     studentHasCurrentProgram(student, PMU_PROGRAM_ID) &&
     student.grade != null &&
-    TEST_ATTENDANCE_GRADES.includes(Number(student.grade))
+    (TEST_ATTENDANCE_GRADES as readonly number[]).includes(Number(student.grade))
   );
-}
-
-/** One Monthly Test that has opened. Times are UTC ISO strings. */
-export interface TestAttendanceMonthlyTest {
-  key: string;
-  name: string;
-  shortName: string;
-  opensAt: string;
-  closesAt: string;
-  state: "running" | "closed";
-  grades: number[];
-}
-
-/** How far a Student got in one Monthly Test, over all of its Papers. */
-export type AttendanceMark = "not_opened" | "opened" | "submitted";
-
-/** A Student on the tab's list, before any attendance. */
-export interface ListedStudent {
-  userId: string;
-  name: string;
-  studentId: string | null;
-  grade: number;
-  examPreparingFor: ExamPreparingFor | null;
-}
-
-/**
- * A Student on the tab's list. Carries nothing else about the Student.
- * `attendance` has one mark per Monthly Test key the Student is counted for,
- * and nothing for the others.
- */
-export interface TestAttendanceStudent extends ListedStudent {
-  attendance: Record<string, AttendanceMark>;
-}
-
-/** `GET /api/school/[udise]/test-attendance` */
-export interface TestAttendanceResponse {
-  monthlyTests: TestAttendanceMonthlyTest[];
-  students: TestAttendanceStudent[];
-  /** When the warehouse attendance table was last rebuilt (UTC ISO); null when unknown. */
-  lastRefreshed: string | null;
-  /** When the server built the response (UTC ISO). */
-  serverTime: string;
-}
-
-/** One entry of the PMU test set list: a Monthly Test's name and its Papers. */
-export interface TestSet {
-  label: string;
-  quizIds: string[];
-}
-
-/**
- * One Paper's window from the `session` table. Times are UTC ISO strings, or
- * null when missing or unparseable. A Paper with no `session` row has none.
- */
-export interface PaperWindow {
-  quizId: string;
-  opensAt: string | null;
-  closesAt: string | null;
-  grade: number | null;
-  switchedOn: boolean;
 }
 
 /** The period key of the All year page; never given to a Monthly Test. */
@@ -205,16 +157,6 @@ export function attendanceQuizIds(testSets: TestSet[], papers: PaperWindow[], no
   return [...new Set(openedMonthlyTests(testSets, papers, now).flatMap((test) => test.quizIds))];
 }
 
-/**
- * One attendance row from the warehouse: the Student opened the Paper.
- * `submitted` is null when the warehouse does not know.
- */
-export interface PaperAttendance {
-  userId: string;
-  quizId: string;
-  submitted: boolean | null;
-}
-
 const IST_OFFSET_MS = 330 * 60 * 1000;
 
 /** The IST calendar day of a UTC instant, as `YYYY-MM-DD`. */
@@ -307,9 +249,6 @@ export function monthTiles(students: TestAttendanceStudent[], testKey: string): 
   return tiles;
 }
 
-/** A month page's list filter: one mark, or every counted Student. */
-export type MonthListFilter = AttendanceMark | "all";
-
 /** The month list opens on the Students to chase: Yet to start, or Absent. */
 export const DEFAULT_MONTH_FILTER: MonthListFilter = "not_opened";
 
@@ -399,12 +338,6 @@ export function defaultPeriod(monthlyTests: Pick<TestAttendanceMonthlyTest, "key
   return running.reduce((latest, test) => (Date.parse(test.opensAt) > Date.parse(latest.opensAt) ? test : latest)).key;
 }
 
-/** A Student's Exam Preparing For group: one of the five, or "Not set". */
-export type ExamPreparingForGroup = ExamPreparingFor | "Not set";
-
-/** Group order: Engineering, Medical, CLAT, CA, NDA, Not set. */
-const EXAM_PREPARING_FOR_GROUPS: readonly ExamPreparingForGroup[] = [...EXAM_PREPARING_FOR, "Not set"];
-
 /** A blank or unrecognised value is "Not set", so no Student disappears from the counts. */
 function examPreparingForGroup(student: Pick<ListedStudent, "examPreparingFor">): ExamPreparingForGroup {
   return examPreparingFor(student.examPreparingFor) ?? "Not set";
@@ -446,7 +379,7 @@ export function monthGroupRows(students: TestAttendanceStudent[], testKey: strin
 
 /** The tab's Grade and Exam Preparing For filters. Component state only; not in the URL. */
 export interface TestAttendanceFilters {
-  grade: "all" | 11 | 12;
+  grade: "all" | TestAttendanceGrade;
   examPreparingFor: "all" | ExamPreparingForGroup;
 }
 
@@ -494,9 +427,6 @@ type TagWindowTest = Pick<TestAttendanceMonthlyTest, "key" | "shortName" | "stat
 function studentWindow<T extends TagWindowTest>(student: Pick<TestAttendanceStudent, "attendance">, monthlyTests: T[]): T[] {
   return schoolWindow(monthlyTests.filter((test) => student.attendance[test.key] != null));
 }
-
-/** Follow Up (red): Absent in 2 or more. Not Submitting (amber): Opened, not submitted in 2 or more. */
-export type FollowUpTag = "follow_up" | "not_submitting";
 
 /** How many misses of one kind a tag needs. */
 const TAG_THRESHOLD = 2;
@@ -574,9 +504,6 @@ export function followUpFor(student: Pick<TestAttendanceStudent, "attendance">, 
 export function attendedText(attended: number, counted: number): string {
   return counted === 0 ? "—" : `${attended} of ${counted} (${percentText(attended, counted)})`;
 }
-
-/** The All year list filter: everyone, or one tag. */
-export type AllYearListFilter = "all" | FollowUpTag;
 
 export interface AllYearStudentRow {
   student: TestAttendanceStudent;

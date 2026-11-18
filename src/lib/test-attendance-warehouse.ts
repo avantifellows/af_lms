@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 
 import { getBigQueryClient } from "@/lib/bigquery";
-import type { PaperAttendance } from "@/lib/test-attendance-rules";
+import type { PaperAttendance } from "@/types/test-attendance";
 import { ttlCache } from "@/lib/ttl-cache";
 
 const ATTENDANCE_TABLE = "`avantifellows.production_dbt_final.fact_student_test_attendance`";

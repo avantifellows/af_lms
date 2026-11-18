@@ -9,13 +9,8 @@
 // whole run; it never turns into empty difference lists.
 // `scripts/check-test-attendance.ts` wires the real, read-only sources.
 
-import {
-  examPreparingFor,
-  monthlyTestsWithPapers,
-  type PaperWindow,
-  type TestAttendanceResponse,
-  type TestSet,
-} from "./test-attendance-rules";
+import type { PaperWindow, TestAttendanceResponse, TestSet } from "@/types/test-attendance";
+import { examPreparingFor, monthlyTestsWithPapers } from "./test-attendance-rules";
 
 /** One submitted result in the warehouse: the Student submitted the quiz. */
 export interface SubmittedResult {

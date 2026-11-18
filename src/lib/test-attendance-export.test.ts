@@ -2,12 +2,8 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
 import { testAttendanceSheet } from "./test-attendance-export";
-import {
-  ALL_STUDENTS,
-  DEFAULT_MONTH_FILTER,
-  type TestAttendanceMonthlyTest,
-  type TestAttendanceStudent,
-} from "./test-attendance-rules";
+import type { TestAttendanceMonthlyTest, TestAttendanceStudent } from "@/types/test-attendance";
+import { ALL_STUDENTS, DEFAULT_MONTH_FILTER } from "./test-attendance-rules";
 
 const monthlyTest = (name: string): TestAttendanceMonthlyTest => ({
   key: "test",

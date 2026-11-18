@@ -11,7 +11,7 @@ import type {
   TestAttendanceResponse,
   TestAttendanceStudent,
   TestSet,
-} from "./test-attendance-rules";
+} from "@/types/test-attendance";
 
 // 20 Nov 2026, 12:00 IST. October (two Papers) has closed; November is running.
 const NOW = new Date("2026-11-20T06:30:00.000Z");

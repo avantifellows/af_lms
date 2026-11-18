@@ -12,6 +12,12 @@ import { Card } from "@/components/ui";
 import AttendanceChart from "@/components/test-attendance/AttendanceChart";
 import StudentListHeader from "@/components/test-attendance/StudentListHeader";
 import { Tile } from "@/components/test-attendance/MonthPage";
+import type {
+  AllYearListFilter,
+  AttendanceMark,
+  TestAttendanceMonthlyTest,
+  TestAttendanceStudent,
+} from "@/types/test-attendance";
 import {
   allYearColumns,
   allYearStudents,
@@ -23,11 +29,7 @@ import {
   percentText,
   schoolWindow,
   windowMark,
-  type AllYearListFilter,
-  type AttendanceMark,
   type FollowUp,
-  type TestAttendanceMonthlyTest,
-  type TestAttendanceStudent,
 } from "@/lib/test-attendance-rules";
 
 const LIST_FILTERS: { value: AllYearListFilter; label: string }[] = [

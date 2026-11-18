@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  ListedStudent,
+  PaperAttendance,
+  PaperWindow,
+  TestAttendanceStudent,
+} from "@/types/test-attendance";
 import {
   allYearColumns,
   allYearStudents,
@@ -21,10 +27,6 @@ import {
   percentText,
   schoolWindow,
   testAttendanceFrom,
-  type ListedStudent,
-  type PaperAttendance,
-  type PaperWindow,
-  type TestAttendanceStudent,
   windowMark,
 } from "./test-attendance-rules";
 
