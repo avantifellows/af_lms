@@ -175,28 +175,39 @@ export async function runTestAttendanceCheck(sources: CheckSources, now: Date): 
   };
 }
 
-function paperRows(testSets: TestSet[], papers: PaperWindow[]): CheckReport["papers"] {
-  const byQuizId = new Map(papers.map((paper) => [paper.quizId, paper]));
-  const quizIds = new Set<string>();
-  const incomplete: CheckReport["papers"]["incomplete"] = [];
-  const switchedOff: CheckReport["papers"]["switchedOff"] = [];
+/** What a quiz id's session row lacks for the tab: the whole row, or its grade and times. */
+function missingPaperFields(paper: PaperWindow | undefined): string[] {
+  if (!paper) return ["session row"];
+  const missing: string[] = [];
+  if (paper.grade == null) missing.push("grade");
+  if (paper.opensAt == null) missing.push("opening time");
+  if (paper.closesAt == null) missing.push("closing time");
+  return missing;
+}
+
+/** Each quiz id once, with the label of the first test set that lists it. */
+function uniqueQuizIds(testSets: TestSet[]): { quizId: string; testSet: string }[] {
+  const seen = new Map<string, string>();
   for (const set of testSets) {
     for (const quizId of set.quizIds) {
-      if (quizIds.has(quizId)) continue;
-      quizIds.add(quizId);
-      const paper = byQuizId.get(quizId);
-      const missing = paper
-        ? [
-            ...(paper.grade == null ? ["grade"] : []),
-            ...(paper.opensAt == null ? ["opening time"] : []),
-            ...(paper.closesAt == null ? ["closing time"] : []),
-          ]
-        : ["session row"];
-      if (missing.length > 0) incomplete.push({ quizId, testSet: set.label, missing });
-      if (paper && !paper.switchedOn) switchedOff.push({ quizId, testSet: set.label });
+      if (!seen.has(quizId)) seen.set(quizId, set.label);
     }
   }
-  return { quizIds: quizIds.size, incomplete, switchedOff };
+  return [...seen].map(([quizId, testSet]) => ({ quizId, testSet }));
+}
+
+function paperRows(testSets: TestSet[], papers: PaperWindow[]): CheckReport["papers"] {
+  const byQuizId = new Map(papers.map((paper) => [paper.quizId, paper]));
+  const quizIds = uniqueQuizIds(testSets);
+  const incomplete: CheckReport["papers"]["incomplete"] = [];
+  const switchedOff: CheckReport["papers"]["switchedOff"] = [];
+  for (const { quizId, testSet } of quizIds) {
+    const paper = byQuizId.get(quizId);
+    const missing = missingPaperFields(paper);
+    if (missing.length > 0) incomplete.push({ quizId, testSet, missing });
+    if (paper && !paper.switchedOn) switchedOff.push({ quizId, testSet });
+  }
+  return { quizIds: quizIds.length, incomplete, switchedOff };
 }
 
 function unrecognisedExamPreparingFor(listing: ListingRow[]): CheckReport["examPreparingFor"] {

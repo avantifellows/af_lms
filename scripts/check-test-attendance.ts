@@ -54,16 +54,16 @@ async function main(): Promise<void> {
     .join(" ");
 
   // Imported after the environment is set: the pool reads it on import.
-  const [db, { getBigQueryClient }, check, rules, roster, loader, papers, list] = await Promise.all([
+  const [db, { getBigQueryClient }, check, rules, roster, papers, list] = await Promise.all([
     import("../src/lib/db"),
     import("../src/lib/bigquery"),
     import("../src/lib/test-attendance-check"),
     import("../src/lib/test-attendance-rules"),
     import("../src/lib/school-students"),
-    import("../src/lib/test-attendance"),
     import("../src/lib/test-attendance-papers"),
     import("../src/lib/test-set-list"),
   ]);
+  const { loadTestAttendance, readNvsJoiningDates } = await import("../src/lib/test-attendance");
 
   const sources: CheckSources = {
     nvsSchools: async () =>
@@ -73,11 +73,11 @@ async function main(): Promise<void> {
       ),
     testSets: () => list.getNvsTestSets(),
     paperWindows: (quizIds) => papers.readPaperWindows(quizIds),
-    schoolAttendance: (schoolId, now) => loader.loadTestAttendance(schoolId, now),
+    schoolAttendance: (schoolId, now) => loadTestAttendance(schoolId, now),
     schoolListing: async (schoolId) => {
       const { students } = await roster.getSchoolRoster(schoolId);
       const listed = students.filter(rules.isTestAttendanceStudent);
-      const joinedOn = await loader.readNvsJoiningDates(listed.map((student) => String(student.user_id)));
+      const joinedOn = await readNvsJoiningDates(listed.map((student) => String(student.user_id)));
       return listed.map((student) => ({
         userId: String(student.user_id),
         rawExamPreparingFor: student.stream ?? null,

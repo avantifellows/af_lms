@@ -397,7 +397,7 @@ export type ExamPreparingForGroup = ExamPreparingFor | "Not set";
 const EXAM_PREPARING_FOR_GROUPS: readonly ExamPreparingForGroup[] = [...EXAM_PREPARING_FOR, "Not set"];
 
 /** A blank or unrecognised value is "Not set", so no Student disappears from the counts. */
-export function examPreparingForGroup(student: Pick<ListedStudent, "examPreparingFor">): ExamPreparingForGroup {
+function examPreparingForGroup(student: Pick<ListedStudent, "examPreparingFor">): ExamPreparingForGroup {
   return examPreparingFor(student.examPreparingFor) ?? "Not set";
 }
 
