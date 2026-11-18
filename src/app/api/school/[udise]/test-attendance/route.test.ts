@@ -2,18 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 // The read route through the real gate and permission layer: only the session,
-// the Postgres `query()` boundary and the PMU test set list (Firestore) are
-// stubbed, so the matrix, read_only, the PMU pin (ADR 0007), School scope, the
-// roster loader, the Paper windows read and the rules run as in production.
-const { mockQuery, mockGetServerSession, mockGetNvsTestSets } = vi.hoisted(() => ({
+// the Postgres `query()` boundary, the PMU test set list (Firestore) and the
+// BigQuery client are stubbed, so the matrix, read_only, the PMU pin (ADR 0007),
+// School scope, the roster loader, the Paper windows read, the attendance read
+// and the rules run as in production.
+const { mockQuery, mockGetServerSession, mockGetNvsTestSets, mockBigQuery } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetNvsTestSets: vi.fn(),
+  mockBigQuery: vi.fn(),
 }));
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/test-set-list", () => ({ getNvsTestSets: mockGetNvsTestSets }));
+vi.mock("@/lib/bigquery", () => ({ getBigQueryClient: () => ({ query: mockBigQuery }) }));
 
 import { GET } from "./route";
 
@@ -98,6 +101,7 @@ beforeEach(() => {
   permissionRow = row("pmu_govt_school_user");
   mockGetServerSession.mockResolvedValue({ user: { email } });
   mockGetNvsTestSets.mockResolvedValue([]);
+  mockBigQuery.mockResolvedValue([[]]);
   mockQuery.mockImplementation(async (sql: string) => {
     if (sql.includes("FROM user_permission")) return permissionRow ? [permissionRow] : [];
     if (sql.includes("FROM school WHERE")) return school ? [school] : [];
@@ -116,6 +120,7 @@ function expectNoRosterRead() {
   expect(sqls.filter(isRosterRead)).toEqual([]);
   expect(sqls.filter(isSessionRead)).toEqual([]);
   expect(mockGetNvsTestSets).not.toHaveBeenCalled();
+  expect(mockBigQuery).not.toHaveBeenCalled();
 }
 
 describe("GET /api/school/[udise]/test-attendance — gate", () => {
@@ -200,9 +205,9 @@ describe("GET /api/school/[udise]/test-attendance — success", () => {
     expect(await response.json()).toEqual({
       monthlyTests: [],
       students: [
-        { userId: "10", name: "Nisha Rao", studentId: "NVS001", grade: 11, examPreparingFor: "Engineering" },
-        { userId: "12", name: "Ravi Das", studentId: "NVS003", grade: 11, examPreparingFor: null },
-        { userId: "14", name: "Maya Iyer", studentId: "NVS002", grade: 12, examPreparingFor: "Medical" },
+        { userId: "10", name: "Nisha Rao", studentId: "NVS001", grade: 11, examPreparingFor: "Engineering", attendance: {} },
+        { userId: "12", name: "Ravi Das", studentId: "NVS003", grade: 11, examPreparingFor: null, attendance: {} },
+        { userId: "14", name: "Maya Iyer", studentId: "NVS002", grade: 12, examPreparingFor: "Medical", attendance: {} },
       ],
       serverTime: "2026-11-18T08:30:00.000Z",
     });
@@ -367,6 +372,94 @@ describe("GET /api/school/[udise]/test-attendance — Monthly Tests", () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "Failed to load Test Attendance" });
     expect(JSON.stringify(consoleError.mock.calls)).toContain("statement timeout");
+    consoleError.mockRestore();
+  });
+});
+
+// Warehouse rows as the attendance read's query returns them: one per Student
+// and quiz, `submitted` null when the warehouse does not know.
+const bqRow = (user_id: string, quiz_id: string, submitted: boolean | null) => ({ user_id, quiz_id, submitted });
+
+describe("GET /api/school/[udise]/test-attendance — attendance", () => {
+  beforeEach(() => {
+    // Server time 2026-11-18T08:30:00Z = 18 Nov 2026, 2:00 pm IST.
+    // October (closed): Grade 11 Engineering and NDA Papers, a Grade 12 Paper.
+    // November (running): Grade 11 only.
+    mockGetNvsTestSets.mockResolvedValue([
+      { label: "October", quizIds: ["oct-g11-eng", "oct-g11-nda", "oct-g12"] },
+      { label: "November", quizIds: ["nov-g11"] },
+    ]);
+    sessionRows = [
+      sessionRow("oct-g11-eng", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
+      sessionRow("oct-g11-nda", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "11"),
+      sessionRow("oct-g12", "2026-10-06 05:00:00", "2026-10-10 23:55:00", "12"),
+      sessionRow("nov-g11", "2026-11-17 05:00:00", "2026-11-21 23:55:00", "11"),
+    ];
+  });
+
+  it("returns each listed Student's mark for every Monthly Test they are counted for", async () => {
+    mockBigQuery.mockResolvedValue([
+      [
+        // Nisha (Grade 11): opened both October Papers, submitted the NDA one; opened November.
+        bqRow("10", "oct-g11-eng", false),
+        bqRow("10", "oct-g11-nda", true),
+        bqRow("10", "nov-g11", null),
+        // Ravi (Grade 11): sat October on the Grade 12 Paper; nothing in November.
+        bqRow("12", "oct-g12", true),
+        // Maya (Grade 12): opened October without submitting.
+        bqRow("14", "oct-g12", false),
+      ],
+    ]);
+
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.students.map((s: { userId: string; attendance: unknown }) => [s.userId, s.attendance])).toEqual([
+      ["10", { october: "submitted", november: "opened" }],
+      ["12", { october: "submitted", november: "not_opened" }],
+      // Grade 12 has no Paper in November: no mark for it.
+      ["14", { october: "opened" }],
+    ]);
+  });
+
+  it("returns only listed Students, whatever the warehouse holds for others", async () => {
+    mockBigQuery.mockResolvedValue([
+      [
+        // Chetan (CoE), Deepa (NVS dropout) and Gita (Grade 13) sat October.
+        bqRow("11", "oct-g11-eng", true),
+        bqRow("13", "oct-g12", true),
+        bqRow("17", "oct-g12", true),
+      ],
+    ]);
+
+    const response = await get();
+
+    const body = await response.json();
+    expect(body.students.map((s: { userId: string }) => s.userId)).toEqual(["10", "12", "14"]);
+    expect(JSON.stringify(body)).not.toMatch(/Chetan|Deepa|Gita|COE001|NVS004|NVS013/);
+  });
+
+  it("asks the warehouse only about the listed Students and the opened Monthly Tests' Papers", async () => {
+    await get();
+
+    expect(mockBigQuery).toHaveBeenCalledTimes(1);
+    const params = mockBigQuery.mock.calls[0][0].params;
+    expect([...params.userIds].sort()).toEqual(["10", "12", "14"]);
+    expect([...params.quizIds].sort()).toEqual(["nov-g11", "oct-g11-eng", "oct-g11-nda", "oct-g12"]);
+  });
+
+  it("answers 500 and logs no Student data when the attendance read fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockBigQuery.mockRejectedValue(new Error("Access Denied: Table fact_student_test_attendance"));
+
+    const response = await get();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Failed to load Test Attendance" });
+    const logged = JSON.stringify(consoleError.mock.calls);
+    expect(logged).toContain("Access Denied");
+    expect(logged).not.toContain("Nisha");
     consoleError.mockRestore();
   });
 });

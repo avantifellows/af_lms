@@ -59,13 +59,25 @@ export interface TestAttendanceMonthlyTest {
   grades: number[];
 }
 
-/** A Student on the tab's list. Carries nothing else about the Student. */
-export interface TestAttendanceStudent {
+/** How far a Student got in one Monthly Test, over all of its Papers. */
+export type AttendanceMark = "not_opened" | "opened" | "submitted";
+
+/** A Student on the tab's list, before any attendance. */
+export interface ListedStudent {
   userId: string;
   name: string;
   studentId: string | null;
   grade: number;
   examPreparingFor: ExamPreparingFor | null;
+}
+
+/**
+ * A Student on the tab's list. Carries nothing else about the Student.
+ * `attendance` has one mark per Monthly Test key the Student is counted for,
+ * and nothing for the others.
+ */
+export interface TestAttendanceStudent extends ListedStudent {
+  attendance: Record<string, AttendanceMark>;
 }
 
 /** `GET /api/school/[udise]/test-attendance` */
@@ -112,21 +124,25 @@ function usablePapers(set: TestSet, papers: Map<string, PaperWindow>) {
     );
 }
 
-/**
- * The Monthly Tests that have opened by `now`, ordered by closing time. A
- * Monthly Test is one test set list entry with at least one usable Paper
- * (switched on, both times known); it runs from its earliest Paper opening
- * until its latest Paper closing and is closed from then on.
- */
-export function monthlyTestsFrom(
-  testSets: TestSet[],
-  papers: PaperWindow[],
-  now: Date,
-): TestAttendanceMonthlyTest[] {
+/** An opened Monthly Test with the quiz ids of its usable Papers. */
+type OpenedMonthlyTest = TestAttendanceMonthlyTest & { quizIds: string[] };
+
+/** The Monthly Test as the response carries it: no quiz ids. */
+const withoutQuizIds = (test: OpenedMonthlyTest): TestAttendanceMonthlyTest => ({
+  key: test.key,
+  name: test.name,
+  shortName: test.shortName,
+  opensAt: test.opensAt,
+  closesAt: test.closesAt,
+  state: test.state,
+  grades: test.grades,
+});
+
+function openedMonthlyTests(testSets: TestSet[], papers: PaperWindow[], now: Date): OpenedMonthlyTest[] {
   const byQuizId = new Map(papers.map((p) => [p.quizId, p]));
   const nowMs = now.getTime();
   const keys = new Set<string>();
-  const tests: TestAttendanceMonthlyTest[] = [];
+  const tests: OpenedMonthlyTest[] = [];
   for (const set of testSets) {
     const key = keyFor(set.label, keys);
     const usable = usablePapers(set, byQuizId);
@@ -143,9 +159,150 @@ export function monthlyTestsFrom(
       closesAt,
       state: nowMs < Date.parse(closesAt) ? "running" : "closed",
       grades,
+      quizIds: usable.map((p) => p.quizId),
     });
   }
   return tests.sort((a, b) => Date.parse(a.closesAt) - Date.parse(b.closesAt));
+}
+
+/**
+ * The Monthly Tests that have opened by `now`, ordered by closing time. A
+ * Monthly Test is one test set list entry with at least one usable Paper
+ * (switched on, both times known); it runs from its earliest Paper opening
+ * until its latest Paper closing and is closed from then on.
+ */
+export function monthlyTestsFrom(
+  testSets: TestSet[],
+  papers: PaperWindow[],
+  now: Date,
+): TestAttendanceMonthlyTest[] {
+  return openedMonthlyTests(testSets, papers, now).map(withoutQuizIds);
+}
+
+/** The quiz ids whose attendance the tab needs: the usable Papers of the opened Monthly Tests. */
+export function attendanceQuizIds(testSets: TestSet[], papers: PaperWindow[], now: Date): string[] {
+  return [...new Set(openedMonthlyTests(testSets, papers, now).flatMap((test) => test.quizIds))];
+}
+
+/**
+ * One attendance row from the warehouse: the Student opened the Paper.
+ * `submitted` is null when the warehouse does not know.
+ */
+export interface PaperAttendance {
+  userId: string;
+  quizId: string;
+  submitted: boolean | null;
+}
+
+/**
+ * The tab's data: the opened Monthly Tests, and each listed Student's mark for
+ * every Monthly Test they are counted for. A Student is counted when their
+ * grade is one of the Monthly Test's grades. Any Paper of the Monthly Test
+ * counts, whatever its grade; submitting any Paper is "submitted", opening
+ * any is "opened". An unknown submitted state counts as not submitted.
+ */
+export function testAttendanceFrom(input: {
+  testSets: TestSet[];
+  papers: PaperWindow[];
+  students: ListedStudent[];
+  attendance: PaperAttendance[];
+  now: Date;
+}): Pick<TestAttendanceResponse, "monthlyTests" | "students"> {
+  const tests = openedMonthlyTests(input.testSets, input.papers, input.now);
+  const byStudent = new Map<string, PaperAttendance[]>();
+  for (const row of input.attendance) {
+    const rows = byStudent.get(row.userId) ?? [];
+    rows.push(row);
+    byStudent.set(row.userId, rows);
+  }
+  const students = input.students.map((student) => {
+    const rows = byStudent.get(student.userId) ?? [];
+    const attendance: Record<string, AttendanceMark> = {};
+    for (const test of tests) {
+      if (!test.grades.includes(student.grade)) continue;
+      const papersOpened = rows.filter((row) => test.quizIds.includes(row.quizId));
+      attendance[test.key] = papersOpened.some((row) => row.submitted === true)
+        ? "submitted"
+        : papersOpened.length > 0
+          ? "opened"
+          : "not_opened";
+    }
+    return { ...student, attendance };
+  });
+  return { monthlyTests: tests.map(withoutQuizIds), students };
+}
+
+/** A Student's Test Attendance Status for one Monthly Test. */
+export type TestAttendanceStatus = "Yet to start" | "In progress" | "Submitted" | "Absent" | "Opened, not submitted";
+
+const STATUS: Record<TestAttendanceMonthlyTest["state"], Record<AttendanceMark, TestAttendanceStatus>> = {
+  running: { not_opened: "Yet to start", opened: "In progress", submitted: "Submitted" },
+  closed: { not_opened: "Absent", opened: "Opened, not submitted", submitted: "Submitted" },
+};
+
+/** The status for a mark: the furthest state reached, read against whether the test is running or closed. */
+export function attendanceStatus(state: TestAttendanceMonthlyTest["state"], mark: AttendanceMark): TestAttendanceStatus {
+  return STATUS[state][mark];
+}
+
+/** A whole percentage of `x` out of `y`; a zero base is "—", never "0%". */
+export function percentText(x: number, y: number): string {
+  return y === 0 ? "—" : `${Math.round((x / y) * 100)}%`;
+}
+
+/** A month page's counts. Every count is out of `counted`, the Students counted for the Monthly Test. */
+export interface MonthTiles {
+  counted: number;
+  /** Opened any Paper, submitted or not. */
+  attended: number;
+  submitted: number;
+  /** Opened a Paper and submitted none (In progress, or Opened, not submitted). */
+  opened: number;
+  /** Opened no Paper (Yet to start, or Absent). */
+  notOpened: number;
+}
+
+export function monthTiles(students: TestAttendanceStudent[], testKey: string): MonthTiles {
+  const tiles: MonthTiles = { counted: 0, attended: 0, submitted: 0, opened: 0, notOpened: 0 };
+  for (const student of students) {
+    const mark = student.attendance[testKey];
+    if (mark == null) continue;
+    tiles.counted += 1;
+    if (mark === "submitted") tiles.submitted += 1;
+    else if (mark === "opened") tiles.opened += 1;
+    else tiles.notOpened += 1;
+  }
+  tiles.attended = tiles.submitted + tiles.opened;
+  return tiles;
+}
+
+/** A month page's list filter: one mark, or every counted Student. */
+export type MonthListFilter = AttendanceMark | "all";
+
+/** The month list opens on the Students to chase: Yet to start, or Absent. */
+export const DEFAULT_MONTH_FILTER: MonthListFilter = "not_opened";
+
+export interface MonthStudentRow {
+  student: TestAttendanceStudent;
+  status: TestAttendanceStatus;
+}
+
+/** Sorted by grade, then name. */
+const byGradeThenName = (a: ListedStudent, b: ListedStudent) => a.grade - b.grade || a.name.localeCompare(b.name);
+
+/** The month page's Students: those counted for the Monthly Test, filtered, by grade then name. */
+export function monthStudents(
+  students: TestAttendanceStudent[],
+  test: Pick<TestAttendanceMonthlyTest, "key" | "state">,
+  filter: MonthListFilter = DEFAULT_MONTH_FILTER,
+): MonthStudentRow[] {
+  return students
+    .filter((student) => {
+      const mark = student.attendance[test.key];
+      return mark != null && (filter === "all" || mark === filter);
+    })
+    .sort(byGradeThenName)
+    .map((student) => ({ student, status: attendanceStatus(test.state, student.attendance[test.key]) }));
 }
 
 const IST_OFFSET_MS = 330 * 60 * 1000;

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, Card } from "@/components/ui";
+import MonthPage from "@/components/test-attendance/MonthPage";
 import {
   closingTimeText,
   type TestAttendanceMonthlyTest,
@@ -127,7 +128,11 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
         <PeriodStrip monthlyTests={data.monthlyTests} period={selected ? selected.key : "all"} onChange={setPeriod} />
       )}
       {selected ? (
-        <MonthBanner test={selected} serverTime={data.serverTime} />
+        <>
+          <MonthBanner test={selected} serverTime={data.serverTime} />
+          {/* Keyed so a newly opened month starts on its default list filter. */}
+          <MonthPage key={selected.key} test={selected} students={data.students} />
+        </>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
