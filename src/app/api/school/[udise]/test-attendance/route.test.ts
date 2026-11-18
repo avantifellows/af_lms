@@ -591,6 +591,15 @@ const enrollmentRow = (user_id: string, start_date: string | null, is_current: b
 });
 const isJoiningRead = (sql: string) => sql.includes("start_date");
 
+/** What the joining-date read answers for the asked Students: their earliest dated row, as MIN … GROUP BY does. */
+function earliestEnrollments(rows: ReturnType<typeof enrollmentRow>[], asked: string[]) {
+  const dated = rows
+    .filter((r) => asked.includes(r.user_id) && r.start_date != null)
+    .sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)));
+  // Later entries win in a Map, so latest-first leaves each Student's earliest date.
+  return [...new Map(dated.map((r) => [r.user_id, r.start_date]))].map(([user_id, start_date]) => ({ user_id, start_date }));
+}
+
 describe("GET /api/school/[udise]/test-attendance — joining dates", () => {
   let enrollmentRows: ReturnType<typeof enrollmentRow>[];
 
@@ -614,14 +623,7 @@ describe("GET /api/school/[udise]/test-attendance — joining dates", () => {
       if (sql.includes("program_dropout_audits")) return roster;
       if (isSessionRead(sql)) return sessionRows;
       if (isJoiningRead(sql)) {
-        const asked = (params[0] as unknown[]).map(String);
-        const earliest = new Map<string, string>();
-        for (const r of enrollmentRows) {
-          if (!asked.includes(r.user_id) || r.start_date == null) continue;
-          const seen = earliest.get(r.user_id);
-          if (seen == null || r.start_date < seen) earliest.set(r.user_id, r.start_date);
-        }
-        return [...earliest].map(([user_id, start_date]) => ({ user_id, start_date }));
+        return earliestEnrollments(enrollmentRows, (params[0] as unknown[]).map(String));
       }
       return [];
     });

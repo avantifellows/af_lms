@@ -96,8 +96,11 @@ export const latestTime = (times: (string | null)[]) =>
 type OpenedMonthlyTest = TestAttendanceMonthlyTest & { quizIds: string[] };
 
 /** The Monthly Test as the response carries it: no quiz ids. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose
-const withoutQuizIds = ({ quizIds, ...test }: OpenedMonthlyTest): TestAttendanceMonthlyTest => test;
+function withoutQuizIds(test: OpenedMonthlyTest): TestAttendanceMonthlyTest {
+  const sent: Partial<OpenedMonthlyTest> = { ...test };
+  delete sent.quizIds;
+  return sent as TestAttendanceMonthlyTest;
+}
 
 /**
  * The Monthly Tests that have opened by `now`, ordered by closing time, with
