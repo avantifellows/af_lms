@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession, type Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessStudent, isPmuOnlyStudent } from "@/lib/permissions";
+import { examPasswordViewer, gateExamRecords } from "@/lib/exam-records-gate";
 import {
   listExamOptions,
   listStudentExamRecords,
@@ -16,89 +16,95 @@ import {
   canonicalizeExamRecordsPayload,
   type CanonicalExamRecordInput,
 } from "@/lib/exam-records-payload";
+import { encryptExamPassword } from "@/lib/exam-password-crypto";
 import type { StudentExamRecord } from "@/lib/competitive-exams";
 
-// The Exams tab of Edit Student. Both verbs require edit rights on the
-// Student, not just view: the response carries exam-portal passwords, which no
-// other surface exposes.
+// The Exams tab of Edit Student. Both verbs are gated by `gateExamRecords`
+// (edit rights on the Student, not a JNV NVS Student).
 //
-// Exam registrations are a physical-centre feature (#434, confirmed with the
-// Programs team), so both verbs also refuse a PMU (JNV NVS) Student outright
-// — the UI hides the tab for them, and the endpoint can't be used to put one
-// on an NVS Student behind its back.
-
-function parseStudentId(raw: string): number | null {
-  // Exact integer only — `Number.parseInt` would turn "5abc" into another
-  // Student's id.
-  if (!/^\d+$/.test(raw)) return null;
-  const id = Number.parseInt(raw, 10);
-  return Number.isFinite(id) && id > 0 ? id : null;
-}
-
-async function gate(
-  session: Session | null,
-  rawStudentId: string,
-): Promise<{ ok: true; studentId: number } | { ok: false; response: NextResponse }> {
-  if (!session) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
-    };
-  }
-  const studentId = parseStudentId(rawStudentId);
-  if (studentId === null) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Invalid student id" }, { status: 400 }),
-    };
-  }
-  if (!(await canAccessStudent(session, studentId, { requireEdit: true }))) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
-  }
-  if (await isPmuOnlyStudent(studentId)) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: "Exam registrations are not collected for JNV NVS Students" },
-        { status: 403 },
-      ),
-    };
-  }
-  return { ok: true, studentId };
-}
+// Neither verb returns a password, only whether one is stored. A password the
+// tab sends is encrypted with KMS here, before it leaves for the DB Service;
+// reading one back is a separate, logged reveal
+// (`[recordId]/password/route.ts`).
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const gated = await gate(await getServerSession(authOptions), id);
+  const session = await getServerSession(authOptions);
+  const gated = await gateExamRecords(session, id);
   if (!gated.ok) return gated.response;
 
   try {
-    const [exams, records] = await Promise.all([
+    const [exams, records, viewer] = await Promise.all([
       listExamOptions(),
       listStudentExamRecords(gated.studentId),
+      examPasswordViewer(session as Session),
     ]);
-    return NextResponse.json({ exams, records });
+    return NextResponse.json({
+      exams,
+      records,
+      can_reveal_password: viewer?.canReveal ?? false,
+    });
   } catch (error) {
     console.error("Error loading student exam records:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
-function unchanged(existing: StudentExamRecord, write: ExamRecordWrite): boolean {
+function unchanged(existing: StudentExamRecord, exam: CanonicalExamRecordInput): boolean {
   const sameSessions =
     (existing.sessions_applied ?? []).join(",") ===
-    (write.sessions_applied ?? []).join(",");
+    (exam.sessions_applied ?? []).join(",");
+  // A new password is always written: KMS ciphertext differs every time, and
+  // the stored one is not decrypted just to compare.
+  const samePassword =
+    exam.password.action === "keep" ||
+    (exam.password.action === "clear" && !existing.has_password);
   return (
-    (existing.application_number ?? "") === write.application_number &&
-    (existing.application_password ?? null) === write.application_password &&
+    (existing.application_number ?? "") === exam.application_number &&
+    samePassword &&
     sameSessions
   );
+}
+
+/** The DB Service write for one registration, its password encrypted on the way. */
+async function toWrite(
+  studentId: number,
+  exam: CanonicalExamRecordInput,
+): Promise<ExamRecordWrite> {
+  const write: ExamRecordWrite = {
+    student_id: studentId,
+    exam_id: exam.exam_id,
+    application_number: exam.application_number,
+    sessions_applied: exam.sessions_applied,
+  };
+  if (exam.password.action === "set") {
+    write.application_password = null;
+    write.application_password_ciphertext = await encryptOrFail(exam.password.value, studentId);
+  } else if (exam.password.action === "clear") {
+    write.application_password = null;
+    write.application_password_ciphertext = null;
+  }
+  return write;
+}
+
+/**
+ * KMS errors name the key ARN and the IAM user, which belong in the server log
+ * and not in a warning shown to whoever is editing the Student, so they are
+ * replaced with a plain message here.
+ */
+async function encryptOrFail(plaintext: string, studentId: number): Promise<string> {
+  try {
+    return await encryptExamPassword(plaintext, studentId);
+  } catch (error) {
+    console.error(
+      "Exam password encryption failed:",
+      error instanceof Error ? error.name : typeof error,
+    );
+    throw new Error("the password could not be encrypted; try again later");
+  }
 }
 
 function errorText(error: unknown): string {
@@ -166,17 +172,13 @@ async function applyUpserts(
   outcome: WriteOutcome,
 ): Promise<void> {
   for (const exam of exams) {
-    const write: ExamRecordWrite = {
-      student_id: studentId,
-      exam_id: exam.exam_id,
-      application_number: exam.application_number,
-      application_password: exam.application_password,
-      sessions_applied: exam.sessions_applied,
-    };
     const current = existingByExam.get(exam.exam_id);
-    if (current && unchanged(current, write)) continue;
+    if (current && unchanged(current, exam)) continue;
     outcome.attempted += 1;
     try {
+      // Inside the try: a KMS failure fails this registration, as a DB Service
+      // failure does, and never sends the password unencrypted.
+      const write = await toWrite(studentId, exam);
       if (current) await updateExamRecord(current.id, write);
       else await createExamRecord(write);
     } catch (error) {
@@ -191,7 +193,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const gated = await gate(await getServerSession(authOptions), id);
+  const gated = await gateExamRecords(await getServerSession(authOptions), id);
   if (!gated.ok) return gated.response;
   const studentId = gated.studentId;
 

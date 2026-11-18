@@ -39,6 +39,10 @@ frontend:
           echo "S3_DOCS_REGION=$S3_DOCS_REGION" >> .env.production
           echo "S3_DOCS_ACCESS_KEY_ID=$S3_DOCS_ACCESS_KEY_ID" >> .env.production
           echo "S3_DOCS_SECRET_ACCESS_KEY=$S3_DOCS_SECRET_ACCESS_KEY" >> .env.production
+          echo "EXAM_PASSWORD_KMS_KEY_ID=$EXAM_PASSWORD_KMS_KEY_ID" >> .env.production
+          echo "EXAM_PASSWORD_KMS_REGION=$EXAM_PASSWORD_KMS_REGION" >> .env.production
+          echo "EXAM_PASSWORD_KMS_ACCESS_KEY_ID=$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" >> .env.production
+          echo "EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY=$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" >> .env.production
           echo "CMS_SERVICE_URL=$CMS_SERVICE_URL" >> .env.production
           echo "CMS_SERVICE_TOKEN=$CMS_SERVICE_TOKEN" >> .env.production
           echo "QUIZ_BACKEND_URL=$QUIZ_BACKEND_URL" >> .env.production

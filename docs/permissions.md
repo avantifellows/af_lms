@@ -192,6 +192,13 @@ page and API denies them (`getUserPermission` returns `null` for them).
 | performance | view | view | view | view |
 | summary_stats | none | view | view | view |
 | pm_dashboard | none | view | view | view |
+| exam_passwords | view | view | view | view |
+
+`exam_passwords` is the right to reveal a Student's decrypted exam-portal password on the
+Edit Student Exams tab. It sits on top of the tab's own gate (edit rights on the Student,
+school-scoped, never a JNV NVS Student), so a teacher sees their schools' Students and a PM
+their assigned schools'. Every reveal is logged to `lms_exam_password_reveals`. Every other
+role is `none`.
 
 ### NVS-Only Users
 

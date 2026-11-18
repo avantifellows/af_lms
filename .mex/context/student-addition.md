@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-23
+last_updated: 2026-11-16
 ---
 
 # Student Addition
@@ -187,19 +187,49 @@ decide which blocks *open* — nothing is stored until a teacher fills one in, a
 can be removed.
 
 Per exam: application number (required — see the DB Service note below), application
-password (type=password with a Show toggle) and, for an exam that runs more than once a
-year, the sittings applied for. Only JEE Mains has sittings today (`EXAM_SESSIONS`).
+password and, for an exam that runs more than once a year, the sittings applied for. Only
+JEE Mains has sittings today (`EXAM_SESSIONS`).
+
+**Passwords are KMS-encrypted (2026-11-16, confirmed with Programs).** The LMS encrypts an
+exam-portal password with AWS KMS (`src/lib/exam-password-crypto.ts`, key
+`EXAM_PASSWORD_KMS_KEY_ID`, its own IAM user) before it goes to the DB Service, which stores
+the base64 ciphertext in `student_exam_record.application_password_ciphertext` without any
+key that could read it; BigQuery gets the ciphertext only. The encryption context carries
+the Student id, so a ciphertext copied to another Student's row won't decrypt. No read in
+the LMS selects a password: the tab and the card both get `has_password` (ciphertext, or a
+non-blank legacy plaintext the backfill has not reached). A stored password shows masked
+with **Show** (roles with `exam_passwords` view), **Change** and **Remove**. Show calls
+`POST /api/students/[id]/exam-records/[recordId]/password` — same gate as the tab, then
+`exam_passwords` view, then the record must be this Student's (404 otherwise) — which
+decrypts, appends a row to `lms_exam_password_reveals` (viewer email + role, Student,
+registration, exam; append-only, schema in db-service), and only then returns the password
+with `no-store`. A reveal that can't be logged isn't made. Teachers reach their schools'
+Students and PMs their assigned schools' through `canAccessStudent`; Programs required
+both to see passwords and allowed admins and program admins to.
+
+The save is tri-state per registration: `application_password` left out keeps what is
+stored (the tab never has it to send back), `null`/blank clears it, a string replaces it.
+A KMS failure fails that registration like a DB Service failure, and the plaintext never
+leaves for the DB Service; the warning says only that the password could not be encrypted
+(KMS errors name the key and IAM user, so they stay in the server log). Writes send
+`application_password: null` alongside the ciphertext, which wipes any legacy plaintext on
+the row, and a password write fails unless the DB Service answers with exactly the
+ciphertext sent and no plaintext — a DB Service without the ciphertext column would
+otherwise drop it and report success. Reveal state in the tab is keyed by record id, and a
+reveal still in flight when the tab reloads or saves is discarded when it lands. `scripts/encrypt-exam-passwords.ts`
+re-encrypts the rest (dry-run by default, round-trips every value before writing); once
+it reports nothing pending, a db-service migration drops `application_password`.
 
 Reads go through Postgres (`src/lib/student-exam-records.ts`), writes through
-`PUT /api/students/[id]/exam-records`, which both verbs gate with
-`canAccessStudent(..., { requireEdit: true })` — not just view, because the response carries
-exam-portal passwords — and then with `isPmuOnlyStudent`, which 403s a JNV NVS Student. The route reconciles against what is stored: removals first (an
+`PUT /api/students/[id]/exam-records`, which both verbs gate with `gateExamRecords`
+(`src/lib/exam-records-gate.ts`): `canAccessStudent(..., { requireEdit: true })`, then
+`isPmuOnlyStudent`, which 403s a JNV NVS Student. The route reconciles against what is stored: removals first (an
 application number moved between exams would otherwise collide with the DB Service's
 upsert), then a PATCH per changed registration and a POST per new one, skipping no-ops.
 Per-call failures come back as `warnings`; everything failing is a 502.
 
-The roster never carries a password — `listExamSummariesForStudents` selects
-`application_password IS NOT NULL` as `has_password`, and the card renders a fixed mask. That
+The roster never carries a password — `listExamSummariesForStudents` selects the same
+`has_password` expression, and the card renders a fixed mask. That
 read is wrapped in a try/catch: the roster is the point of the page, so a database without
 the DB Service migration loses the exam tags rather than the roster.
 

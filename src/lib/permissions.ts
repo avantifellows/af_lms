@@ -54,7 +54,8 @@ export type Feature =
   | "teacher_feedback"
   | "blended_learning"
   | "alumni"
-  | "test_attendance";
+  | "test_attendance"
+  | "exam_passwords";
 
 // Feature access levels
 export type FeatureAccess = "none" | "view" | "edit";
@@ -86,6 +87,12 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   alumni: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "edit" },
   // Not NVS-gated: it exists for NVS-only users. No edit level, so read_only keeps view.
   test_attendance: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "view", pmu_govt_school_user: "view", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  // Revealing a decrypted exam-portal password on the Exams tab. Only "view"
+  // means anything; setting or replacing a password rides on `students` edit.
+  // School scope comes from canAccessStudent, so a teacher sees their own
+  // schools' Students and a PM their assigned schools'. Programs confirmed
+  // teachers and PMs must be able to see it; admins and program admins may.
+  exam_passwords: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
