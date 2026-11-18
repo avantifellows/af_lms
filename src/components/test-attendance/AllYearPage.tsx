@@ -5,18 +5,20 @@
 // listed Student, each judged over their own last 3 closed Monthly Tests they
 // are counted for: repeat absentees (Follow Up) first and repeat non-submitters
 // (Not Submitting) next. Tags, notes, order, tiles and chart bars come from the
-// client-safe rules module, from the response the tab already loaded.
+// client-safe rules module, from the response the tab already loaded. Below
+// `sm` the list is a list of cards.
 import { useState } from "react";
 
-import { Card } from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
 import AttendanceChart from "@/components/test-attendance/AttendanceChart";
 import StudentListHeader from "@/components/test-attendance/StudentListHeader";
-import { Tile } from "@/components/test-attendance/MonthPage";
-import type {
-  AllYearListFilter,
-  AttendanceMark,
-  TestAttendanceMonthlyTest,
-  TestAttendanceStudent,
+import { Tile, TileNumber } from "@/components/test-attendance/MonthPage";
+import {
+  ALL_YEAR_LIST_FILTERS,
+  type AllYearListFilter,
+  type AttendanceMark,
+  type TestAttendanceMonthlyTest,
+  type TestAttendanceStudent,
 } from "@/types/test-attendance";
 import {
   allYearColumns,
@@ -29,14 +31,17 @@ import {
   percentText,
   schoolWindow,
   windowMark,
+  type AllYearStudentRow,
   type FollowUp,
 } from "@/lib/test-attendance-rules";
 
-const LIST_FILTERS: { value: AllYearListFilter; label: string }[] = [
-  { value: "all", label: "All students" },
-  { value: "follow_up", label: "Need follow-up" },
-  { value: "not_submitting", label: "Not submitting" },
-];
+const LIST_FILTER_LABELS: Record<AllYearListFilter, string> = {
+  all: "All students",
+  follow_up: "Need follow-up",
+  not_submitting: "Not submitting",
+};
+
+const LIST_FILTERS = ALL_YEAR_LIST_FILTERS.map((value) => ({ value, label: LIST_FILTER_LABELS[value] }));
 
 const boxTone: Record<AttendanceMark, string> = {
   not_opened: "border-danger bg-danger",
@@ -62,23 +67,114 @@ const rowTone: Record<NonNullable<FollowUp["tag"]>, string> = {
   not_submitting: "bg-warning-bg",
 };
 
-function FollowUpCell({ followUp }: { followUp: FollowUp }) {
+const toneOf = (followUp: FollowUp) => (followUp.tag ? rowTone[followUp.tag] : "");
+
+/** The tag as the shared Badge: red Follow up, amber Not submitting. */
+function FollowUpTag({ followUp }: { followUp: FollowUp }) {
+  if (followUp.tag === "follow_up") {
+    return (
+      <Badge variant="danger" className="whitespace-nowrap font-bold">
+        Follow up
+      </Badge>
+    );
+  }
+  if (followUp.tag === "not_submitting") {
+    return (
+      <Badge variant="warning" className="whitespace-nowrap font-bold">
+        Not submitting
+      </Badge>
+    );
+  }
+  return null;
+}
+
+function FollowUpNote({ followUp }: { followUp: FollowUp }) {
+  if (!followUp.note) return null;
   return (
-    <div className="flex flex-col items-start gap-1">
-      {followUp.tag === "follow_up" && (
-        <span className="whitespace-nowrap rounded-full bg-danger px-2 py-0.5 text-[11px] font-bold text-white">Follow up</span>
-      )}
-      {followUp.tag === "not_submitting" && (
-        <span className="whitespace-nowrap rounded-full bg-warning-border px-2 py-0.5 text-[11px] font-bold text-white">
-          Not submitting
-        </span>
-      )}
-      {followUp.note && (
-        <span className={`text-xs font-medium ${followUp.tone === "red" ? "text-danger" : "text-warning-text"}`}>
-          {followUp.note}
-        </span>
-      )}
+    <span className={`text-xs font-medium ${followUp.tone === "red" ? "text-danger" : "text-warning-text"}`}>
+      {followUp.note}
+    </span>
+  );
+}
+
+function StudentTable({ rows, columns }: { rows: AllYearStudentRow[]; columns: TestAttendanceMonthlyTest[] }) {
+  return (
+    <div className="hidden overflow-x-auto sm:block">
+      <table aria-label="All students" className="min-w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
+            <th scope="col" className="py-2 pr-4 font-medium">Student</th>
+            <th scope="col" className="py-2 pr-4 font-medium">Grade</th>
+            <th scope="col" className="py-2 pr-4 font-medium">Exam Preparing For</th>
+            {columns.map((test) => (
+              <th key={test.key} scope="col" className="px-1 py-2 text-center font-medium">
+                {test.shortName}
+              </th>
+            ))}
+            <th scope="col" className="py-2 pl-3 pr-4 font-medium">Attended</th>
+            <th scope="col" className="py-2 font-medium">Follow-up</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.student.userId} className={`border-b border-border last:border-0 ${toneOf(row.followUp)}`}>
+              <td className="py-2 pr-4 text-text-primary">{row.student.name}</td>
+              <td className="py-2 pr-4 text-text-secondary">{row.student.grade}</td>
+              <td className="py-2 pr-4 text-text-secondary">{row.student.examPreparingFor ?? "Not set"}</td>
+              {columns.map((test) => (
+                <td key={test.key} className="px-1 py-2 text-center">
+                  <MonthBox test={test} mark={windowMark(row, test.key)} />
+                </td>
+              ))}
+              <td className="py-2 pl-3 pr-4 font-mono text-text-secondary">{attendedText(row.attended, row.counted)}</td>
+              <td className="py-2">
+                <div className="flex flex-col items-start gap-1">
+                  <FollowUpTag followUp={row.followUp} />
+                  <FollowUpNote followUp={row.followUp} />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
+  );
+}
+
+/** The list as cards, for phones: the same rows, in the same order, with the same month boxes. */
+function StudentCards({ rows, columns }: { rows: AllYearStudentRow[]; columns: TestAttendanceMonthlyTest[] }) {
+  return (
+    <ul aria-label="All students" className="space-y-2 sm:hidden">
+      {rows.map((row) => (
+        <li key={row.student.userId}>
+          <Card elevation="sm" className="overflow-hidden">
+            <div className={`space-y-2 p-3 ${toneOf(row.followUp)}`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium text-text-primary">{row.student.name}</p>
+                  <p className="text-xs text-text-secondary">
+                    Grade {row.student.grade} · {row.student.examPreparingFor ?? "Not set"}
+                  </p>
+                </div>
+                <FollowUpTag followUp={row.followUp} />
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {columns.map((test) => (
+                  <span key={test.key} className="inline-flex items-center gap-1 text-xs text-text-muted">
+                    <span aria-hidden="true">{test.shortName}</span>
+                    <MonthBox test={test} mark={windowMark(row, test.key)} />
+                  </span>
+                ))}
+              </div>
+              <p className="text-xs text-text-secondary">
+                Attended <span className="font-mono">{attendedText(row.attended, row.counted)}</span>
+              </p>
+              <FollowUpNote followUp={row.followUp} />
+            </div>
+          </Card>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -98,7 +194,7 @@ export default function AllYearPage({
 
   const enrolled = (
     <Tile name="Enrolled">
-      <p className="mt-1 text-2xl font-bold text-text-primary">{tiles.enrolled}</p>
+      <TileNumber>{tiles.enrolled}</TileNumber>
     </Tile>
   );
 
@@ -121,17 +217,22 @@ export default function AllYearPage({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {enrolled}
         <Tile name="Attendance">
-          <p className="mt-1 text-2xl font-bold text-text-primary">{percentText(tiles.attended, tiles.sittings)}</p>
+          <TileNumber>{percentText(tiles.attended, tiles.sittings)}</TileNumber>
           <p className="text-xs text-text-secondary">
-            {tiles.attended} of {tiles.sittings} sittings
+            <span className="font-mono">
+              {tiles.attended} of {tiles.sittings}
+            </span>{" "}
+            sittings
           </p>
-          <p className="text-xs text-text-muted">of these, {tiles.openedNotSubmitted} opened, not submitted</p>
+          <p className="text-xs text-text-muted">
+            of these, <span className="font-mono">{tiles.openedNotSubmitted}</span> opened, not submitted
+          </p>
         </Tile>
         <Tile name="Need follow-up">
-          <p className="mt-1 text-2xl font-bold text-text-primary">
+          <TileNumber>
             {tiles.followUp} <span className="text-sm font-medium text-text-muted">of {tiles.enrolled}</span>
-          </p>
-          <p className="text-xs text-text-secondary">{percentText(tiles.followUp, tiles.enrolled)}</p>
+          </TileNumber>
+          <p className="font-mono text-xs text-text-secondary">{percentText(tiles.followUp, tiles.enrolled)}</p>
         </Tile>
       </div>
 
@@ -150,45 +251,10 @@ export default function AllYearPage({
         {rows.length === 0 ? (
           <p className="py-4 text-center text-sm text-text-muted">No Students in this list.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table aria-label="All students" className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
-                  <th scope="col" className="py-2 pr-4 font-medium">Student</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Grade</th>
-                  <th scope="col" className="py-2 pr-4 font-medium">Exam Preparing For</th>
-                  {columns.map((test) => (
-                    <th key={test.key} scope="col" className="px-1 py-2 text-center font-medium">
-                      {test.shortName}
-                    </th>
-                  ))}
-                  <th scope="col" className="py-2 pl-3 pr-4 font-medium">Attended</th>
-                  <th scope="col" className="py-2 font-medium">Follow-up</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.student.userId}
-                    className={`border-b border-border last:border-0 ${row.followUp.tag ? rowTone[row.followUp.tag] : ""}`}
-                  >
-                    <td className="py-2 pr-4 text-text-primary">{row.student.name}</td>
-                    <td className="py-2 pr-4 text-text-secondary">{row.student.grade}</td>
-                    <td className="py-2 pr-4 text-text-secondary">{row.student.examPreparingFor ?? "Not set"}</td>
-                    {columns.map((test) => (
-                      <td key={test.key} className="px-1 py-2 text-center">
-                        <MonthBox test={test} mark={windowMark(row, test.key)} />
-                      </td>
-                    ))}
-                    <td className="py-2 pl-3 pr-4 text-text-secondary">{attendedText(row.attended, row.counted)}</td>
-                    <td className="py-2">
-                      <FollowUpCell followUp={row.followUp} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <StudentCards rows={rows} columns={columns} />
+            <StudentTable rows={rows} columns={columns} />
+          </>
         )}
       </Card>
     </div>

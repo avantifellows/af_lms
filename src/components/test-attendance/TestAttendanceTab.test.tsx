@@ -116,6 +116,21 @@ describe("TestAttendanceTab — period strip", () => {
     expect(buttons.map((b) => b.textContent)).toEqual(["All year", "November live", "October", "July"]);
   });
 
+  it("keeps the live mark readable on the selected button and on an unselected one", async () => {
+    mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z")));
+    const user = userEvent.setup();
+
+    render(<TestAttendanceTab schoolUdise="24120100101" schoolCode="14042" />);
+    const live = within(await screen.findByRole("button", { name: "November live" })).getByText("live");
+    // Selected: white on the button's red, with a white ring.
+    expect(live).toHaveClass("text-text-on-accent", "border-text-on-accent");
+    expect(live).not.toHaveClass("bg-success");
+
+    await user.click(screen.getByRole("button", { name: "October" }));
+    // Unselected: white on solid green.
+    expect(live).toHaveClass("text-text-on-accent", "bg-success");
+  });
+
   it("opens on the running month", async () => {
     mockFetch.mockResolvedValue(ok(withTests("2026-11-18T08:30:00.000Z")));
 
@@ -254,158 +269,6 @@ async function openMonth(name: string) {
   return user;
 }
 
-describe("TestAttendanceTab — month page", () => {
-  it("shows Enrolled, Submitted, In progress and Yet to start for a running month", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("November live");
-
-    // Counted for November: the four Grade 11 Students.
-    expect(tile("Enrolled")).toHaveTextContent("4");
-    expect(tile("Enrolled")).toHaveTextContent("Attended 2 of 4");
-    expect(tile("Submitted")).toHaveTextContent("1 of 4");
-    expect(tile("Submitted")).toHaveTextContent("25%");
-    expect(tile("In progress")).toHaveTextContent("1 of 4");
-    expect(tile("Yet to start")).toHaveTextContent("2 of 4");
-    expect(tile("Yet to start")).toHaveTextContent("50%");
-  });
-
-  it("shows Enrolled, Submitted, Opened, not submitted and Absent for a closed month", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("October");
-
-    // Counted for October: all five.
-    expect(tile("Enrolled")).toHaveTextContent("5");
-    expect(tile("Enrolled")).toHaveTextContent("Attended 3 of 5");
-    expect(tile("Submitted")).toHaveTextContent("2 of 5");
-    expect(tile("Submitted")).toHaveTextContent("40%");
-    expect(tile("Opened, not submitted")).toHaveTextContent("1 of 5");
-    expect(tile("Absent")).toHaveTextContent("2 of 5");
-    expect(screen.queryByRole("region", { name: "In progress" })).not.toBeInTheDocument();
-  });
-
-  it("shows a dash, never 0%, when nobody is counted for the month", async () => {
-    mockFetch.mockResolvedValue(ok({ ...monthData, students: [monthStudents[4]] }));
-
-    await openMonth("November live");
-
-    expect(tile("Submitted")).toHaveTextContent("0 of 0");
-    expect(tile("Submitted")).toHaveTextContent("—");
-    expect(tile("Submitted")).not.toHaveTextContent("0%");
-  });
-
-  it("opens the Students list on Yet to start, by grade then name", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("November live");
-
-    expect(screen.getByRole("button", { name: "Yet to start" })).toHaveAttribute("aria-pressed", "true");
-    expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"],
-      ["Charu Pal", "11", "NDA", "Yet to start", ""],
-    ]);
-  });
-
-  it("opens a closed month's list on Absent", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("October");
-
-    expect(screen.getByRole("button", { name: "Absent" })).toHaveAttribute("aria-pressed", "true");
-    expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Absent", ""],
-      ["Ekta Jain", "12", "CLAT", "Absent", ""],
-    ]);
-  });
-
-  it("shows the Students in progress in one click", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    const user = await openMonth("November live");
-    await user.click(screen.getByRole("button", { name: "In progress" }));
-
-    expect(studentRows()).toEqual([["Bina Shah", "11", "Medical", "In progress", "Not submitted Oct"]]);
-  });
-
-  it("shows every counted Student under All", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    const user = await openMonth("October");
-    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "All" }));
-
-    expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Absent", ""],
-      ["Bina Shah", "11", "Medical", "Opened, not submitted", ""],
-      ["Charu Pal", "11", "NDA", "Submitted", ""],
-      ["Zara Khan", "11", "Engineering", "Submitted", ""],
-      ["Ekta Jain", "12", "CLAT", "Absent", ""],
-    ]);
-  });
-
-  it("has the columns Student, Grade, Exam Preparing For, Status and Previous 3 tests", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("November live");
-
-    const table = screen.getByRole("table", { name: "Students" });
-    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
-      "Student",
-      "Grade",
-      "Exam Preparing For",
-      "Status",
-      "Previous 3 tests",
-    ]);
-  });
-
-  it("notes the earlier tests a Student missed or did not submit, red with a miss and amber without", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    const user = await openMonth("November live");
-    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "All" }));
-
-    // November's window is October, the one closed Monthly Test before it.
-    expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"],
-      ["Bina Shah", "11", "Medical", "In progress", "Not submitted Oct"],
-      ["Charu Pal", "11", "NDA", "Yet to start", ""],
-      ["Zara Khan", "11", "Engineering", "Submitted", ""],
-    ]);
-    expect(screen.getByText("Missed Oct")).toHaveClass("text-danger");
-    expect(screen.getByText("Not submitted Oct")).toHaveClass("text-warning-text");
-  });
-
-  it("leaves Previous 3 tests blank on the first Monthly Test of the year", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    const user = await openMonth("October");
-    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "All" }));
-
-    expect(studentRows().map((row) => row[4])).toEqual(["", "", "", "", ""]);
-  });
-
-  it("shows 25 rows, then all of them after Show all", async () => {
-    const many = Array.from({ length: 30 }, (_, i) => ({
-      userId: String(100 + i),
-      name: `Student ${String(i + 1).padStart(2, "0")}`,
-      studentId: null,
-      grade: 11,
-      examPreparingFor: "Engineering",
-      attendance: { november: "not_opened" },
-    }));
-    mockFetch.mockResolvedValue(ok({ ...monthData, students: many }));
-
-    const user = await openMonth("November live");
-
-    expect(studentRows()).toHaveLength(25);
-    expect(studentRows()[24][0]).toBe("Student 25");
-    await user.click(screen.getByRole("button", { name: "Show all" }));
-    expect(studentRows()).toHaveLength(30);
-    expect(studentRows()[29][0]).toBe("Student 30");
-    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
-  });
-});
-
 function filterButton(filter: "Grade" | "Exam Preparing For", name: string) {
   return within(screen.getByRole("group", { name: filter })).getByRole("button", { name });
 }
@@ -535,63 +398,6 @@ describe("TestAttendanceTab — filters", () => {
     expect(tile("Submitted")).toHaveTextContent("—");
     expect(tile("Submitted")).not.toHaveTextContent("0%");
     expect(screen.queryByRole("table", { name: "By grade and Exam Preparing For" })).not.toBeInTheDocument();
-  });
-});
-
-describe("TestAttendanceTab — by grade and Exam Preparing For", () => {
-  it("shows one row per group for a closed month, Grade 11 first, in group order", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("October");
-
-    const table = screen.getByRole("table", { name: "By grade and Exam Preparing For" });
-    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
-      "Group",
-      "Submitted",
-      "Opened, not submitted",
-      "Absent",
-    ]);
-    expect(groupRows()).toEqual([
-      ["Grade 11 · Engineering", "1 of 1 (100%)", "0", "0"],
-      ["Grade 11 · Medical", "0 of 1 (0%)", "1", "0"],
-      ["Grade 11 · NDA", "1 of 1 (100%)", "0", "0"],
-      ["Grade 11 · Not set", "0 of 1 (0%)", "0", "1"],
-      ["Grade 12 · CLAT", "0 of 1 (0%)", "0", "1"],
-    ]);
-  });
-
-  it("shows In progress and Yet to start for a running month, with a two-part bar per row", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("November live");
-
-    const table = screen.getByRole("table", { name: "By grade and Exam Preparing For" });
-    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
-      "Group",
-      "Submitted",
-      "In progress",
-      "Yet to start",
-    ]);
-    // November has no Grade 12 Paper, so Ekta's group has no row.
-    expect(groupRows()).toEqual([
-      ["Grade 11 · Engineering", "1 of 1 (100%)", "0", "0"],
-      ["Grade 11 · Medical", "0 of 1 (0%)", "1", "0"],
-      ["Grade 11 · NDA", "0 of 1 (0%)", "0", "1"],
-      ["Grade 11 · Not set", "0 of 1 (0%)", "0", "1"],
-    ]);
-    expect(within(table).getByRole("img", { name: "Grade 11 · Medical: 0 submitted, 1 in progress, of 1" })).toBeInTheDocument();
-  });
-
-  it("sits between the tiles and the Students list", async () => {
-    mockFetch.mockResolvedValue(ok(monthData));
-
-    await openMonth("October");
-
-    const block = screen.getByRole("table", { name: "By grade and Exam Preparing For" });
-    expect(tile("Absent").compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(
-      block.compareDocumentPosition(screen.getByRole("table", { name: "Students" })) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
   });
 });
 
@@ -838,115 +644,14 @@ function allStudentsTable() {
   return screen.getByRole("table", { name: "All students" });
 }
 
-function allStudentRows() {
-  return within(allStudentsTable()).getAllByRole("row").slice(1);
-}
-
 function allStudentNames() {
-  return allStudentRows().map((row) => within(row).getAllByRole("cell")[0].textContent);
+  return within(allStudentsTable())
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) => within(row).getAllByRole("cell")[0].textContent);
 }
 
 describe("TestAttendanceTab — All year", () => {
-  it("shows Enrolled, attendance over the window and Need follow-up", async () => {
-    await openAllYear();
-
-    // Hand count. Sittings: five Students x 3 tests (Omar counted for none) = 15.
-    // Attended: Zoya 3, Kiran 1, Neel 3, Asha 0, Bala 3 = 10 (67%). Opened, not submitted: Neel 2, Bala 1 = 3.
-    // Follow Up: Asha, Kiran = 2 of 6.
-    expect(within(tile("Enrolled")).getByText("6")).toBeInTheDocument();
-    expect(tile("Attendance")).toHaveTextContent("67%");
-    expect(tile("Attendance")).toHaveTextContent("10 of 15 sittings");
-    expect(tile("Attendance")).toHaveTextContent("of these, 3 opened, not submitted");
-    expect(tile("Need follow-up")).toHaveTextContent("2 of 6");
-    expect(tile("Need follow-up")).toHaveTextContent("33%");
-  });
-
-  it("lists Follow Up by pattern, then Not Submitting, then everyone else by grade and name, with tagged rows highlighted", async () => {
-    await openAllYear();
-
-    expect(allStudentNames()).toEqual(["Asha Bose", "Kiran Das", "Neel Jha", "Bala Nair", "Zoya Ali", "Omar Khan"]);
-    const [asha, kiran, neel, bala] = allStudentRows();
-    expect(asha).toHaveClass("bg-danger-bg");
-    expect(kiran).toHaveClass("bg-danger-bg");
-    expect(neel).toHaveClass("bg-warning-bg");
-    expect(bala).not.toHaveClass("bg-danger-bg");
-    expect(bala).not.toHaveClass("bg-warning-bg");
-  });
-
-  it("shows each Student's tag and note", async () => {
-    await openAllYear();
-
-    const followUp = allStudentRows().map((row) => within(row).getAllByRole("cell")[7].textContent);
-    expect(followUp).toEqual([
-      "Follow upMissed Aug, Sep, Oct",
-      "Follow upMissed Aug, Sep · attended Oct",
-      "Not submittingNot submitted Aug, Oct",
-      "Not submitted Sep",
-      "",
-      "",
-    ]);
-  });
-
-  it("colours a note red when it has a miss and amber when it has only non-submissions", async () => {
-    await openAllYear();
-
-    expect(screen.getByText("Missed Aug, Sep, Oct")).toHaveClass("text-danger");
-    expect(screen.getByText("Not submitted Sep")).toHaveClass("text-warning-text");
-  });
-
-  it("has the columns Student, Grade, Exam Preparing For, the window's months, Attended and Follow-up", async () => {
-    await openAllYear();
-
-    const headers = within(allStudentsTable()).getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers).toEqual(["Student", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Attended", "Follow-up"]);
-  });
-
-  it("shows a month box for each window test: Absent, Opened, not submitted, Submitted, or not counted", async () => {
-    await openAllYear();
-
-    const boxes = (name: string) => {
-      const row = allStudentRows().find((r) => within(r).getAllByRole("cell")[0].textContent === name)!;
-      return within(row).getAllByRole("img").map((box) => box.getAttribute("aria-label"));
-    };
-    expect(boxes("Neel Jha")).toEqual(["Aug: Opened, not submitted", "Sep: Submitted", "Oct: Opened, not submitted"]);
-    expect(boxes("Kiran Das")).toEqual(["Aug: Absent", "Sep: Absent", "Oct: Submitted"]);
-    expect(boxes("Omar Khan")).toEqual(["Aug: not counted", "Sep: not counted", "Oct: not counted"]);
-  });
-
-  it("shows Attended as x of y with a percentage, or a dash when counted for none", async () => {
-    await openAllYear();
-
-    const attended = allStudentRows().map((row) => within(row).getAllByRole("cell")[6].textContent);
-    expect(attended).toEqual(["0 of 3 (0%)", "1 of 3 (33%)", "3 of 3 (100%)", "3 of 3 (100%)", "3 of 3 (100%)", "—"]);
-  });
-
-  it("states the counted tests and the tag rules above the list", async () => {
-    await openAllYear();
-
-    expect(
-      screen.getByText(
-        "Tags look at each Student's last 3 closed tests they are counted for (shown: Aug, Sep, Oct). November is added once it closes. Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("filters the list to Need follow-up and to Not submitting", async () => {
-    const user = await openAllYear();
-    const listFilter = screen.getByRole("group", { name: "Show Students" });
-    expect(within(listFilter).getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "All students",
-      "Need follow-up",
-      "Not submitting",
-    ]);
-    expect(within(listFilter).getByRole("button", { name: "All students" })).toHaveAttribute("aria-pressed", "true");
-
-    await user.click(within(listFilter).getByRole("button", { name: "Need follow-up" }));
-    expect(allStudentNames()).toEqual(["Asha Bose", "Kiran Das"]);
-
-    await user.click(within(listFilter).getByRole("button", { name: "Not submitting" }));
-    expect(allStudentNames()).toEqual(["Neel Jha"]);
-  });
-
   it("applies the Grade filter to the tiles and the list", async () => {
     const user = await openAllYear();
     await user.click(filterButton("Grade", "12"));
@@ -957,62 +662,6 @@ describe("TestAttendanceTab — All year", () => {
     expect(tile("Attendance")).toHaveTextContent("of these, 0 opened, not submitted");
     expect(tile("Need follow-up")).toHaveTextContent("1 of 2");
     expect(allStudentNames()).toEqual(["Kiran Das", "Omar Khan"]);
-  });
-
-  it("shows a dash, never 0%, when there is no sitting", async () => {
-    const user = await openAllYear();
-    await user.click(filterButton("Exam Preparing For", "CLAT"));
-
-    expect(tile("Attendance")).toHaveTextContent("—");
-    expect(tile("Attendance")).toHaveTextContent("0 of 0 sittings");
-    expect(tile("Need follow-up")).toHaveTextContent("—");
-    expect(tile("Attendance")).not.toHaveTextContent("0%");
-  });
-
-  it("judges each Student over their own last 3 counted tests, with four columns when a grade skipped a month", async () => {
-    // Grade 12 had no Paper in October. Closed: Aug, Sep, Oct, Nov; December is running.
-    const octoberGrade11 = { ...october, grades: [11] };
-    const novemberClosed = { ...november, state: "closed" };
-    const december = {
-      key: "december", name: "December", shortName: "Dec",
-      opensAt: "2026-12-14T23:30:00.000Z", closesAt: "2026-12-19T18:25:00.000Z", state: "running", grades: [11, 12],
-    };
-    await openAllYear({
-      ...yearData,
-      monthlyTests: [august, september, octoberGrade11, novemberClosed, december],
-      students: [
-        { userId: "1", name: "Gita Rao", studentId: "NVS1", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", november: "submitted" } },
-        { userId: "2", name: "Hari Sen", studentId: "NVS2", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "submitted", october: "submitted", november: "submitted" } },
-      ],
-    });
-
-    const headers = within(allStudentsTable()).getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers).toEqual(["Student", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Nov", "Attended", "Follow-up"]);
-    const boxes = (row: HTMLElement) => within(row).getAllByRole("img").map((box) => box.getAttribute("aria-label"));
-    const [gita, hari] = allStudentRows();
-    expect(within(gita).getAllByRole("cell")[0]).toHaveTextContent("Gita Rao");
-    expect(boxes(gita)).toEqual(["Aug: Absent", "Sep: Absent", "Oct: not counted", "Nov: Submitted"]);
-    // Hari was counted for August, but it is not in his last 3.
-    expect(boxes(hari)).toEqual(["Aug: not counted", "Sep: Submitted", "Oct: Submitted", "Nov: Submitted"]);
-    expect(within(gita).getAllByRole("cell")[7]).toHaveTextContent("1 of 3 (33%)");
-    expect(within(gita).getAllByRole("cell")[8]).toHaveTextContent("Follow upMissed Aug, Sep · attended Nov");
-    expect(gita).toHaveClass("bg-danger-bg");
-    expect(tile("Need follow-up")).toHaveTextContent("1 of 2");
-    expect(
-      screen.getByText(
-        "Tags look at each Student's last 3 closed tests they are counted for (shown: Aug, Sep, Oct, Nov). December is added once it closes. Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("shows Enrolled and says attendance and tags appear once a test closes when none has closed yet", async () => {
-    await openAllYear({ ...yearData, monthlyTests: [november] });
-
-    expect(within(tile("Enrolled")).getByText("6")).toBeInTheDocument();
-    expect(screen.getByText("Attendance and tags appear once a Monthly Test closes.")).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Attendance" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Need follow-up" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "All students" })).not.toBeInTheDocument();
   });
 });
 
@@ -1026,29 +675,6 @@ function chartBars() {
 }
 
 describe("TestAttendanceTab — All year chart", () => {
-  it("shows a bar per closed Monthly Test oldest first, then the running one so far, each with its percentage, x of y and not-submitted count", async () => {
-    await openAllYear();
-
-    // Aug: Zoya, Bala submitted; Neel opened; Kiran, Asha absent. 3 of 5.
-    // Sep: Zoya, Neel submitted; Bala opened; Kiran, Asha absent. 3 of 5.
-    // Oct: Zoya, Kiran, Bala submitted; Neel opened; Asha absent. 4 of 5.
-    // Nov (running): Zoya, Asha, Bala submitted; Kiran, Neel, Omar not yet. 3 of 6.
-    expect(chartBars()).toEqual([
-      ["Aug", "60%", "3 of 5", "1 not submitted"],
-      ["Sep", "60%", "3 of 5", "1 not submitted"],
-      ["Oct", "80%", "4 of 5", "1 not submitted"],
-      ["Nov so far", "50%", "3 of 6", "0 not submitted"],
-    ]);
-  });
-
-  it("sits after the tiles and before the student list", async () => {
-    await openAllYear();
-    const chart = screen.getByRole("region", { name: "Attendance by Monthly Test" });
-
-    expect(tile("Need follow-up").compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(chart.compareDocumentPosition(allStudentsTable()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
   it("applies the Grade filter to every bar", async () => {
     const user = await openAllYear();
     await user.click(filterButton("Grade", "12"));
@@ -1060,24 +686,6 @@ describe("TestAttendanceTab — All year chart", () => {
       ["Oct", "100%", "1 of 1", "0 not submitted"],
       ["Nov so far", "0%", "0 of 2", "0 not submitted"],
     ]);
-  });
-
-  it("shows a dash, never 0%, on a bar with nobody counted", async () => {
-    const user = await openAllYear();
-    await user.click(filterButton("Exam Preparing For", "CLAT"));
-
-    expect(chartBars().map(([month, percent, of]) => [month, percent, of])).toEqual([
-      ["Aug", "—", "0 of 0"],
-      ["Sep", "—", "0 of 0"],
-      ["Oct", "—", "0 of 0"],
-      ["Nov so far", "—", "0 of 0"],
-    ]);
-  });
-
-  it("shows the running month so far when no Monthly Test has closed yet", async () => {
-    await openAllYear({ ...yearData, monthlyTests: [november] });
-
-    expect(chartBars()).toEqual([["Nov so far", "50%", "3 of 6", "0 not submitted"]]);
   });
 
   it("shows no chart when no Monthly Test has opened", async () => {

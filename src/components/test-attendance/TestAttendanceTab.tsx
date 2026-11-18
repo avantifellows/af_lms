@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card } from "@/components/ui";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import AllYearPage from "@/components/test-attendance/AllYearPage";
-import MonthPage from "@/components/test-attendance/MonthPage";
+import MonthPage, { Tile, TileNumber } from "@/components/test-attendance/MonthPage";
 import { downloadTestAttendance } from "@/lib/test-attendance-export";
 import {
   TEST_ATTENDANCE_GRADES,
@@ -42,6 +42,23 @@ const REFRESH_EVERY_MS = 15 * 60 * 1000;
 /** "All year", or a Monthly Test key. Component state only; not in the URL. */
 type Period = "all" | string;
 
+/** The live mark on a running Monthly Test's button, readable on the selected and the unselected button. */
+function LiveMark({ selected }: { selected: boolean }) {
+  return (
+    <>
+      {" "}
+      {/* White on the selected button's red (6.5:1); white on solid green otherwise (6.4:1), so it reads on hover too. */}
+      <span
+        className={`ml-1 rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase text-text-on-accent ${
+          selected ? "border-text-on-accent" : "border-success bg-success"
+        }`}
+      >
+        live
+      </span>
+    </>
+  );
+}
+
 function PeriodStrip({
   monthlyTests,
   period,
@@ -53,42 +70,21 @@ function PeriodStrip({
 }) {
   // The response is ordered by closing time; the strip shows newest first.
   const options = [
-    { value: "all", label: "All year", live: false },
-    ...[...monthlyTests].reverse().map((test) => ({ value: test.key, label: test.name, live: test.state === "running" })),
+    { value: "all", label: "All year" },
+    ...[...monthlyTests].reverse().map((test) => ({
+      value: test.key,
+      label:
+        test.state === "running" ? (
+          <>
+            {test.name}
+            <LiveMark selected={test.key === period} />
+          </>
+        ) : (
+          test.name
+        ),
+    })),
   ];
-  return (
-    <div role="group" aria-label="Period" className="inline-flex flex-wrap overflow-hidden rounded-lg border border-border bg-bg-card-alt shadow-sm">
-      {options.map((option, i) => {
-        const active = option.value === period;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(option.value)}
-            className={`min-h-[44px] px-3 text-xs font-bold transition-colors md:px-4 md:text-sm ${
-              i > 0 ? "border-l border-border" : ""
-            } ${active ? "bg-accent text-text-on-accent" : "text-text-secondary hover:bg-hover-bg hover:text-text-primary"}`}
-          >
-            {option.label}
-            {option.live && (
-              <>
-                {" "}
-                {/* White on the selected button's red (6.5:1); white on solid green otherwise (6.4:1), so it reads on hover too. */}
-                <span
-                  className={`ml-1 rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase text-text-on-accent ${
-                    active ? "border-text-on-accent" : "border-success bg-success"
-                  }`}
-                >
-                  live
-                </span>
-              </>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
+  return <SegmentedControl label="Period" hideLabel wrap options={options} value={period} onChange={onChange} />;
 }
 
 const GRADE_OPTIONS: { value: TestAttendanceFilters["grade"]; label: string }[] = [
@@ -231,12 +227,9 @@ function NoMonthlyTests({ enrolled }: { enrolled: number }) {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <section aria-label="Enrolled">
-          <Card elevation="sm" className="p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Enrolled</p>
-            <p className="mt-1 text-2xl font-bold text-text-primary">{enrolled}</p>
-          </Card>
-        </section>
+        <Tile name="Enrolled">
+          <TileNumber>{enrolled}</TileNumber>
+        </Tile>
       </div>
       <Card elevation="sm" className="p-6 text-center">
         <p className="text-sm text-text-muted">No Monthly Tests yet</p>

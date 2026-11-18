@@ -83,11 +83,13 @@ export default function AttendanceChart({ bars }: { bars: AttendanceChartBar[] }
                 {bar.shortName}
                 {bar.running && <span className="font-medium text-text-muted"> so far</span>}
               </p>
-              <p className="text-sm font-bold text-text-primary">{bar.percent}</p>
-              <p className="text-xs text-text-secondary">
+              <p className="font-mono text-sm font-bold text-text-primary">{bar.percent}</p>
+              <p className="font-mono text-xs text-text-secondary">
                 {bar.attended} of {bar.counted}
               </p>
-              <p className="text-xs text-warning-text">{bar.openedNotSubmitted} not submitted</p>
+              <p className="text-xs text-warning-text">
+                <span className="font-mono">{bar.openedNotSubmitted}</span> not submitted
+              </p>
             </li>
           ))}
         </ol>
