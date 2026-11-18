@@ -4,14 +4,14 @@
 // the same rows, in the same order, as the list the user is looking at.
 
 import {
+  allYearColumns,
   allYearStudents,
   attendanceStatus,
   attendedText,
   DEFAULT_MONTH_FILTER,
   monthStudents,
-  previousTestsWindow,
-  tagWindow,
   filterStudents,
+  windowMark,
   type AllYearListFilter,
   type ExamPreparingForGroup,
   type MonthListFilter,
@@ -115,7 +115,8 @@ export function testAttendanceSheet(
   const students = filterStudents(data.students, filters);
 
   if (period === "all") {
-    const window = tagWindow(data.monthlyTests);
+    const rows = allYearStudents(students, data.monthlyTests, list as AllYearListFilter);
+    const columns = allYearColumns(data.monthlyTests, rows);
     return {
       name: "All year",
       periodSlug: "all-year",
@@ -124,24 +125,27 @@ export function testAttendanceSheet(
         "Student ID",
         "Grade",
         "Exam Preparing For",
-        ...window.map((test) => test.shortName),
+        ...columns.map((test) => test.shortName),
         "Attended",
         "Tag",
         "Follow-up",
       ],
-      rows: allYearStudents(students, window, list as AllYearListFilter).map(({ student, followUp, attended, counted }) => [
-        student.name,
-        student.studentId ?? "",
-        student.grade,
-        examText(student.examPreparingFor),
-        ...window.map((test) => {
-          const mark = student.attendance[test.key];
-          return mark == null ? "" : attendanceStatus("closed", mark);
-        }),
-        attendedText(attended, counted),
-        followUp.tag === "follow_up" ? "Follow up" : followUp.tag === "not_submitting" ? "Not submitting" : "",
-        followUp.note ?? "",
-      ]),
+      rows: rows.map((row) => {
+        const { student, followUp, attended, counted } = row;
+        return [
+          student.name,
+          student.studentId ?? "",
+          student.grade,
+          examText(student.examPreparingFor),
+          ...columns.map((test) => {
+            const mark = windowMark(row, test.key);
+            return mark == null ? "" : attendanceStatus("closed", mark);
+          }),
+          attendedText(attended, counted),
+          followUp.tag === "follow_up" ? "Follow up" : followUp.tag === "not_submitting" ? "Not submitting" : "",
+          followUp.note ?? "",
+        ];
+      }),
     };
   }
 
@@ -151,12 +155,7 @@ export function testAttendanceSheet(
     name: excelSheetName(test.name),
     periodSlug: test.key,
     header: ["Student Name", "Student ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"],
-    rows: monthStudents(
-      students,
-      test,
-      list as MonthListFilter,
-      previousTestsWindow(data.monthlyTests, test.key),
-    ).map(({ student, status, previous }) => [
+    rows: monthStudents(students, test, list as MonthListFilter, data.monthlyTests).map(({ student, status, previous }) => [
       student.name,
       student.studentId ?? "",
       student.grade,

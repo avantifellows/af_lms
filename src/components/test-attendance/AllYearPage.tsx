@@ -1,8 +1,9 @@
 "use client";
 
-// The Test Attendance tab's All year page (#517): three tiles over the tag
-// window (the last 3 closed Monthly Tests), a month-by-month chart, and every
-// listed Student, repeat absentees (Follow Up) first and repeat non-submitters
+// The Test Attendance tab's All year page (#517): three tiles (Attendance over
+// the School's last 3 closed Monthly Tests), a month-by-month chart, and every
+// listed Student, each judged over their own last 3 closed Monthly Tests they
+// are counted for: repeat absentees (Follow Up) first and repeat non-submitters
 // (Not Submitting) next. Tags, notes, order, tiles and chart bars come from the
 // client-safe rules module, from the response the tab already loaded.
 import { useState } from "react";
@@ -12,6 +13,7 @@ import AttendanceChart from "@/components/test-attendance/AttendanceChart";
 import StudentListHeader from "@/components/test-attendance/StudentListHeader";
 import { Tile } from "@/components/test-attendance/MonthPage";
 import {
+  allYearColumns,
   allYearStudents,
   attendanceChart,
   allYearTiles,
@@ -19,7 +21,8 @@ import {
   attendedText,
   countedTestsLine,
   percentText,
-  tagWindow,
+  schoolWindow,
+  windowMark,
   type AllYearListFilter,
   type AttendanceMark,
   type FollowUp,
@@ -39,7 +42,7 @@ const boxTone: Record<AttendanceMark, string> = {
   submitted: "border-success bg-success-bg",
 };
 
-/** One window test for one Student: red = Absent, dashed amber = Opened, not submitted, light green = Submitted, empty = not counted. */
+/** One column test for one Student: red = Absent, dashed amber = Opened, not submitted, light green = Submitted, empty = not counted or outside the Student's window. */
 function MonthBox({ test, mark }: { test: TestAttendanceMonthlyTest; mark: AttendanceMark | undefined }) {
   const label = mark == null ? "not counted" : attendanceStatus("closed", mark);
   return (
@@ -88,8 +91,7 @@ export default function AllYearPage({
   onDownload: (list: AllYearListFilter) => void;
 }) {
   const [filter, setFilter] = useState<AllYearListFilter>("all");
-  const windowTests = tagWindow(monthlyTests);
-  const tiles = allYearTiles(students, windowTests);
+  const tiles = allYearTiles(students, monthlyTests);
   const chart = <AttendanceChart bars={attendanceChart(monthlyTests, students)} />;
 
   const enrolled = (
@@ -98,7 +100,7 @@ export default function AllYearPage({
     </Tile>
   );
 
-  if (windowTests.length === 0) {
+  if (schoolWindow(monthlyTests).length === 0) {
     return (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{enrolled}</div>
@@ -110,7 +112,8 @@ export default function AllYearPage({
     );
   }
 
-  const rows = allYearStudents(students, windowTests, filter);
+  const rows = allYearStudents(students, monthlyTests, filter);
+  const columns = allYearColumns(monthlyTests, rows);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -140,7 +143,7 @@ export default function AllYearPage({
           onChange={setFilter}
           onDownload={() => onDownload(filter)}
         />
-        <p className="text-xs text-text-muted">{countedTestsLine(monthlyTests)}</p>
+        <p className="text-xs text-text-muted">{countedTestsLine(monthlyTests, columns)}</p>
 
         {rows.length === 0 ? (
           <p className="py-4 text-center text-sm text-text-muted">No Students in this list.</p>
@@ -152,7 +155,7 @@ export default function AllYearPage({
                   <th scope="col" className="py-2 pr-4 font-medium">Student</th>
                   <th scope="col" className="py-2 pr-4 font-medium">Grade</th>
                   <th scope="col" className="py-2 pr-4 font-medium">Exam Preparing For</th>
-                  {windowTests.map((test) => (
+                  {columns.map((test) => (
                     <th key={test.key} scope="col" className="px-1 py-2 text-center font-medium">
                       {test.shortName}
                     </th>
@@ -162,22 +165,22 @@ export default function AllYearPage({
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ student, followUp, attended, counted }) => (
+                {rows.map((row) => (
                   <tr
-                    key={student.userId}
-                    className={`border-b border-border last:border-0 ${followUp.tag ? rowTone[followUp.tag] : ""}`}
+                    key={row.student.userId}
+                    className={`border-b border-border last:border-0 ${row.followUp.tag ? rowTone[row.followUp.tag] : ""}`}
                   >
-                    <td className="py-2 pr-4 text-text-primary">{student.name}</td>
-                    <td className="py-2 pr-4 text-text-secondary">{student.grade}</td>
-                    <td className="py-2 pr-4 text-text-secondary">{student.examPreparingFor ?? "Not set"}</td>
-                    {windowTests.map((test) => (
+                    <td className="py-2 pr-4 text-text-primary">{row.student.name}</td>
+                    <td className="py-2 pr-4 text-text-secondary">{row.student.grade}</td>
+                    <td className="py-2 pr-4 text-text-secondary">{row.student.examPreparingFor ?? "Not set"}</td>
+                    {columns.map((test) => (
                       <td key={test.key} className="px-1 py-2 text-center">
-                        <MonthBox test={test} mark={student.attendance[test.key]} />
+                        <MonthBox test={test} mark={windowMark(row, test.key)} />
                       </td>
                     ))}
-                    <td className="py-2 pl-3 pr-4 text-text-secondary">{attendedText(attended, counted)}</td>
+                    <td className="py-2 pl-3 pr-4 text-text-secondary">{attendedText(row.attended, row.counted)}</td>
                     <td className="py-2">
-                      <FollowUpCell followUp={followUp} />
+                      <FollowUpCell followUp={row.followUp} />
                     </td>
                   </tr>
                 ))}

@@ -319,15 +319,18 @@ const byGradeThenName = (a: ListedStudent, b: ListedStudent) => a.grade - b.grad
 
 /**
  * The month page's Students: those counted for the Monthly Test, filtered, by
- * grade then name. `previousWindow` (from `previousTestsWindow`) gives each
- * row its "Previous 3 tests" note: the All year follow-up note over that window.
+ * grade then name. Each row's "Previous 3 tests" note is the All year
+ * follow-up note over that Student's `previousTestsWindow` in `monthlyTests`
+ * (every opened Monthly Test, ordered by closing time).
  */
 export function monthStudents(
   students: TestAttendanceStudent[],
   test: Pick<TestAttendanceMonthlyTest, "key" | "state">,
   filter: MonthListFilter = DEFAULT_MONTH_FILTER,
-  previousWindow: WindowTest[] = [],
+  monthlyTests: TagWindowTest[] = [],
 ): MonthStudentRow[] {
+  const index = monthlyTests.findIndex((monthlyTest) => monthlyTest.key === test.key);
+  const before = index < 0 ? [] : monthlyTests.slice(0, index);
   return students
     .filter((student) => {
       const mark = student.attendance[test.key];
@@ -335,7 +338,7 @@ export function monthStudents(
     })
     .sort(byGradeThenName)
     .map((student) => {
-      const { note, tone } = followUpFor(student, previousWindow);
+      const { note, tone } = followUpFor(student, studentWindow(student, before));
       return { student, status: attendanceStatus(test.state, student.attendance[test.key]), previous: { note, tone } };
     });
 }
@@ -463,25 +466,27 @@ export function examPreparingForOptions(students: Pick<ListedStudent, "examPrepa
 const TAG_WINDOW_SIZE = 3;
 
 /**
- * The tag window: the last 3 closed Monthly Tests of the School's list (fewer
- * early in the year), oldest first. A running Monthly Test never counts. One
- * window applies to every Student.
+ * The School window: the last 3 closed Monthly Tests of the School's list
+ * (fewer early in the year), oldest first. A running Monthly Test never
+ * counts. It describes the School's tests (the All year Attendance tile);
+ * tags and notes use each Student's own `studentWindow` instead.
  */
-export function tagWindow<T extends Pick<TestAttendanceMonthlyTest, "state">>(monthlyTests: T[]): T[] {
+export function schoolWindow<T extends Pick<TestAttendanceMonthlyTest, "state">>(monthlyTests: T[]): T[] {
   return monthlyTests.filter((test) => test.state === "closed").slice(-TAG_WINDOW_SIZE);
 }
 
+/** A Monthly Test as the tag rules read it. */
+type TagWindowTest = Pick<TestAttendanceMonthlyTest, "key" | "shortName" | "state">;
+
 /**
- * A month page's "Previous 3 tests" window: the tag window over the Monthly
- * Tests before the selected one, so the selected test is never in its own
- * window and a running one never counts. Empty for the first test of the year.
+ * A Student's tag window: the last 3 closed Monthly Tests of `monthlyTests`
+ * that Student is counted for (fewer early in the year or for a late joiner),
+ * oldest first. A running Monthly Test never counts. A month page's "Previous
+ * 3 tests" is this window over the Monthly Tests before the selected one, so
+ * the selected test is never in its own window.
  */
-export function previousTestsWindow<T extends Pick<TestAttendanceMonthlyTest, "key" | "state">>(
-  monthlyTests: T[],
-  testKey: string,
-): T[] {
-  const index = monthlyTests.findIndex((test) => test.key === testKey);
-  return index < 0 ? [] : tagWindow(monthlyTests.slice(0, index));
+function studentWindow<T extends TagWindowTest>(student: Pick<TestAttendanceStudent, "attendance">, monthlyTests: T[]): T[] {
+  return schoolWindow(monthlyTests.filter((test) => student.attendance[test.key] != null));
 }
 
 /** Follow Up (red): Absent in 2 or more. Not Submitting (amber): Opened, not submitted in 2 or more. */
@@ -533,10 +538,10 @@ function followUpPattern(
 }
 
 /**
- * A Student's tag and note over the tag window (from `tagWindow`), judged only
- * on the window's tests they are counted for. A tag always needs 2 misses of
- * one kind, so a Student counted for one test is never tagged and nobody has
- * both tags. Any miss or non-submission gets a note, tagged or not: months in
+ * A Student's tag and note over a window of Monthly Tests, judged only on the
+ * window's tests they are counted for (all of them, for a Student's own
+ * `studentWindow`). A tag always needs 2 misses of one kind, so a Student
+ * counted for one test is never tagged and nobody has both tags. Any miss or non-submission gets a note, tagged or not: months in
  * calendar order, misses first. A Follow Up Tag's note names its pattern.
  */
 export function followUpFor(student: Pick<TestAttendanceStudent, "attendance">, window: WindowTest[]): FollowUp {
@@ -570,9 +575,11 @@ export type AllYearListFilter = "all" | FollowUpTag;
 export interface AllYearStudentRow {
   student: TestAttendanceStudent;
   followUp: FollowUp;
+  /** The keys of the Student's own window: their last 3 closed Monthly Tests they are counted for. */
+  windowKeys: string[];
   /** The window's tests the Student opened, submitted or not. */
   attended: number;
-  /** The window's tests the Student is counted for. */
+  /** The window's tests the Student is counted for: the window's size. */
   counted: number;
 }
 
@@ -583,48 +590,72 @@ function followUpRank({ tag, pattern }: FollowUp): number {
 }
 
 /**
- * The All year page's Students over the tag window (from `tagWindow`):
- * Follow Up by pattern, then Not Submitting, then everyone else; grade then
- * name within each.
+ * The All year page's Students, each judged over their own window (their last
+ * 3 closed Monthly Tests of `monthlyTests` they are counted for): Follow Up by
+ * pattern, then Not Submitting, then everyone else; grade then name within each.
  */
 export function allYearStudents(
   students: TestAttendanceStudent[],
-  window: Pick<TestAttendanceMonthlyTest, "key" | "shortName">[],
+  monthlyTests: TagWindowTest[],
   filter: AllYearListFilter = "all",
 ): AllYearStudentRow[] {
   return students
     .map((student) => {
-      const marks = window.flatMap((test) => (student.attendance[test.key] == null ? [] : [student.attendance[test.key]]));
+      const window = studentWindow(student, monthlyTests);
       return {
         student,
         followUp: followUpFor(student, window),
-        attended: marks.filter((mark) => mark !== "not_opened").length,
-        counted: marks.length,
+        windowKeys: window.map((test) => test.key),
+        attended: window.filter((test) => student.attendance[test.key] !== "not_opened").length,
+        counted: window.length,
       };
     })
     .filter((row) => filter === "all" || row.followUp.tag === filter)
     .sort((a, b) => followUpRank(a.followUp) - followUpRank(b.followUp) || byGradeThenName(a.student, b.student));
 }
 
+/**
+ * The All year list's month columns: the Monthly Tests in at least one listed
+ * row's window, in list (calendar) order. Three when every row shares the
+ * School's last 3 closed tests; more when a grade had no Paper in one of them.
+ */
+export function allYearColumns<T extends Pick<TestAttendanceMonthlyTest, "key">>(
+  monthlyTests: T[],
+  rows: Pick<AllYearStudentRow, "windowKeys">[],
+): T[] {
+  return monthlyTests.filter((test) => rows.some((row) => row.windowKeys.includes(test.key)));
+}
+
+/** A row's mark in one column; none (an empty box, a blank cell) when the test is outside the Student's window. */
+export function windowMark(
+  { student, windowKeys }: Pick<AllYearStudentRow, "student" | "windowKeys">,
+  testKey: string,
+): AttendanceMark | undefined {
+  return windowKeys.includes(testKey) ? student.attendance[testKey] : undefined;
+}
+
 /** The All year page's three tiles. */
 export interface AllYearTiles {
   /** Every listed Student (after filters). */
   enrolled: number;
-  /** Counted Students summed over the window's tests. */
+  /** Counted Students summed over the School window's tests. */
   sittings: number;
   /** Sittings where the Student opened a Paper, submitted or not. */
   attended: number;
   /** Of the attended sittings, those opened and not submitted. */
   openedNotSubmitted: number;
-  /** Students with the Follow Up Tag, out of `enrolled`. */
+  /** Students with the Follow Up Tag (over their own window), out of `enrolled`. */
   followUp: number;
 }
 
-export function allYearTiles(
-  students: TestAttendanceStudent[],
-  window: Pick<TestAttendanceMonthlyTest, "key" | "shortName">[],
-): AllYearTiles {
+/**
+ * The All year tiles. Attendance counts sittings over the School window (the
+ * School's last 3 closed Monthly Tests); Need follow-up counts the Students
+ * whose own window gives them the Follow Up Tag.
+ */
+export function allYearTiles(students: TestAttendanceStudent[], monthlyTests: TagWindowTest[]): AllYearTiles {
   const tiles: AllYearTiles = { enrolled: students.length, sittings: 0, attended: 0, openedNotSubmitted: 0, followUp: 0 };
+  const window = schoolWindow(monthlyTests);
   for (const student of students) {
     for (const test of window) {
       const mark = student.attendance[test.key];
@@ -633,17 +664,19 @@ export function allYearTiles(
       if (mark !== "not_opened") tiles.attended += 1;
       if (mark === "opened") tiles.openedNotSubmitted += 1;
     }
-    if (followUpFor(student, window).tag === "follow_up") tiles.followUp += 1;
+    if (followUpFor(student, studentWindow(student, monthlyTests)).tag === "follow_up") tiles.followUp += 1;
   }
   return tiles;
 }
 
 /**
- * The line above the All year list: the counted tests (the tag window), any
+ * The line above the All year list: that tags look at each Student's own last
+ * 3 closed tests, the months shown as `columns` (from `allYearColumns`), any
  * running test that is added once it closes, and the two tag rules.
  */
 export function countedTestsLine(
   monthlyTests: Pick<TestAttendanceMonthlyTest, "key" | "name" | "shortName" | "state">[],
+  columns: Pick<TestAttendanceMonthlyTest, "key" | "shortName">[],
 ): string {
   const running = monthlyTests.filter((test) => test.state === "running").map((test) => test.name);
   const added =
@@ -652,10 +685,10 @@ export function countedTestsLine(
       : running.length === 1
         ? ` ${running[0]} is added once it closes.`
         : ` ${running.slice(0, -1).join(", ")} and ${running[running.length - 1]} are added once they close.`;
-  return (
-    `Counts tests that have closed: ${monthList(tagWindow(monthlyTests))}.${added} ` +
-    "Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them."
-  );
+  const rules = "Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.";
+  if (schoolWindow(monthlyTests).length === 0) return `Counts tests that have closed: .${added} ${rules}`;
+  const shown = columns.length > 0 ? ` (shown: ${monthList(columns)})` : "";
+  return `Tags look at each Student's last ${TAG_WINDOW_SIZE} closed tests they are counted for${shown}.${added} ${rules}`;
 }
 
 /** One bar of the All year chart: the attended share of the Students counted for one Monthly Test. */

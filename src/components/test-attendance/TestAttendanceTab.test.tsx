@@ -921,7 +921,7 @@ describe("TestAttendanceTab — All year", () => {
 
     expect(
       screen.getByText(
-        "Counts tests that have closed: Aug, Sep, Oct. November is added once it closes. Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.",
+        "Tags look at each Student's last 3 closed tests they are counted for (shown: Aug, Sep, Oct). November is added once it closes. Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.",
       ),
     ).toBeInTheDocument();
   });
@@ -963,6 +963,42 @@ describe("TestAttendanceTab — All year", () => {
     expect(tile("Attendance")).toHaveTextContent("0 of 0 sittings");
     expect(tile("Need follow-up")).toHaveTextContent("—");
     expect(tile("Attendance")).not.toHaveTextContent("0%");
+  });
+
+  it("judges each Student over their own last 3 counted tests, with four columns when a grade skipped a month", async () => {
+    // Grade 12 had no Paper in October. Closed: Aug, Sep, Oct, Nov; December is running.
+    const octoberGrade11 = { ...october, grades: [11] };
+    const novemberClosed = { ...november, state: "closed" };
+    const december = {
+      key: "december", name: "December", shortName: "Dec",
+      opensAt: "2026-12-14T23:30:00.000Z", closesAt: "2026-12-19T18:25:00.000Z", state: "running", grades: [11, 12],
+    };
+    await openAllYear({
+      ...yearData,
+      monthlyTests: [august, september, octoberGrade11, novemberClosed, december],
+      students: [
+        { userId: "1", name: "Gita Rao", studentId: "NVS1", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", november: "submitted" } },
+        { userId: "2", name: "Hari Sen", studentId: "NVS2", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "submitted", october: "submitted", november: "submitted" } },
+      ],
+    });
+
+    const headers = within(allStudentsTable()).getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual(["Student", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Nov", "Attended", "Follow-up"]);
+    const boxes = (row: HTMLElement) => within(row).getAllByRole("img").map((box) => box.getAttribute("aria-label"));
+    const [gita, hari] = allStudentRows();
+    expect(within(gita).getAllByRole("cell")[0]).toHaveTextContent("Gita Rao");
+    expect(boxes(gita)).toEqual(["Aug: Absent", "Sep: Absent", "Oct: not counted", "Nov: Submitted"]);
+    // Hari was counted for August, but it is not in his last 3.
+    expect(boxes(hari)).toEqual(["Aug: not counted", "Sep: Submitted", "Oct: Submitted", "Nov: Submitted"]);
+    expect(within(gita).getAllByRole("cell")[7]).toHaveTextContent("1 of 3 (33%)");
+    expect(within(gita).getAllByRole("cell")[8]).toHaveTextContent("Follow upMissed Aug, Sep · attended Nov");
+    expect(gita).toHaveClass("bg-danger-bg");
+    expect(tile("Need follow-up")).toHaveTextContent("1 of 2");
+    expect(
+      screen.getByText(
+        "Tags look at each Student's last 3 closed tests they are counted for (shown: Aug, Sep, Oct, Nov). December is added once it closes. Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows Enrolled and says attendance and tags appear once a test closes when none has closed yet", async () => {

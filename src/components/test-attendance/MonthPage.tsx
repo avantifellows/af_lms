@@ -15,7 +15,6 @@ import {
   monthStudents,
   monthTiles,
   percentText,
-  previousTestsWindow,
   type MonthGroupRow,
   type MonthListFilter,
   type TestAttendanceMonthlyTest,
@@ -123,7 +122,7 @@ export default function MonthPage({
 
   const tiles = monthTiles(students, test.key);
   const groups = monthGroupRows(students, test.key);
-  const rows = monthStudents(students, test, filter, previousTestsWindow(monthlyTests, test.key));
+  const rows = monthStudents(students, test, filter, monthlyTests);
   const shown = showAll ? rows : rows.slice(0, PAGE_SIZE);
   const label = (mark: "not_opened" | "opened" | "submitted") => attendanceStatus(test.state, mark);
   const filters: { value: MonthListFilter; label: string }[] = [

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  allYearColumns,
   allYearStudents,
   attendanceChart,
   allYearTiles,
@@ -17,13 +18,13 @@ import {
   monthTiles,
   monthlyTestsFrom,
   percentText,
-  previousTestsWindow,
-  tagWindow,
+  schoolWindow,
   testAttendanceFrom,
   type ListedStudent,
   type PaperAttendance,
   type PaperWindow,
   type TestAttendanceStudent,
+  windowMark,
 } from "./test-attendance-rules";
 
 describe("examPreparingFor", () => {
@@ -689,13 +690,13 @@ const sep = monthly("september", "September");
 const oct = monthly("october", "October");
 const nov = monthly("november", "November", "running");
 
-describe("tagWindow", () => {
+describe("schoolWindow", () => {
   it("is the last 3 closed Monthly Tests, oldest first", () => {
-    expect(tagWindow([jul, aug, sep, oct, nov]).map((t) => t.key)).toEqual(["august", "september", "october"]);
+    expect(schoolWindow([jul, aug, sep, oct, nov]).map((t) => t.key)).toEqual(["august", "september", "october"]);
   });
 
   it("never counts a running Monthly Test", () => {
-    expect(tagWindow([sep, oct, nov]).map((t) => t.key)).toEqual(["september", "october"]);
+    expect(schoolWindow([sep, oct, nov]).map((t) => t.key)).toEqual(["september", "october"]);
   });
 
   it.each([
@@ -705,7 +706,7 @@ describe("tagWindow", () => {
     [[sep, oct], ["september", "october"]],
     [[aug, sep, oct], ["august", "september", "october"]],
   ])("holds fewer tests early in the year: %#", (tests, keys) => {
-    expect(tagWindow(tests).map((t) => t.key)).toEqual(keys);
+    expect(schoolWindow(tests).map((t) => t.key)).toEqual(keys);
   });
 });
 
@@ -762,7 +763,7 @@ describe("followUpFor — tags", () => {
 
   it("never counts a running Monthly Test or one before the window", () => {
     // Absent in July (before the window) and November (running); Absent once in the window.
-    const window = tagWindow([jul, aug, sep, oct, nov]);
+    const window = schoolWindow([jul, aug, sep, oct, nov]);
     expect(
       tagOf({ july: "not_opened", august: "submitted", september: "submitted", october: "not_opened", november: "not_opened" }, window),
     ).toBeNull();
@@ -819,7 +820,7 @@ describe("followUpFor — notes", () => {
   });
 
   it("names only the window's tests", () => {
-    const window = tagWindow([jul, aug, sep, oct, nov]);
+    const window = schoolWindow([jul, aug, sep, oct, nov]);
     expect(
       noteOf({ july: "not_opened", august: "submitted", september: "submitted", october: "submitted", november: "not_opened" }, window),
     ).toEqual({ note: null, tone: null });
@@ -910,36 +911,40 @@ describe("followUpFor — Follow Up patterns", () => {
   });
 });
 
-// "Previous 3 tests" on a month page (#529): the same rule, with the window set
-// to the 3 closed Monthly Tests before the selected one.
-describe("previousTestsWindow", () => {
-  const keysBefore = (tests: Parameters<typeof previousTestsWindow>[0], key: string) =>
-    previousTestsWindow(tests, key).map((t) => t.key);
+// "Previous 3 tests" on a month page (#529): the same rule, with each Student's
+// window set to their last 3 counted closed Monthly Tests before the selected one.
+describe("monthStudents — the Previous 3 tests window", () => {
+  // Absent in every Monthly Test, so the note names exactly the window's months.
+  const alwaysAbsent = marks({ july: "not_opened", august: "not_opened", september: "not_opened", october: "not_opened", november: "not_opened", december: "not_opened" });
+  const windowNote = (tests: Parameters<typeof monthStudents>[3], key: string) => {
+    const selected = tests!.find((t) => t.key === key) ?? { key, state: "closed" as const };
+    return monthStudents([alwaysAbsent], selected, "all", tests)[0]?.previous.note ?? null;
+  };
 
   it("is empty for the first Monthly Test of the year", () => {
-    expect(keysBefore([jul, aug, sep, oct, nov], "july")).toEqual([]);
+    expect(windowNote([jul, aug, sep, oct, nov], "july")).toBeNull();
   });
 
   it("holds the one closed Monthly Test before the second", () => {
-    expect(keysBefore([jul, aug, sep, oct, nov], "august")).toEqual(["july"]);
+    expect(windowNote([jul, aug, sep, oct, nov], "august")).toBe("Missed Jul");
   });
 
   it("holds the 3 closed Monthly Tests before the fourth, oldest first", () => {
-    expect(keysBefore([jul, aug, sep, oct, nov], "october")).toEqual(["july", "august", "september"]);
+    expect(windowNote([jul, aug, sep, oct, nov], "october")).toBe("Missed Jul, Aug, Sep");
   });
 
   it("holds the 3 closed Monthly Tests before a running selected month", () => {
-    expect(keysBefore([jul, aug, sep, oct, nov], "november")).toEqual(["august", "september", "october"]);
+    expect(windowNote([jul, aug, sep, oct, nov], "november")).toBe("Missed Aug, Sep, Oct");
   });
 
   it("never counts a running Monthly Test before the selected one", () => {
     const earlyRunning = monthly("october", "October", "running");
     const alsoRunning = monthly("november", "November", "running");
-    expect(keysBefore([aug, sep, earlyRunning, alsoRunning], "november")).toEqual(["august", "september"]);
+    expect(windowNote([aug, sep, earlyRunning, alsoRunning], "november")).toBe("Missed Aug, Sep");
   });
 
   it("is empty for an unknown Monthly Test", () => {
-    expect(keysBefore([jul, aug], "december")).toEqual([]);
+    expect(windowNote([jul, aug], "december")).toBeNull();
   });
 });
 
@@ -966,7 +971,7 @@ describe("monthStudents — Previous 3 tests", () => {
     monthStudents(novFixture, november, "all", window).map((row) => [row.student.name, row.previous.note, row.previous.tone]);
 
   it("names the earlier months missed or not submitted, red with a miss and amber with only non-submissions", () => {
-    expect(notes(previousTestsWindow([jul, aug, sep, oct, nov], "november"))).toEqual([
+    expect(notes([jul, aug, sep, oct, nov])).toEqual([
       ["Asha Roy", null, null],
       ["Bina Shah", "Missed Sep", "red"],
       ["Charu Pal", "Not submitted Oct", "amber"],
@@ -977,7 +982,7 @@ describe("monthStudents — Previous 3 tests", () => {
   });
 
   it("is blank for everyone on the first Monthly Test of the year", () => {
-    expect(notes(previousTestsWindow([nov], "november"))).toEqual([
+    expect(notes([nov])).toEqual([
       ["Asha Roy", null, null],
       ["Bina Shah", null, null],
       ["Charu Pal", null, null],
@@ -989,7 +994,7 @@ describe("monthStudents — Previous 3 tests", () => {
 
   it("judges only the window's tests, so a later miss is not named on an earlier month", () => {
     // Selected September: window is August only.
-    const rows = monthStudents(novFixture, { key: "september", state: "closed" }, "all", previousTestsWindow([aug, sep, oct, nov], "september"));
+    const rows = monthStudents(novFixture, { key: "september", state: "closed" }, "all", [aug, sep, oct, nov]);
     expect(rows.map((row) => [row.student.name, row.previous.note])).toEqual([
       ["Asha Roy", null],
       ["Bina Shah", null],
@@ -1037,6 +1042,13 @@ describe("allYearStudents", () => {
       "Zoya Ali",
       "Pia Shah", // Grade 12
     ]);
+  });
+
+  it("gives each row its own window, and the union of the windows is the three columns", () => {
+    const rows = allYearStudents(yearFixture, window3);
+    expect(rows.find((r) => r.student.name === "Omar Khan")!.windowKeys).toEqual(["october"]);
+    expect(rows.find((r) => r.student.name === "Pia Shah")!.windowKeys).toEqual([]);
+    expect(allYearColumns(window3, rows).map((t) => t.shortName)).toEqual(["Aug", "Sep", "Oct"]);
   });
 
   it("filters to Need follow-up", () => {
@@ -1120,21 +1132,37 @@ describe("allYearTiles", () => {
 describe("countedTestsLine", () => {
   const rules = "Follow up: Absent in 2 or more of them. Not submitting: Opened, not submitted in 2 or more of them.";
 
-  it("names the counted tests and the running one that is added once it closes", () => {
-    expect(countedTestsLine([jul, aug, sep, oct, nov])).toBe(
-      `Counts tests that have closed: Aug, Sep, Oct. November is added once it closes. ${rules}`,
+  const perStudent = "Tags look at each Student's last 3 closed tests they are counted for";
+
+  it("names the months shown as columns and the running one that is added once it closes", () => {
+    expect(countedTestsLine([jul, aug, sep, oct, nov], [aug, sep, oct])).toBe(
+      `${perStudent} (shown: Aug, Sep, Oct). November is added once it closes. ${rules}`,
     );
   });
 
-  it("names only the counted tests when none is running", () => {
-    expect(countedTestsLine([sep, oct])).toBe(`Counts tests that have closed: Sep, Oct. ${rules}`);
+  it("names only the shown months when none is running", () => {
+    expect(countedTestsLine([sep, oct], [sep, oct])).toBe(`${perStudent} (shown: Sep, Oct). ${rules}`);
+  });
+
+  it("names four months when a skipped month makes four columns", () => {
+    expect(countedTestsLine([jul, aug, sep, oct], [jul, aug, sep, oct])).toBe(
+      `${perStudent} (shown: Jul, Aug, Sep, Oct). ${rules}`,
+    );
+  });
+
+  it("names no months when no listed Student has a window", () => {
+    expect(countedTestsLine([sep, oct], [])).toBe(`${perStudent}. ${rules}`);
   });
 
   it("names two running tests", () => {
     const retest = monthly("retest", "Retest", "running");
-    expect(countedTestsLine([oct, nov, retest])).toBe(
-      `Counts tests that have closed: Oct. November and Retest are added once they close. ${rules}`,
+    expect(countedTestsLine([oct, nov, retest], [oct])).toBe(
+      `${perStudent} (shown: Oct). November and Retest are added once they close. ${rules}`,
     );
+  });
+
+  it("keeps the old wording when no Monthly Test has closed", () => {
+    expect(countedTestsLine([nov], [])).toBe(`Counts tests that have closed: . November is added once it closes. ${rules}`);
   });
 });
 
@@ -1200,5 +1228,96 @@ describe("attendanceChart", () => {
 
   it("has no bars when no Monthly Test has opened", () => {
     expect(attendanceChart([], chartFixture)).toEqual([]);
+  });
+});
+
+// The tag window is each Student's own (#517): their last 3 closed Monthly
+// Tests they are counted for. Grade 12 had no Paper in October, so a Grade 12
+// Student's last 3 counted tests are Aug, Sep and Nov; Grade 11's are Sep, Oct, Nov.
+describe("each Student's own tag window across a skipped month", () => {
+  const octG11 = { ...monthly("october", "October"), grades: [11] };
+  const novClosed = monthly("november", "November");
+  const tests = [jul, aug, sep, octG11, novClosed];
+  const grade12 = yearStudent("1", "Gita Rao", 12, { july: "submitted", august: "not_opened", september: "not_opened", november: "submitted" });
+  const grade11 = yearStudent("2", "Hari Sen", 11, {
+    july: "submitted", august: "not_opened", september: "not_opened", october: "submitted", november: "submitted",
+  });
+  const lateJoiner = yearStudent("3", "Isha Pal", 11, { october: "not_opened", november: "not_opened" });
+  const skipped = [grade12, grade11, lateJoiner];
+  const rowOf = (rows: ReturnType<typeof allYearStudents>, name: string) => {
+    const row = rows.find((r) => r.student.name === name)!;
+    return { tag: row.followUp.tag, pattern: row.followUp.pattern, note: row.followUp.note, attended: attendedText(row.attended, row.counted) };
+  };
+
+  it("judges a Grade 12 Student on Aug, Sep and Nov, and gives the Follow Up Tag", () => {
+    const rows = allYearStudents(skipped, tests);
+    expect(rows.find((r) => r.student.name === "Gita Rao")!.windowKeys).toEqual(["august", "september", "november"]);
+    expect(rowOf(rows, "Gita Rao")).toEqual({ tag: "follow_up", pattern: 3, note: "Missed Aug, Sep · attended Nov", attended: "1 of 3 (33%)" });
+    // The School window (Sep, Oct, Nov) would judge Sep and Nov only: one miss, no tag.
+    expect(followUpFor(grade12, schoolWindow(tests)).tag).toBeNull();
+  });
+
+  it("leaves a Student counted for every closed test on the School's last 3", () => {
+    const rows = allYearStudents(skipped, tests);
+    expect(rows.find((r) => r.student.name === "Hari Sen")!.windowKeys).toEqual(["september", "october", "november"]);
+    expect(rowOf(rows, "Hari Sen")).toEqual({ tag: null, pattern: null, note: "Missed Sep", attended: "2 of 3 (67%)" });
+  });
+
+  it("leaves a late joiner counted for the last two closed tests on those two", () => {
+    expect(rowOf(allYearStudents(skipped, tests), "Isha Pal")).toEqual({ tag: "follow_up", pattern: 1, note: "Missed Oct, Nov", attended: "0 of 2 (0%)" });
+  });
+
+  it("lists the Grade 12 Student first and counts them for Need follow-up", () => {
+    expect(yearNames(allYearStudents(skipped, tests, "follow_up"))).toEqual(["Isha Pal", "Gita Rao"]);
+    expect(allYearTiles(skipped, tests).followUp).toBe(2);
+  });
+
+  it("shows four columns, the union of the windows, with a box empty outside a Student's window", () => {
+    const rows = allYearStudents(skipped, tests);
+    const columns = allYearColumns(tests, rows);
+    expect(columns.map((t) => t.shortName)).toEqual(["Aug", "Sep", "Oct", "Nov"]);
+    const boxes = (name: string) => columns.map((t) => windowMark(rows.find((r) => r.student.name === name)!, t.key) ?? null);
+    expect(boxes("Gita Rao")).toEqual(["not_opened", "not_opened", null, "submitted"]);
+    // Counted for August, but it is outside Hari's window: an empty box.
+    expect(boxes("Hari Sen")).toEqual([null, "not_opened", "submitted", "submitted"]);
+    expect(boxes("Isha Pal")).toEqual([null, null, "not_opened", "not_opened"]);
+  });
+
+  it("shows three columns when only Grade 11 is listed", () => {
+    const rows = allYearStudents(filterStudents(skipped, { grade: 11, examPreparingFor: "all" }), tests);
+    expect(allYearColumns(tests, rows).map((t) => t.shortName)).toEqual(["Sep", "Oct", "Nov"]);
+  });
+
+  it("takes the columns from the listed rows only", () => {
+    const rows = allYearStudents(skipped, tests, "follow_up").filter((r) => r.student.grade === 11);
+    expect(allYearColumns(tests, rows).map((t) => t.shortName)).toEqual(["Oct", "Nov"]);
+  });
+
+  it("gives Previous 3 tests on a month page the Student's own earlier counted tests, across the skipped month", () => {
+    const december = { ...monthly("december", "December", "running") };
+    const withDec = [...tests, december];
+    const dec = (s: TestAttendanceStudent) => ({ ...s, attendance: { ...s.attendance, december: "not_opened" as const } });
+    const notes = monthStudents(skipped.map(dec), december, "all", withDec).map((r) => [r.student.name, r.previous.note]);
+    expect(notes).toEqual([
+      ["Hari Sen", "Missed Sep"], // Sep, Oct, Nov
+      ["Isha Pal", "Missed Oct, Nov"], // Oct, Nov
+      ["Gita Rao", "Missed Aug, Sep · attended Nov"], // Aug, Sep, Nov: October skipped
+    ]);
+    // Selected November: Grade 12's earlier counted tests are Jul, Aug, Sep.
+    const nov = monthStudents([grade12], novClosed, "all", withDec)[0].previous;
+    expect(nov).toEqual({ note: "Missed Aug, Sep in a row", tone: "red" });
+  });
+
+  it("keeps the Attendance tile and the chart on the School's tests", () => {
+    // School window: Sep, Oct, Nov. Sittings: Gita 2 (Sep, Nov), Hari 3, Isha 2 = 7.
+    // Attended: Gita 1 (Nov), Hari 2, Isha 0 = 3. Opened, not submitted: none.
+    expect(allYearTiles(skipped, tests)).toEqual({ enrolled: 3, sittings: 7, attended: 3, openedNotSubmitted: 0, followUp: 2 });
+    expect(attendanceChart(tests, skipped).map((bar) => [bar.shortName, bar.attended, bar.counted])).toEqual([
+      ["Jul", 2, 2],
+      ["Aug", 0, 2],
+      ["Sep", 0, 2],
+      ["Oct", 1, 2],
+      ["Nov", 2, 3],
+    ]);
   });
 });

@@ -2,7 +2,12 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
 import { testAttendanceSheet } from "./test-attendance-export";
-import { ALL_STUDENTS, DEFAULT_MONTH_FILTER, type TestAttendanceMonthlyTest } from "./test-attendance-rules";
+import {
+  ALL_STUDENTS,
+  DEFAULT_MONTH_FILTER,
+  type TestAttendanceMonthlyTest,
+  type TestAttendanceStudent,
+} from "./test-attendance-rules";
 
 const monthlyTest = (name: string): TestAttendanceMonthlyTest => ({
   key: "test",
@@ -58,5 +63,60 @@ describe("testAttendanceSheet sheet name", () => {
     const name = sheetNameFor("'Oct' ")!;
     expect(name).toBe("Oct");
     acceptedByExcel(name);
+  });
+});
+
+// Each Student's own tag window (#517). Grade 12 had no Paper in October, so a
+// Grade 12 Student's last 3 counted tests are Aug, Sep and Nov.
+describe("testAttendanceSheet across a skipped month", () => {
+  const test = (key: string, name: string, grades = [11, 12], state: "closed" | "running" = "closed") => ({
+    ...monthlyTest(name),
+    key,
+    shortName: name.slice(0, 3),
+    grades,
+    state,
+  });
+  const monthlyTests = [
+    test("august", "August"),
+    test("september", "September"),
+    test("october", "October", [11]),
+    test("november", "November"),
+    test("december", "December", [11, 12], "running"),
+  ];
+  const student = (userId: string, name: string, grade: number, attendance: TestAttendanceStudent["attendance"]) => ({
+    userId,
+    name,
+    studentId: `NVS${userId}`,
+    grade,
+    examPreparingFor: "Engineering" as const,
+    attendance: { ...attendance, december: "not_opened" as const },
+  });
+  const students = [
+    student("1", "Gita Rao", 12, { august: "not_opened", september: "not_opened", november: "submitted" }),
+    student("2", "Hari Sen", 11, { august: "not_opened", september: "submitted", october: "submitted", november: "opened" }),
+  ];
+  const sheet = (period: string, list: string) =>
+    testAttendanceSheet({ monthlyTests, students }, { period, filters: ALL_STUDENTS, list: list as never })!;
+
+  it("gives the All year sheet the union of the Students' windows as columns, blank outside a Student's window", () => {
+    const { header, rows } = sheet("all", "all");
+    expect(header).toEqual([
+      "Student Name", "Student ID", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Nov", "Attended", "Tag", "Follow-up",
+    ]);
+    expect(rows).toEqual([
+      ["Gita Rao", "NVS1", 12, "Engineering", "Absent", "Absent", "", "Submitted", "1 of 3 (33%)", "Follow up", "Missed Aug, Sep · attended Nov"],
+      ["Hari Sen", "NVS2", 11, "Engineering", "", "Submitted", "Submitted", "Opened, not submitted", "3 of 3 (100%)", "", "Not submitted Nov"],
+    ]);
+  });
+
+  it("takes the columns from the rows in the list", () => {
+    expect(sheet("all", "follow_up").header.slice(4, -3)).toEqual(["Aug", "Sep", "Nov"]);
+  });
+
+  it("gives the month sheet's Previous 3 tests each Student's own earlier counted tests", () => {
+    expect(sheet("december", "all").rows.map((row) => [row[0], row[5]])).toEqual([
+      ["Hari Sen", "Not submitted Nov"],
+      ["Gita Rao", "Missed Aug, Sep · attended Nov"],
+    ]);
   });
 });
