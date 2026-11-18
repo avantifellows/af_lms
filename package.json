@@ -89,7 +89,7 @@
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.0.5",
-    "fallow": "^2.96.0",
+    "fallow": "3.43.2",
     "jsdom": "^28.1.0",
     "monocart-reporter": "^2.10.0",
     "tailwindcss": "^4",
