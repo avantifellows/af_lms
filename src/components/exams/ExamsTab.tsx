@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, FormSection } from "@/components/ui";
 import {
+  MASKED_PASSWORD,
   examSessionsFor,
   requiredExamNamesForBoardStream,
   type ExamOption,
@@ -23,8 +24,26 @@ interface ExamRow {
   examId: number;
   examName: string;
   applicationNumber: string;
-  applicationPassword: string;
+  /** A password is stored. The tab never holds it unless the user reveals it. */
+  hasStoredPassword: boolean;
+  /** A new password being typed; null while the stored one (or none) is kept. */
+  newPassword: string | null;
+  /** The stored password is removed on save. */
+  clearPassword: boolean;
   sessionsApplied: number[];
+}
+
+function emptyRow(exam: ExamOption): ExamRow {
+  return {
+    recordId: null,
+    examId: exam.id,
+    examName: exam.name,
+    applicationNumber: "",
+    hasStoredPassword: false,
+    newPassword: "",
+    clearPassword: false,
+    sessionsApplied: [],
+  };
 }
 
 const inputClassName =
@@ -38,7 +57,9 @@ function toRow(record: StudentExamRecord): ExamRow {
     examId: record.exam_id,
     examName: record.exam_name,
     applicationNumber: record.application_number ?? "",
-    applicationPassword: record.application_password ?? "",
+    hasStoredPassword: record.has_password,
+    newPassword: record.has_password ? null : "",
+    clearPassword: false,
     sessionsApplied: record.sessions_applied ?? [],
   };
 }
@@ -58,14 +79,7 @@ function initialRows(
     const exam = exams.find((option) => option.name === name);
     if (!exam || seen.has(exam.id)) continue;
     seen.add(exam.id);
-    rows.push({
-      recordId: null,
-      examId: exam.id,
-      examName: exam.name,
-      applicationNumber: "",
-      applicationPassword: "",
-      sessionsApplied: [],
-    });
+    rows.push(emptyRow(exam));
   }
   return rows;
 }
@@ -73,9 +87,20 @@ function initialRows(
 function isBlank(row: ExamRow): boolean {
   return (
     !row.applicationNumber.trim() &&
-    !row.applicationPassword.trim() &&
+    !(row.newPassword ?? "").trim() &&
     row.sessionsApplied.length === 0
   );
+}
+
+/**
+ * The password part of a save: null removes the stored password, a string
+ * replaces it, and leaving the key out keeps what is stored — the tab never
+ * has the stored password to send back.
+ */
+function passwordPayload(row: ExamRow): { application_password?: string | null } {
+  if (row.clearPassword) return { application_password: null };
+  const typed = (row.newPassword ?? "").trim();
+  return typed ? { application_password: typed } : {};
 }
 
 // fallow-ignore-next-line complexity
@@ -83,7 +108,22 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
   const [exams, setExams] = useState<ExamOption[]>([]);
   const [rows, setRows] = useState<ExamRow[]>([]);
   const [removedRecordIds, setRemovedRecordIds] = useState<number[]>([]);
-  const [revealed, setRevealed] = useState<Record<number, boolean>>({});
+  const [canRevealPassword, setCanRevealPassword] = useState(false);
+  // `showTyped` is keyed by exam id and toggles a new password's input. The
+  // reveal state is keyed by record id: a revealed password belongs to one
+  // stored registration, and must never surface on a row that has since been
+  // removed, re-added or reloaded under the same exam.
+  const [showTyped, setShowTyped] = useState<Record<number, boolean>>({});
+  const [revealed, setRevealed] = useState<Record<number, string>>({});
+  const [revealing, setRevealing] = useState<Record<number, boolean>>({});
+  const [revealErrors, setRevealErrors] = useState<Record<number, string>>({});
+  // Bumped whenever revealed passwords are forgotten, so a reveal still in
+  // flight at that moment is dropped when it lands instead of showing.
+  const revealEpoch = useRef(0);
+  // The reveal each record is waiting on; removing the row forgets it, so that
+  // reveal is dropped too without cancelling other rows' reveals.
+  const pendingReveals = useRef(new Map<number, number>());
+  const revealSeq = useRef(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -104,11 +144,16 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
         setLoadError(`Failed to load exams (${res.status})`);
         return;
       }
-      const data: { exams: ExamOption[]; records: StudentExamRecord[] } = await res.json();
+      const data: {
+        exams: ExamOption[];
+        records: StudentExamRecord[];
+        can_reveal_password?: boolean;
+      } = await res.json();
       setExams(data.exams ?? []);
       setRows(initialRows(data.records ?? [], data.exams ?? [], boardStream));
+      setCanRevealPassword(Boolean(data.can_reveal_password));
       setRemovedRecordIds([]);
-      setRevealed({});
+      forgetPasswords();
       setRowErrors({});
     } catch (err) {
       console.error("ExamsTab fetch failed:", err);
@@ -121,6 +166,69 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Drop every revealed or half-typed password, e.g. once a save lands. */
+  function forgetPasswords() {
+    revealEpoch.current += 1;
+    setShowTyped({});
+    setRevealed({});
+    setRevealing({});
+    setRevealErrors({});
+  }
+
+  function hideRevealed(recordId: number | null) {
+    if (recordId === null) return;
+    setRevealed((current) => without(current, recordId));
+    setRevealErrors((current) => without(current, recordId));
+  }
+
+  /** Forget everything about one registration's password, e.g. on removal. */
+  function forgetRow(row: ExamRow) {
+    setShowTyped((current) => without(current, row.examId));
+    if (row.recordId === null) return;
+    const recordId = row.recordId;
+    setRevealed((current) => without(current, recordId));
+    pendingReveals.current.delete(recordId);
+    setRevealing((current) => without(current, recordId));
+    setRevealErrors((current) => without(current, recordId));
+  }
+
+  async function revealPassword(row: ExamRow) {
+    if (row.recordId === null) return;
+    const recordId = row.recordId;
+    const epoch = revealEpoch.current;
+    const token = ++revealSeq.current;
+    pendingReveals.current.set(recordId, token);
+    const stale = () =>
+      revealEpoch.current !== epoch || pendingReveals.current.get(recordId) !== token;
+    setRevealing((current) => ({ ...current, [recordId]: true }));
+    setRevealErrors((current) => without(current, recordId));
+    try {
+      const res = await fetch(
+        `/api/students/${studentId}/exam-records/${recordId}/password`,
+        { method: "POST", cache: "no-store" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (stale()) return;
+      if (!res.ok || typeof data.password !== "string") {
+        setRevealErrors((current) => ({
+          ...current,
+          [recordId]: data.error || `Could not show the password (${res.status})`,
+        }));
+        return;
+      }
+      setRevealed((current) => ({ ...current, [recordId]: data.password }));
+    } catch (err) {
+      console.error("ExamsTab reveal failed:", err instanceof Error ? err.name : err);
+      if (stale()) return;
+      setRevealErrors((current) => ({
+        ...current,
+        [recordId]: "Network error while showing the password.",
+      }));
+    } finally {
+      if (!stale()) setRevealing((current) => without(current, recordId));
+    }
+  }
 
   const availableExams = useMemo(() => {
     const listed = new Set(rows.map((row) => row.examId));
@@ -138,23 +246,14 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
     const exam = exams.find((option) => option.id === examId);
     if (!exam) return;
     setSaved(false);
-    setRows((current) => [
-      ...current,
-      {
-        recordId: null,
-        examId: exam.id,
-        examName: exam.name,
-        applicationNumber: "",
-        applicationPassword: "",
-        sessionsApplied: [],
-      },
-    ]);
+    setRows((current) => [...current, emptyRow(exam)]);
   }
 
   function removeExam(examId: number) {
     setSaved(false);
     setRows((current) => {
       const row = current.find((candidate) => candidate.examId === examId);
+      if (row) forgetRow(row);
       // A stored registration is only deleted when the save goes through, so
       // the id is remembered rather than the row being dropped silently.
       if (row?.recordId) {
@@ -214,7 +313,7 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
           exams: filled.map((row) => ({
             exam_id: row.examId,
             application_number: row.applicationNumber.trim(),
-            application_password: row.applicationPassword.trim(),
+            ...passwordPayload(row),
             sessions_applied: row.sessionsApplied,
           })),
           removed_record_ids: removedRecordIds,
@@ -227,6 +326,7 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
       }
       setRows(initialRows(data.records ?? [], exams, boardStream));
       setRemovedRecordIds([]);
+      forgetPasswords();
       setWarnings(data.warnings ?? []);
       setSaved(true);
       onSaved();
@@ -343,35 +443,28 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
                     >
                       Application password
                     </label>
-                    <div className="flex items-end gap-2">
-                      <input
-                        id={`application_password_${row.examId}`}
-                        type={revealed[row.examId] ? "text" : "password"}
-                        autoComplete="off"
-                        value={row.applicationPassword}
-                        onChange={(event) =>
-                          updateRow(row.examId, { applicationPassword: event.target.value })
-                        }
-                        className={inputClassName}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setRevealed((current) => ({
-                            ...current,
-                            [row.examId]: !current[row.examId],
-                          }))
-                        }
-                        aria-label={
-                          revealed[row.examId]
-                            ? `Hide ${row.examName} password`
-                            : `Show ${row.examName} password`
-                        }
-                      >
-                        {revealed[row.examId] ? "Hide" : "Show"}
-                      </Button>
-                    </div>
+                    <PasswordField
+                      row={row}
+                      canReveal={canRevealPassword}
+                      revealed={row.recordId === null ? undefined : revealed[row.recordId]}
+                      revealing={row.recordId !== null && Boolean(revealing[row.recordId])}
+                      revealError={
+                        row.recordId === null ? undefined : revealErrors[row.recordId]
+                      }
+                      showTyped={Boolean(showTyped[row.examId])}
+                      onReveal={() => void revealPassword(row)}
+                      onHide={() => hideRevealed(row.recordId)}
+                      onToggleTyped={() =>
+                        setShowTyped((current) => ({
+                          ...current,
+                          [row.examId]: !current[row.examId],
+                        }))
+                      }
+                      onChange={(change) => {
+                        hideRevealed(row.recordId);
+                        updateRow(row.examId, change);
+                      }}
+                    />
                   </div>
                   {sessions.length > 0 && (
                     <fieldset className="md:col-span-2">
@@ -408,4 +501,149 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
       </div>
     </div>
   );
+}
+
+interface PasswordFieldProps {
+  row: ExamRow;
+  canReveal: boolean;
+  revealed: string | undefined;
+  revealing: boolean;
+  revealError: string | undefined;
+  showTyped: boolean;
+  onReveal: () => void;
+  onHide: () => void;
+  onToggleTyped: () => void;
+  onChange: (change: Partial<ExamRow>) => void;
+}
+
+/**
+ * One registration's password. A stored password shows masked, with Show (for
+ * a role allowed to reveal it — each reveal is logged), Change and Remove. A
+ * new password is typed into a password input with its own Show toggle.
+ */
+// fallow-ignore-next-line complexity
+function PasswordField({
+  row,
+  canReveal,
+  revealed,
+  revealing,
+  revealError,
+  showTyped,
+  onReveal,
+  onHide,
+  onToggleTyped,
+  onChange,
+}: PasswordFieldProps) {
+  const inputId = `application_password_${row.examId}`;
+
+  if (row.clearPassword) {
+    return (
+      <div className="mt-1 flex items-center gap-2">
+        <p className="flex-1 text-sm text-text-muted">Password will be removed when you save.</p>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange({ clearPassword: false })}
+          aria-label={`Undo removing ${row.examName} password`}
+        >
+          Undo
+        </Button>
+      </div>
+    );
+  }
+
+  if (row.hasStoredPassword && row.newPassword === null) {
+    return (
+      <>
+        <div className="flex items-end gap-2">
+          <input
+            id={inputId}
+            type="text"
+            readOnly
+            autoComplete="off"
+            value={revealed ?? MASKED_PASSWORD}
+            className={inputClassName}
+          />
+          {canReveal &&
+            (revealed === undefined ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onReveal}
+                disabled={revealing}
+                aria-label={`Show ${row.examName} password`}
+              >
+                {revealing ? "Showing…" : "Show"}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onHide}
+                aria-label={`Hide ${row.examName} password`}
+              >
+                Hide
+              </Button>
+            ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange({ newPassword: "" })}
+            aria-label={`Change ${row.examName} password`}
+          >
+            Change
+          </Button>
+          <Button
+            variant="danger-ghost"
+            size="sm"
+            onClick={() => onChange({ clearPassword: true })}
+            aria-label={`Remove ${row.examName} password`}
+          >
+            Remove
+          </Button>
+        </div>
+        {revealError && <p className={errorClassName}>{revealError}</p>}
+      </>
+    );
+  }
+
+  return (
+    <div className="flex items-end gap-2">
+      <input
+        id={inputId}
+        type={showTyped ? "text" : "password"}
+        autoComplete="new-password"
+        value={row.newPassword ?? ""}
+        placeholder={row.hasStoredPassword ? "New password" : undefined}
+        onChange={(event) => onChange({ newPassword: event.target.value })}
+        className={inputClassName}
+      />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onToggleTyped}
+        aria-label={showTyped ? `Hide ${row.examName} password` : `Show ${row.examName} password`}
+      >
+        {showTyped ? "Hide" : "Show"}
+      </Button>
+      {row.hasStoredPassword && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange({ newPassword: null })}
+          aria-label={`Keep stored ${row.examName} password`}
+        >
+          Keep stored
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** A copy of `record` without `key`. */
+function without<T>(record: Record<number, T>, key: number): Record<number, T> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
 }

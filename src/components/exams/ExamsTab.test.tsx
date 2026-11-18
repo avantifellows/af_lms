@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ExamsTab } from "./ExamsTab";
 import type { StudentExamRecord } from "@/lib/competitive-exams";
@@ -16,8 +16,10 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 /** Answer the tab's initial load, then whatever the save gets. */
-function serve(records: StudentExamRecord[] = []) {
-  mockFetch.mockResolvedValueOnce(jsonResponse({ exams: EXAMS, records }));
+function serve(records: StudentExamRecord[] = [], canReveal = true) {
+  mockFetch.mockResolvedValueOnce(
+    jsonResponse({ exams: EXAMS, records, can_reveal_password: canReveal }),
+  );
 }
 
 beforeEach(() => {
@@ -32,8 +34,9 @@ afterEach(() => {
 async function renderTab(
   props: Partial<React.ComponentProps<typeof ExamsTab>> = {},
   records: StudentExamRecord[] = [],
+  canReveal = true,
 ) {
-  serve(records);
+  serve(records, canReveal);
   const onSaved = props.onSaved ?? vi.fn();
   render(
     <ExamsTab studentId={7} boardStream={props.boardStream ?? "PCM"} onSaved={onSaved} />,
@@ -53,9 +56,36 @@ const storedJee: StudentExamRecord = {
   exam_id: 1,
   exam_name: "JEE Mains",
   application_number: "JEE123",
-  application_password: "secret",
+  has_password: true,
   sessions_applied: [1],
 };
+
+/** The tab opened on a Student with a stored JEE Mains password. */
+async function renderStoredJee(canReveal = true) {
+  const user = userEvent.setup();
+  await renderTab({ boardStream: "PCM" }, [storedJee], canReveal);
+  return user;
+}
+
+/** Press Save right after the initial load, and wait for the save request. */
+async function pressSaveAfterLoad(user: ReturnType<typeof userEvent.setup>) {
+  mockFetch.mockResolvedValueOnce(jsonResponse({ records: [] }));
+  await user.click(screen.getByRole("button", { name: "Save Exams" }));
+  await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+}
+
+/** Press Save, answer it with `records`, and return the first exam it sent. */
+async function saveFirstExam(
+  user: ReturnType<typeof userEvent.setup>,
+  records: StudentExamRecord[] = [],
+) {
+  mockFetch.mockResolvedValueOnce(jsonResponse({ records }));
+  await user.click(screen.getByRole("button", { name: "Save Exams" }));
+  await waitFor(() =>
+    expect(mockFetch.mock.calls.some((call) => call[1]?.method === "PUT")).toBe(true),
+  );
+  return savedBody().exams[0];
+}
 
 describe("ExamsTab", () => {
   it("opens the exams the Board Stream calls for", async () => {
@@ -87,17 +117,121 @@ describe("ExamsTab", () => {
     expect(screen.getAllByLabelText(/Session [12]/)).toHaveLength(2);
   });
 
-  it("masks a stored password until Show is pressed", async () => {
-    const user = userEvent.setup();
-    await renderTab({ boardStream: "PCM" }, [storedJee]);
+  it("masks a stored password and fetches it from the logged reveal route on Show", async () => {
+    const user = await renderStoredJee();
 
-    const password = screen.getByLabelText("Application password");
-    expect(password).toHaveAttribute("type", "password");
-    expect(password).toHaveValue("secret");
+    expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
 
+    mockFetch.mockResolvedValueOnce(jsonResponse({ password: "secret" }));
     await user.click(screen.getByRole("button", { name: "Show JEE Mains password" }));
 
+    expect(await screen.findByDisplayValue("secret")).toBeInTheDocument();
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      "/api/students/7/exam-records/10/password",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Hide JEE Mains password" }));
+
+    expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
+  });
+
+  it("offers no Show for a role that may not reveal passwords", async () => {
+    await renderStoredJee(false);
+
+    expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
+    expect(
+      screen.queryByRole("button", { name: "Show JEE Mains password" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change JEE Mains password" })).toBeInTheDocument();
+  });
+
+  it("says why a reveal was refused", async () => {
+    const user = await renderStoredJee();
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ error: "Forbidden" }, 403));
+    await user.click(screen.getByRole("button", { name: "Show JEE Mains password" }));
+
+    expect(await screen.findByText("Forbidden")).toBeInTheDocument();
+    expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
+  });
+
+  it("drops a reveal that lands after the save it was overtaken by", async () => {
+    const user = await renderStoredJee();
+    let answerReveal: (res: Response) => void = () => {};
+    mockFetch.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (answerReveal = resolve)),
+    );
+    await user.click(screen.getByRole("button", { name: "Show JEE Mains password" }));
+    await user.click(screen.getByLabelText("Session 2"));
+    await saveFirstExam(user, [storedJee]);
+
+    await act(async () => answerReveal(jsonResponse({ password: "late-secret" })));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Show JEE Mains password" })).toBeEnabled(),
+    );
+    expect(screen.queryByDisplayValue("late-secret")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
+  });
+
+  it("keeps a stored password on save by leaving it out", async () => {
+    const user = await renderStoredJee();
+
+    await user.click(screen.getByLabelText("Session 2"));
+
+    expect(await saveFirstExam(user, [storedJee])).toEqual({
+      exam_id: 1,
+      application_number: "JEE123",
+      sessions_applied: [1, 2],
+    });
+  });
+
+  it("replaces a stored password through Change", async () => {
+    const user = await renderStoredJee();
+
+    await user.click(screen.getByRole("button", { name: "Change JEE Mains password" }));
+    const input = screen.getByLabelText("Application password");
+    expect(input).toHaveAttribute("type", "password");
+    await user.type(input, " newpw ");
+
+    expect((await saveFirstExam(user, [storedJee])).application_password).toBe("newpw");
+  });
+
+  it("goes back to the stored password when a change is abandoned", async () => {
+    const user = await renderStoredJee();
+
+    await user.click(screen.getByRole("button", { name: "Change JEE Mains password" }));
+    await user.type(screen.getByLabelText("Application password"), "typo");
+    await user.click(screen.getByRole("button", { name: "Keep stored JEE Mains password" }));
+    await user.click(screen.getByLabelText("Session 2"));
+
+    expect(await saveFirstExam(user, [storedJee])).not.toHaveProperty("application_password");
+  });
+
+  it("removes a stored password, and can undo that before saving", async () => {
+    const user = await renderStoredJee();
+
+    await user.click(screen.getByRole("button", { name: "Remove JEE Mains password" }));
+    expect(screen.getByText("Password will be removed when you save.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Undo removing JEE Mains password" }));
+    expect(screen.getByLabelText("Application password")).toHaveValue("••••••••");
+
+    await user.click(screen.getByRole("button", { name: "Remove JEE Mains password" }));
+
+    expect((await saveFirstExam(user)).application_password).toBeNull();
+  });
+
+  it("sends a new registration's typed password, with its own Show toggle", async () => {
+    const user = userEvent.setup();
+    await renderTab({ boardStream: "PCM" });
+
+    await user.type(screen.getByLabelText("Application number"), "JEE123");
+    await user.type(screen.getByLabelText("Application password"), "pw1");
+    await user.click(screen.getByRole("button", { name: "Show JEE Mains password" }));
     expect(screen.getByLabelText("Application password")).toHaveAttribute("type", "text");
+
+    expect((await saveFirstExam(user)).application_password).toBe("pw1");
   });
 
   it("adds an exam from the picker and saves it", async () => {
@@ -115,7 +249,6 @@ describe("ExamsTab", () => {
         {
           exam_id: 3,
           application_number: "CU-9",
-          application_password: "",
           sessions_applied: [],
         },
       ],
@@ -137,10 +270,7 @@ describe("ExamsTab", () => {
 
     await user.type(screen.getByLabelText("Application number"), "JEE123");
     await user.click(screen.getByLabelText("Session 2"));
-    mockFetch.mockResolvedValueOnce(jsonResponse({ records: [] }));
-    await user.click(screen.getByRole("button", { name: "Save Exams" }));
-
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    await pressSaveAfterLoad(user);
     expect(savedBody().exams[0].sessions_applied).toEqual([2]);
   });
 
@@ -172,10 +302,7 @@ describe("ExamsTab", () => {
     await renderTab({ boardStream: "PCM" }, [storedJee]);
 
     await user.click(screen.getByRole("button", { name: "Remove" }));
-    mockFetch.mockResolvedValueOnce(jsonResponse({ records: [] }));
-    await user.click(screen.getByRole("button", { name: "Save Exams" }));
-
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    await pressSaveAfterLoad(user);
     expect(savedBody()).toEqual({ exams: [], removed_record_ids: [10] });
   });
 

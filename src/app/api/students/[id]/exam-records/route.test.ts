@@ -4,6 +4,10 @@ import {
   jsonRequest,
   routeParams,
 } from "@/app/api/__test-utils__/api-test-helpers";
+import {
+  examRecordsPermissionRow as permissionRow,
+  queueExamRecordsGate,
+} from "@/app/api/__test-utils__/exam-records-gate";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -17,6 +21,7 @@ vi.mock("@/lib/db-service-exam-records", () => ({
   updateExamRecord: vi.fn(),
   deleteExamRecord: vi.fn(),
 }));
+vi.mock("@/lib/exam-password-crypto", () => ({ encryptExamPassword: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
@@ -26,6 +31,7 @@ import {
   deleteExamRecord,
   updateExamRecord,
 } from "@/lib/db-service-exam-records";
+import { encryptExamPassword } from "@/lib/exam-password-crypto";
 import { GET, PUT } from "./route";
 
 const mockSession = vi.mocked(getServerSession);
@@ -35,6 +41,7 @@ const mockListRecords = vi.mocked(listStudentExamRecords);
 const mockCreate = vi.mocked(createExamRecord);
 const mockUpdate = vi.mocked(updateExamRecord);
 const mockDelete = vi.mocked(deleteExamRecord);
+const mockEncrypt = vi.mocked(encryptExamPassword);
 
 const JEE = { id: 1, name: "JEE Mains" };
 const NEET = { id: 2, name: "NEET" };
@@ -45,32 +52,19 @@ beforeEach(() => {
   // that short-circuits (read-only, PMU) leaves its unused rows behind and
   // shifts the next test's queue, so the query queue is reset outright.
   mockQuery.mockReset();
+  // Same for the DB Service writes: a test that queues a one-off rejection
+  // but stops before using it must not fail whichever test runs next.
+  mockCreate.mockReset();
+  mockUpdate.mockReset();
+  mockDelete.mockReset();
   mockListExams.mockResolvedValue([JEE, NEET]);
   mockListRecords.mockResolvedValue([]);
+  mockEncrypt.mockImplementation(async (plaintext, studentId) => `enc(${plaintext}|${studentId})`);
 });
 
-/**
- * The three queries the gate runs: the Student's school, the permission, then
- * `isPmuOnlyStudent` — which the Student fails by default, being a
- * physical-centre Student with a current non-NVS batch.
- */
-function authorize({ readOnly = false, pmuOnly = false } = {}) {
-  mockSession.mockResolvedValue(ADMIN_SESSION);
-  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West", program_id: 1 }]);
-  mockQuery.mockResolvedValueOnce([
-    {
-      email: "admin@avantifellows.org",
-      level: 3,
-      role: readOnly ? "program_admin" : "admin",
-      school_codes: null,
-      regions: null,
-      program_ids: readOnly ? [1] : null,
-      read_only: readOnly,
-    },
-  ]);
-  mockQuery.mockResolvedValueOnce([
-    pmuOnly ? { nvs: true, other: false } : { nvs: false, other: true },
-  ]);
+/** Sign in and pass (or stop) the Exams tab gate — see `queueExamRecordsGate`. */
+function authorize(options: { readOnly?: boolean; pmuOnly?: boolean } = {}) {
+  queueExamRecordsGate(mockSession, mockQuery, options);
 }
 
 function putRequest(body: unknown) {
@@ -117,15 +111,17 @@ describe("GET /api/students/[id]/exam-records", () => {
     expect(mockListRecords).not.toHaveBeenCalled();
   });
 
-  it("returns the picker options and the stored registrations", async () => {
+  it("returns the registrations with whether a password is stored, never the password", async () => {
     authorize();
+    // `exam_passwords` is read from the permission row once the gate passes.
+    mockQuery.mockResolvedValueOnce([permissionRow()]);
     mockListRecords.mockResolvedValue([
       {
         id: 10,
         exam_id: 1,
         exam_name: "JEE Mains",
         application_number: "JEE123",
-        application_password: "secret",
+        has_password: true,
         sessions_applied: [1],
       },
     ]);
@@ -135,25 +131,43 @@ describe("GET /api/students/[id]/exam-records", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.exams).toEqual([JEE, NEET]);
-    expect(body.records[0]).toMatchObject({
+    expect(body.records[0]).toEqual({
       id: 10,
+      exam_id: 1,
+      exam_name: "JEE Mains",
       application_number: "JEE123",
-      application_password: "secret",
+      has_password: true,
+      sessions_applied: [1],
     });
+    expect(body.can_reveal_password).toBe(true);
+  });
+
+  it("tells a role without exam_passwords that it cannot reveal", async () => {
+    authorize();
+    mockQuery.mockResolvedValueOnce([permissionRow({ role: "holistic_mentorship_admin" })]);
+
+    const res = await GET(new Request("http://test"), routeParams({ id: "7" }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).can_reveal_password).toBe(false);
   });
 });
+
+/** PUT one registration and expect a 403 that never reached the DB Service. */
+async function expectRefusedBeforeWriting() {
+  const res = await PUT(
+    putRequest({ exams: [{ exam_id: 1, application_number: "JEE123" }] }),
+    routeParams({ id: "7" }),
+  );
+  expect(res.status).toBe(403);
+  expect(mockCreate).not.toHaveBeenCalled();
+}
 
 describe("PUT /api/students/[id]/exam-records", () => {
   it("refuses a PMU (JNV NVS) Student, so the UI gate can't be walked around", async () => {
     authorize({ pmuOnly: true });
 
-    const res = await PUT(
-      putRequest({ exams: [{ exam_id: 1, application_number: "JEE123" }] }),
-      routeParams({ id: "7" }),
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockCreate).not.toHaveBeenCalled();
+    await expectRefusedBeforeWriting();
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockDelete).not.toHaveBeenCalled();
   });
@@ -161,13 +175,7 @@ describe("PUT /api/students/[id]/exam-records", () => {
   it("refuses a read-only user before touching the DB Service", async () => {
     authorize({ readOnly: true });
 
-    const res = await PUT(
-      putRequest({ exams: [{ exam_id: 1, application_number: "JEE123" }] }),
-      routeParams({ id: "7" }),
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockCreate).not.toHaveBeenCalled();
+    await expectRefusedBeforeWriting();
   });
 
   it("creates a registration for an exam the Student has none for", async () => {
@@ -188,14 +196,52 @@ describe("PUT /api/students/[id]/exam-records", () => {
     );
 
     expect(res.status).toBe(200);
+    expect(mockEncrypt).toHaveBeenCalledWith("secret", 7);
     expect(mockCreate).toHaveBeenCalledWith({
       student_id: 7,
       exam_id: 1,
       application_number: "JEE123",
-      application_password: "secret",
       sessions_applied: [1, 2],
+      application_password: null,
+      application_password_ciphertext: "enc(secret|7)",
     });
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("never sends a plaintext password to the DB Service", async () => {
+    authorize();
+
+    await PUT(
+      putRequest({ exams: [{ exam_id: 1, application_number: "JEE123", application_password: "secret" }] }),
+      routeParams({ id: "7" }),
+    );
+
+    expect(JSON.stringify(mockCreate.mock.calls)).not.toContain('"secret"');
+  });
+
+  it("fails a registration whose password cannot be encrypted, and sends nothing for it", async () => {
+    authorize();
+    mockEncrypt.mockRejectedValueOnce(
+      new Error("User arn:aws:iam::123:user/x is not authorized on arn:aws:kms:ap-south-1:123:key/k"),
+    );
+
+    const res = await PUT(
+      putRequest({
+        exams: [
+          { exam_id: 1, application_number: "JEE123", application_password: "secret" },
+          { exam_id: 2, application_number: "NEET9" },
+        ],
+      }),
+      routeParams({ id: "7" }),
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).warnings).toEqual([
+      "Could not save JEE Mains: the password could not be encrypted; try again later",
+    ]);
+    expect(JSON.stringify(mockCreate.mock.calls)).not.toContain("arn:aws");
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ exam_id: 2 });
   });
 
   it("updates a changed registration and leaves an unchanged one alone", async () => {
@@ -206,7 +252,7 @@ describe("PUT /api/students/[id]/exam-records", () => {
         exam_id: 1,
         exam_name: "JEE Mains",
         application_number: "JEE123",
-        application_password: "secret",
+        has_password: true,
         sessions_applied: [1],
       },
       {
@@ -214,20 +260,17 @@ describe("PUT /api/students/[id]/exam-records", () => {
         exam_id: 2,
         exam_name: "NEET",
         application_number: "NEET9",
-        application_password: null,
+        has_password: false,
         sessions_applied: null,
       },
     ]);
 
+    // JEE Mains leaves the password out — the tab never has the stored one —
+    // so it keeps it and nothing else changed.
     const res = await PUT(
       putRequest({
         exams: [
-          {
-            exam_id: 1,
-            application_number: "JEE123",
-            application_password: "secret",
-            sessions_applied: [1],
-          },
+          { exam_id: 1, application_number: "JEE123", sessions_applied: [1] },
           { exam_id: 2, application_number: "NEET9", application_password: "np" },
         ],
       }),
@@ -240,10 +283,80 @@ describe("PUT /api/students/[id]/exam-records", () => {
       student_id: 7,
       exam_id: 2,
       application_number: "NEET9",
-      application_password: "np",
       sessions_applied: null,
+      application_password: null,
+      application_password_ciphertext: "enc(np|7)",
     });
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a stored password when only the registration changes", async () => {
+    authorize();
+    mockListRecords.mockResolvedValue([
+      {
+        id: 10,
+        exam_id: 1,
+        exam_name: "JEE Mains",
+        application_number: "JEE123",
+        has_password: true,
+        sessions_applied: [1],
+      },
+    ]);
+
+    await PUT(
+      putRequest({ exams: [{ exam_id: 1, application_number: "JEE123", sessions_applied: [1, 2] }] }),
+      routeParams({ id: "7" }),
+    );
+
+    expect(mockEncrypt).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith(10, {
+      student_id: 7,
+      exam_id: 1,
+      application_number: "JEE123",
+      sessions_applied: [1, 2],
+    });
+  });
+
+  it("clears a stored password, and skips clearing one that is not stored", async () => {
+    authorize();
+    mockListRecords.mockResolvedValue([
+      {
+        id: 10,
+        exam_id: 1,
+        exam_name: "JEE Mains",
+        application_number: "JEE123",
+        has_password: true,
+        sessions_applied: null,
+      },
+      {
+        id: 11,
+        exam_id: 2,
+        exam_name: "NEET",
+        application_number: "NEET9",
+        has_password: false,
+        sessions_applied: null,
+      },
+    ]);
+
+    await PUT(
+      putRequest({
+        exams: [
+          { exam_id: 1, application_number: "JEE123", application_password: null },
+          { exam_id: 2, application_number: "NEET9", application_password: "" },
+        ],
+      }),
+      routeParams({ id: "7" }),
+    );
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith(10, {
+      student_id: 7,
+      exam_id: 1,
+      application_number: "JEE123",
+      sessions_applied: null,
+      application_password: null,
+      application_password_ciphertext: null,
+    });
   });
 
   it("deletes a removed registration before writing the rest", async () => {
@@ -254,7 +367,7 @@ describe("PUT /api/students/[id]/exam-records", () => {
         exam_id: 1,
         exam_name: "JEE Mains",
         application_number: "SHARED1",
-        application_password: null,
+        has_password: false,
         sessions_applied: null,
       },
     ]);
@@ -301,7 +414,7 @@ describe("PUT /api/students/[id]/exam-records", () => {
         exam_id: 1,
         exam_name: "JEE Mains",
         application_number: "SHARED1",
-        application_password: null,
+        has_password: false,
         sessions_applied: null,
       },
     ]);
