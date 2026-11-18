@@ -9,8 +9,11 @@
 //
 // "Last refreshed" is when the table was last rebuilt, from the dataset's
 // table metadata (as PMU Live Tracking reads it), not when the LMS fetched it.
-// Both reads are cached per School for 60 seconds, so the Refresh button and
-// several viewers don't multiply warehouse queries.
+// Both reads are cached for 60 seconds per School and set of Students and
+// Papers asked about, so the Refresh button and several viewers don't multiply
+// warehouse queries, and a Student or Paper added to the list is read at once.
+
+import { createHash } from "node:crypto";
 
 import { getBigQueryClient } from "@/lib/bigquery";
 import type { PaperAttendance } from "@/lib/test-attendance-rules";
@@ -74,21 +77,36 @@ export interface SchoolAttendance {
   lastRefreshed: string | null;
 }
 
+// At most 500 entries (the cache's limit), each expiring after 60 seconds.
 const cached = ttlCache<SchoolAttendance>(60 * 1000);
 
+const sortedUnique = (ids: string[]) => [...new Set(ids)].sort();
+
 /**
- * One School's attendance and the table's last-refreshed time, cached per
- * School for 60 seconds. A failed attendance read throws (and is not kept); a
- * failed last-refreshed lookup is tolerated as an unknown time.
+ * The cache key: the School plus a fixed-length digest of the sorted,
+ * de-duplicated Student and quiz ids, so a key never grows with the roster.
+ */
+function cacheKey(schoolId: string | number, quizIds: string[], userIds: string[]): string {
+  const ids = JSON.stringify([quizIds, userIds]);
+  return `${schoolId}:${createHash("sha256").update(ids).digest("hex")}`;
+}
+
+/**
+ * One School's attendance and the table's last-refreshed time, cached for 60
+ * seconds per School and set of Students and Papers (in any order). A failed
+ * attendance read throws (and is not kept); a failed last-refreshed lookup is
+ * tolerated as an unknown time.
  */
 export function readSchoolAttendance(
   schoolId: string | number,
   quizIds: string[],
   userIds: string[],
 ): Promise<SchoolAttendance> {
-  return cached(String(schoolId), async () => {
+  const quizzes = sortedUnique(quizIds);
+  const users = sortedUnique(userIds);
+  return cached(cacheKey(schoolId, quizzes, users), async () => {
     const [attendance, lastRefreshed] = await Promise.all([
-      readPaperAttendance(quizIds, userIds),
+      readPaperAttendance(quizzes, users),
       readLastRefreshed().catch((error: unknown) => {
         console.error(
           "Test Attendance last-refreshed lookup failed:",
