@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 
 import { CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID } from "../../src/lib/constants";
+import type { TestAttendanceResponse } from "../../src/types/test-attendance";
 
 // Test Attendance tab (#517) fixture. The e2e dump has no JNV School with a
 // listed Student (current-year grade 11/12, a current JNV NVS batch), so the
@@ -95,3 +96,40 @@ export async function removeTestAttendanceFixture(pool: Pool): Promise<void> {
   await pool.query(`DELETE FROM student WHERE user_id = ANY($1)`, [userIds]);
   await pool.query(`DELETE FROM "user" WHERE id = ANY($1)`, [userIds]);
 }
+
+// The e2e server cannot read the PMU test set list or the warehouse, so specs
+// that need a loaded tab answer the read route in the browser with this
+// response (made-up Students; they need not match the seeded roster). Server
+// time 18 Nov 2026, 2:00 pm IST: August, September and October are closed and
+// November is running. Asha and Kiran get Follow up, Neel gets Not submitting.
+const testAttendanceMonth = (key: string, name: string, opensAt: string, closesAt: string, state: "running" | "closed") => ({
+  key,
+  name,
+  shortName: name.slice(0, 3),
+  opensAt,
+  closesAt,
+  state,
+  grades: [11, 12],
+});
+
+export const TEST_ATTENDANCE_RESPONSE: TestAttendanceResponse = {
+  monthlyTests: [
+    testAttendanceMonth("august", "August", "2026-08-17T23:30:00.000Z", "2026-08-22T18:25:00.000Z", "closed"),
+    testAttendanceMonth("september", "September", "2026-09-14T23:30:00.000Z", "2026-09-19T18:25:00.000Z", "closed"),
+    testAttendanceMonth("october", "October", "2026-10-05T23:30:00.000Z", "2026-10-10T18:25:00.000Z", "closed"),
+    testAttendanceMonth("november", "November", "2026-11-16T23:30:00.000Z", "2026-11-21T18:25:00.000Z", "running"),
+  ],
+  students: [
+    { userId: "e2e-ta-1", name: "Asha Bose", studentId: "E2E-TA-1", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "not_opened", october: "not_opened", november: "submitted" } },
+    { userId: "e2e-ta-2", name: "Kiran Das", studentId: "E2E-TA-2", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", october: "submitted", november: "not_opened" } },
+    { userId: "e2e-ta-3", name: "Neel Jha", studentId: "E2E-TA-3", grade: 11, examPreparingFor: "Engineering", attendance: { august: "opened", september: "submitted", october: "opened", november: "not_opened" } },
+    { userId: "e2e-ta-4", name: "Bala Nair", studentId: "E2E-TA-4", grade: 11, examPreparingFor: null, attendance: { august: "submitted", september: "opened", october: "submitted", november: "submitted" } },
+    { userId: "e2e-ta-5", name: "Zoya Ali", studentId: null, grade: 11, examPreparingFor: "Engineering", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "opened" } },
+    // Joined in November: counted for November only.
+    { userId: "e2e-ta-6", name: "Omar Khan", studentId: "E2E-TA-6", grade: 12, examPreparingFor: "CLAT", attendance: { november: "not_opened" } },
+    { userId: "e2e-ta-7", name: "Ravi Sen", studentId: "E2E-TA-7", grade: 12, examPreparingFor: "NDA", attendance: { august: "submitted", september: "submitted", october: "not_opened", november: "opened" } },
+    { userId: "e2e-ta-8", name: "Meera Iyer", studentId: "E2E-TA-8", grade: 12, examPreparingFor: "CA", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "submitted" } },
+  ],
+  lastRefreshed: "2026-11-18T08:15:00.000Z",
+  serverTime: "2026-11-18T08:30:00.000Z",
+};
