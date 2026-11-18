@@ -817,6 +817,9 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A **Paper** opened or submitted after its **Monthly Test** closed still counts towards the Student's **Test Attendance Status**
 - A grade that had no **Paper** in a **Monthly Test** is left out of that Monthly Test
 - A Student is counted only for a **Monthly Test** that closed after they joined JNV NVS; a Student who joined while it was still running is counted for it
+- A Student's joining date for this rule is their earliest JNV NVS batch enrollment in the academic year, so a later move between NVS batches does not remove earlier **Monthly Tests**
+- A **Monthly Test** appears on the **Test Attendance Tab** only once it is in the PMU's test set list; the list's "current" mark is ignored, and a switched-off **Paper** in a set is skipped
+- The **Test Attendance Tab** covers grades 11 and 12; a Student with no **Exam Preparing For** is grouped under "Not set"
 - A **Follow Up Tag** or **Not Submitting Tag** always needs 2 misses; a Student counted for only one **Monthly Test** is never tagged, and a running Monthly Test never counts towards a tag
 - The submitted state on the **Test Attendance Tab** is read from the warehouse attendance table at the 15-minute cadence (etl-next#238); the tab launches only once that is in production
 
