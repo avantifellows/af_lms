@@ -124,19 +124,31 @@ describe("getNvsTestSets", () => {
     ["test_sets that is not a list", () => mockFetch.mockResolvedValue(ok({ fields: { test_sets: str("July") } }))],
     ["a body that is not JSON", () => mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => { throw new SyntaxError("bad"); } })],
     ["a failed token", () => mockGetAccessToken.mockRejectedValue(new Error("invalid_grant"))],
-  ])("is unavailable after %s", async (_label, fail) => {
+  ])("throws after %s, logging only the message", async (_label, fail) => {
     fail();
     const getNvsTestSets = await freshReader();
 
-    expect(await getNvsTestSets()).toBe("unavailable");
+    await expect(getNvsTestSets()).rejects.toThrow();
+    expect(console.error).toHaveBeenCalledWith("PMU test set list unavailable:", expect.any(String));
   });
 
-  it("is unavailable when the service account setting is not JSON, without calling Firestore", async () => {
+  it("throws when the service account setting is not JSON, without calling Firestore", async () => {
     vi.stubEnv("GOOGLE_SERVICE_ACCOUNT_JSON", " ");
     const getNvsTestSets = await freshReader();
 
-    expect(await getNvsTestSets()).toBe("unavailable");
+    await expect(getNvsTestSets()).rejects.toThrow("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON");
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("never puts the service account setting in the error or the log", async () => {
+    // JSON.parse quotes the start of a value it cannot read in its message.
+    vi.stubEnv("GOOGLE_SERVICE_ACCOUNT_JSON", "SECRET-KEY-MATERIAL");
+    const getNvsTestSets = await freshReader();
+
+    const error = await getNvsTestSets().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain("SECRET");
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("SECRET");
   });
 
   it("keeps a read for 5 minutes, then reads again", async () => {
@@ -161,7 +173,7 @@ describe("getNvsTestSets", () => {
       .mockResolvedValueOnce(ok(document([set(str("October"), [str("q1")])])));
     const getNvsTestSets = await freshReader();
 
-    expect(await getNvsTestSets()).toBe("unavailable");
+    await expect(getNvsTestSets()).rejects.toThrow("fetch failed");
     expect(await getNvsTestSets()).toEqual([{ label: "October", quizIds: ["q1"] }]);
   });
 });

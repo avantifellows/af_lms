@@ -18,22 +18,25 @@ const READ_TIMEOUT_MS = 10_000;
 // Live Tracking accepts the same 5-minute delay. A failed read is not kept.
 const cached = ttlCache<TestSet[]>(5 * 60 * 1000, 1);
 
+/**
+ * The service account from GOOGLE_SERVICE_ACCOUNT_JSON when set; otherwise
+ * Google's default lookup, which reads GOOGLE_APPLICATION_CREDENTIALS itself.
+ */
 function googleAuth(): { auth: GoogleAuth; projectId?: string } {
   const credentialsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (credentialsJson) {
-    // Throws on a value that is not JSON (the e2e server sets " ").
-    const credentials = JSON.parse(credentialsJson);
-    return {
-      auth: new GoogleAuth({ credentials, scopes: [FIRESTORE_SCOPE] }),
-      projectId: credentials.project_id,
-    };
+  if (!credentialsJson) return { auth: new GoogleAuth({ scopes: [FIRESTORE_SCOPE] }) };
+  let credentials;
+  try {
+    credentials = JSON.parse(credentialsJson);
+  } catch {
+    // Not the parser's message: it quotes the start of the value, a secret.
+    // The e2e server sets " ", so this is the path it takes.
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON");
   }
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    return {
-      auth: new GoogleAuth({ keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS, scopes: [FIRESTORE_SCOPE] }),
-    };
-  }
-  return { auth: new GoogleAuth({ scopes: [FIRESTORE_SCOPE] }) };
+  return {
+    auth: new GoogleAuth({ credentials, scopes: [FIRESTORE_SCOPE] }),
+    projectId: credentials.project_id,
+  };
 }
 
 type FirestoreValue = {
@@ -76,14 +79,15 @@ async function readTestSets(): Promise<TestSet[]> {
 }
 
 /**
- * The NVS test sets as `{label, quizIds}` in list order, or "unavailable"
- * when the list cannot be read. Cached in process for 5 minutes.
+ * The NVS test sets as `{label, quizIds}` in list order. Throws when the list
+ * cannot be read (logging only the error message). Cached in process for 5
+ * minutes; a failed read is not kept.
  */
-export async function getNvsTestSets(): Promise<TestSet[] | "unavailable"> {
+export async function getNvsTestSets(): Promise<TestSet[]> {
   try {
     return await cached("nvs", readTestSets);
   } catch (error) {
     console.error("PMU test set list unavailable:", error instanceof Error ? error.message : "unknown error");
-    return "unavailable";
+    throw error;
   }
 }

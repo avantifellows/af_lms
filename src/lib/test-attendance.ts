@@ -21,7 +21,6 @@ import { getNvsTestSets } from "@/lib/test-set-list";
 /** The test set list and the windows of its Papers. Throws when a source fails. */
 async function loadTestSets(): Promise<{ testSets: TestSet[]; papers: PaperWindow[] }> {
   const testSets = await getNvsTestSets();
-  if (testSets === "unavailable") throw new Error("PMU test set list unavailable");
   const papers = await readPaperWindows([...new Set(testSets.flatMap((set) => set.quizIds))]);
   return { testSets, papers };
 }

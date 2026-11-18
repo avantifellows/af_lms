@@ -166,7 +166,13 @@ describe("runTestAttendanceCheck: a source that cannot be read fails the run", (
 
   it("fails when the PMU test set list is unavailable", async () => {
     const run = runTestAttendanceCheck(
-      sources({ testSets: async () => "unavailable", schoolAttendance: okAttendance, submittedResults: async () => [] }),
+      sources({
+        testSets: async () => {
+          throw new Error("PMU test set list unavailable");
+        },
+        schoolAttendance: okAttendance,
+        submittedResults: async () => [],
+      }),
       NOW,
     );
     await expect(run).rejects.toThrow("PMU test set list unavailable");

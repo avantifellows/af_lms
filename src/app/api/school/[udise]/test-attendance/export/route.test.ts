@@ -410,7 +410,7 @@ describe("GET /api/school/[udise]/test-attendance/export — parameters", () => 
 
 describe("GET /api/school/[udise]/test-attendance/export — failed sources", () => {
   it.each([
-    ["the PMU test set list is unavailable", () => mockGetNvsTestSets.mockResolvedValue("unavailable")],
+    ["the PMU test set list is unavailable", () => mockGetNvsTestSets.mockRejectedValue(new Error("Firestore answered 403"))],
     [
       "the roster read fails",
       () =>

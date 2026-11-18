@@ -354,7 +354,7 @@ describe("GET /api/school/[udise]/test-attendance — Monthly Tests", () => {
 
   it("answers 500 when the PMU test set list is unavailable", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockGetNvsTestSets.mockResolvedValue("unavailable");
+    mockGetNvsTestSets.mockRejectedValue(new Error("Firestore answered 403"));
 
     const response = await get();
 

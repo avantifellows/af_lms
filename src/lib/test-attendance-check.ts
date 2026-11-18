@@ -21,8 +21,8 @@ export interface SubmittedResult {
 export interface CheckSources {
   /** Every NVS (JNV) School. */
   nvsSchools(): Promise<Array<{ id: string; code: string }>>;
-  /** The PMU test set list; "unavailable" when it cannot be read. */
-  testSets(): Promise<TestSet[] | "unavailable">;
+  /** The PMU test set list. Throws when it cannot be read. */
+  testSets(): Promise<TestSet[]>;
   /** Paper windows from `session` for these quiz ids. */
   paperWindows(quizIds: string[]): Promise<PaperWindow[]>;
   /** The tab's data for one School: the tab's own loader. */
@@ -106,7 +106,6 @@ const byNumber = (a: string, b: string) => Number(a) - Number(b) || a.localeComp
 
 export async function runTestAttendanceCheck(sources: CheckSources, now: Date): Promise<CheckReport> {
   const testSets = await sources.testSets();
-  if (testSets === "unavailable") throw new Error("PMU test set list unavailable");
   const papers = await sources.paperWindows([...new Set(testSets.flatMap((set) => set.quizIds))]);
   const closed = openedMonthlyTests(testSets, papers, now).filter((test) => test.state === "closed");
 
