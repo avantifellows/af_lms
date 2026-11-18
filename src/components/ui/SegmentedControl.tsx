@@ -11,6 +11,12 @@ interface Props<T extends string | number> {
   value: T | null;
   onChange: (value: T) => void;
   className?: string;
+  /**
+   * Let the buttons wrap onto more rows when the group is wider than its
+   * container (a long option list on a phone). Off by default, so existing
+   * rows keep their single-line shape.
+   */
+  wrap?: boolean;
 }
 
 /**
@@ -28,6 +34,7 @@ export function SegmentedControl<T extends string | number>({
   value,
   onChange,
   className = "",
+  wrap = false,
 }: Props<T>) {
   return (
     <div
@@ -36,7 +43,11 @@ export function SegmentedControl<T extends string | number>({
       aria-label={label}
     >
       <span className="text-xs font-bold uppercase tracking-wide text-text-muted">{label}</span>
-      <div className="inline-flex rounded-lg border border-border bg-bg-card-alt overflow-hidden shadow-sm">
+      <div
+        className={`inline-flex rounded-lg border border-border bg-bg-card-alt overflow-hidden shadow-sm ${
+          wrap ? "flex-wrap max-w-full" : ""
+        }`}
+      >
         {options.map((opt, i) => {
           const active = opt.value === value;
           return (

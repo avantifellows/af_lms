@@ -48,8 +48,8 @@ function CountTile({ name, x, y }: { name: string; x: number; y: number }) {
 
 const statusTone: Record<TestAttendanceStatus, string> = {
   Submitted: "text-success",
-  "In progress": "text-warning",
-  "Opened, not submitted": "text-warning",
+  "In progress": "text-warning-text",
+  "Opened, not submitted": "text-warning-text",
   "Yet to start": "text-text-secondary",
   Absent: "text-danger",
 };
@@ -88,7 +88,7 @@ function GroupBlock({ rows, label }: { rows: MonthGroupRow[]; label: (mark: "ope
                         className="mt-1 flex h-2 w-40 overflow-hidden rounded-full bg-border"
                       >
                         <span className="bg-success" style={{ width: `${(row.submitted / row.counted) * 100}%` }} />
-                        <span className="bg-warning" style={{ width: `${(row.opened / row.counted) * 100}%` }} />
+                        <span className="bg-warning-border" style={{ width: `${(row.opened / row.counted) * 100}%` }} />
                       </span>
                     </td>
                     <td className="py-2 pr-4 text-text-secondary">{row.opened}</td>
@@ -162,7 +162,7 @@ export default function MonthPage({
                     setFilter(option.value);
                     setShowAll(false);
                   }}
-                  className={`min-h-[36px] rounded-md border px-3 text-xs font-bold transition-colors ${
+                  className={`min-h-[44px] rounded-md border px-3 text-xs font-bold transition-colors ${
                     filter === option.value
                       ? "border-accent bg-accent text-text-on-accent"
                       : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
@@ -172,7 +172,7 @@ export default function MonthPage({
                 </button>
               ))}
             </div>
-            <Button variant="secondary" size="sm" onClick={() => onDownload(filter)}>
+            <Button variant="secondary" onClick={() => onDownload(filter)}>
               Download
             </Button>
           </div>
@@ -214,7 +214,7 @@ export default function MonthPage({
         )}
 
         {!showAll && rows.length > PAGE_SIZE && (
-          <Button variant="secondary" size="sm" onClick={() => setShowAll(true)}>
+          <Button variant="secondary" onClick={() => setShowAll(true)}>
             Show all
           </Button>
         )}

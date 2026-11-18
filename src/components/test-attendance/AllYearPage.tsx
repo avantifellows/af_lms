@@ -63,7 +63,7 @@ function FollowUpCell({ followUp }: { followUp: FollowUp }) {
         <span className="rounded-full bg-danger px-2 py-0.5 text-[11px] font-bold text-white">Follow up</span>
       )}
       {followUp.tag === "not_submitting" && (
-        <span className="rounded-full bg-warning-border px-2 py-0.5 text-[11px] font-bold text-warning-text">
+        <span className="rounded-full bg-warning-border px-2 py-0.5 text-[11px] font-bold text-white">
           Not submitting
         </span>
       )}
@@ -142,7 +142,7 @@ export default function AllYearPage({
                   type="button"
                   aria-pressed={filter === option.value}
                   onClick={() => setFilter(option.value)}
-                  className={`min-h-[36px] rounded-md border px-3 text-xs font-bold transition-colors ${
+                  className={`min-h-[44px] rounded-md border px-3 text-xs font-bold transition-colors ${
                     filter === option.value
                       ? "border-accent bg-accent text-text-on-accent"
                       : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
@@ -152,7 +152,7 @@ export default function AllYearPage({
                 </button>
               ))}
             </div>
-            <Button variant="secondary" size="sm" onClick={() => onDownload(filter)}>
+            <Button variant="secondary" onClick={() => onDownload(filter)}>
               Download
             </Button>
           </div>

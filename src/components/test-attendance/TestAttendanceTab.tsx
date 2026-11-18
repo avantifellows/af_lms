@@ -72,7 +72,12 @@ function PeriodStrip({
             {option.live && (
               <>
                 {" "}
-                <span className="ml-1 rounded-full bg-success-bg px-1.5 py-0.5 text-[10px] font-bold uppercase text-success">
+                {/* White on the selected button's red (6.5:1); white on solid green otherwise (6.4:1), so it reads on hover too. */}
+                <span
+                  className={`ml-1 rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase text-text-on-accent ${
+                    active ? "border-text-on-accent" : "border-success bg-success"
+                  }`}
+                >
                   live
                 </span>
               </>
@@ -119,6 +124,7 @@ function Filters({
       />
       <SegmentedControl
         label="Exam Preparing For"
+        wrap
         options={examOptions}
         value={filters.examPreparingFor}
         onChange={(examPreparingFor) => onChange({ ...filters, examPreparingFor })}
@@ -154,7 +160,7 @@ function MonthBanner({
       <p className="text-xs text-text-muted">
         {refreshed === "unknown" ? "Last refreshed: unknown" : `Last refreshed ${refreshed}`}
       </p>
-      <Button variant="secondary" size="sm" onClick={onRefresh} disabled={refreshing}>
+      <Button variant="secondary" onClick={onRefresh} disabled={refreshing}>
         {refreshing ? "Refreshing…" : "Refresh"}
       </Button>
     </Card>
@@ -219,7 +225,7 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
     return (
       <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-danger bg-danger-bg p-4">
         <p className="text-sm text-text-primary">Couldn&apos;t load Test Attendance. Please try again.</p>
-        <Button variant="secondary" size="sm" onClick={retry}>
+        <Button variant="secondary" onClick={retry}>
           Retry
         </Button>
       </div>
