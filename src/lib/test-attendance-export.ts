@@ -88,6 +88,22 @@ export interface TestAttendanceSheet {
 
 const examText = (value: ExamPreparingForGroup | null) => value ?? "Not set";
 
+const SHEET_NAME_MAX = 31;
+const DEFAULT_SHEET_NAME = "Monthly Test";
+const trimSheetName = (name: string) => name.trim().replace(/^'+|'+$/g, "").trim();
+
+/**
+ * A worksheet name Excel accepts, from a Monthly Test label. Labels are free
+ * text kept outside the LMS, and ExcelJS throws for `* ? : \ / [ ]`, a single
+ * quote at either end, an empty name or "History". Forbidden characters become
+ * spaces, and the name is cut to 31 characters; "Monthly Test" when nothing is left.
+ */
+function excelSheetName(label: string): string {
+  const cleaned = trimSheetName(label.replace(/[*?:\\/[\]]/g, " ").replace(/\s+/g, " "));
+  const name = trimSheetName(cleaned.slice(0, SHEET_NAME_MAX));
+  return name === "" || name === "History" ? DEFAULT_SHEET_NAME : name;
+}
+
 /**
  * The sheet for the list on screen, built with the same rules as the tab;
  * null when the period is not a Monthly Test that has opened.
@@ -132,7 +148,7 @@ export function testAttendanceSheet(
   const test = data.monthlyTests.find((monthlyTest) => monthlyTest.key === period);
   if (!test) return null;
   return {
-    name: test.name,
+    name: excelSheetName(test.name),
     periodSlug: test.key,
     header: ["Student Name", "Student ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"],
     rows: monthStudents(
