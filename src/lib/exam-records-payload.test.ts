@@ -11,7 +11,7 @@ function canonicalize(input: unknown) {
 }
 
 describe("canonicalizeExamRecordsPayload", () => {
-  it("trims the application number and keeps a blank password as null", () => {
+  it("trims the application number and reads a blank password as clearing it", () => {
     const result = canonicalize({
       exams: [{ exam_id: 1, application_number: "  JEE123 ", application_password: "   " }],
     });
@@ -24,13 +24,53 @@ describe("canonicalizeExamRecordsPayload", () => {
             exam_id: 1,
             exam_name: "JEE Mains",
             application_number: "JEE123",
-            application_password: null,
+            password: { action: "clear" },
             sessions_applied: null,
           },
         ],
         removed_record_ids: [],
       },
     });
+  });
+
+  it("keeps the stored password when the entry leaves it out", () => {
+    const result = canonicalize({ exams: [{ exam_id: 1, application_number: "JEE123" }] });
+
+    expect(result.ok && result.payload.exams[0].password).toEqual({ action: "keep" });
+  });
+
+  it("clears the stored password on an explicit null", () => {
+    const result = canonicalize({
+      exams: [{ exam_id: 1, application_number: "JEE123", application_password: null }],
+    });
+
+    expect(result.ok && result.payload.exams[0].password).toEqual({ action: "clear" });
+  });
+
+  it("sets a new password, trimmed", () => {
+    const result = canonicalize({
+      exams: [{ exam_id: 1, application_number: "JEE123", application_password: " pw1 " }],
+    });
+
+    expect(result.ok && result.payload.exams[0].password).toEqual({ action: "set", value: "pw1" });
+  });
+
+  it("refuses a password that is not a string", () => {
+    const result = canonicalize({
+      exams: [{ exam_id: 1, application_number: "JEE123", application_password: 1234 }],
+    });
+
+    expect(result).toEqual({ ok: false, error: "Application password for JEE Mains is not valid" });
+  });
+
+  it("refuses a password longer than the limit", () => {
+    const result = canonicalize({
+      exams: [
+        { exam_id: 1, application_number: "JEE123", application_password: "x".repeat(256) },
+      ],
+    });
+
+    expect(result).toEqual({ ok: false, error: "Application password for JEE Mains is too long" });
   });
 
   it("stores the sittings as a sorted set", () => {
