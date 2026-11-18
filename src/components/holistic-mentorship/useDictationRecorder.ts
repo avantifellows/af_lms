@@ -43,14 +43,14 @@ export function useSharedDictationAvailability(server: DictationAvailability): S
 export type DictationState =
   | { kind: "idle" }
   | { kind: "requesting_mic"; target: string }
-  | { kind: "recording"; target: string; startedAt: number; stopAtMs: number }
+  | { kind: "recording"; target: string; startedAt: number }
   | { kind: "transcribing"; target: string }
   | { kind: "failed"; target: string; clip: Blob; durationMs: number } // Retry resends clip
   | { kind: "notice"; target: string; message: string }               // mic blocked/missing, unsupported, nothing heard, auto-stopped, too long
   // Today's Dictation time is used up: every mic in the form stops accepting
   // recordings. `target` is the box whose clip found out (null at page load);
   // `note` is that clip's own message, shown before the limit message.
-  | { kind: "unavailable"; reason: "daily_limit"; target: string | null; note: string | null };
+  | { kind: "unavailable"; target: string | null; note: string | null };
 
 export type DictationKind = "post_session" | "follow_up";
 
@@ -128,11 +128,10 @@ function dailyLimitReply({ status, body }: DictationReply) {
   return status === 429 && body?.code === "daily_limit";
 }
 
-// Today's remaining time as the server reports it, or null when it didn't say.
-// A daily-limit refusal without a count (an older server) means none is left.
+// Today's remaining time as the server reports it, or null when it didn't say
+// (a refusal before the clip was checked, or no reply at all).
 function remainingAfter(reply: DictationReply): number | null {
-  const reported = typeof reply.body?.remainingSeconds === "number" ? reply.body.remainingSeconds : null;
-  return dailyLimitReply(reply) ? reported ?? 0 : reported;
+  return typeof reply.body?.remainingSeconds === "number" ? reply.body.remainingSeconds : null;
 }
 
 function replyText({ status, body }: DictationReply): string | null {
@@ -172,7 +171,7 @@ function micErrorMessage(error: unknown) {
 }
 
 function limitState(target: string | null, note: string | null): DictationState {
-  return { kind: "unavailable", reason: "daily_limit", target, note };
+  return { kind: "unavailable", target, note };
 }
 
 // The state the form shows. With no time left today a resting form is locked,
@@ -405,7 +404,7 @@ export function useDictationRecorder(options: {
     const stopAtMs = stopAtSeconds * 1000;
     live.stopAtMs = stopAtMs;
     live.autoStop = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);
-    setState({ kind: "recording", target, startedAt, stopAtMs });
+    setState({ kind: "recording", target, startedAt });
   }, [stop, upload]);
 
   const discard = useCallback(() => {

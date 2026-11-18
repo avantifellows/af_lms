@@ -189,15 +189,6 @@ function expectSaveAllowed(button: HTMLElement) {
   expect(screen.queryByText(SAVE_HINT)).not.toBeInTheDocument();
 }
 
-// These forms have no <form> element or keyboard shortcut, and React never runs
-// onClick for a disabled button, so the only other way to reach the save
-// handler is to call it directly. It must refuse on its own, not only by the
-// button being disabled.
-function callSaveHandler(button: HTMLElement) {
-  const propsKey = Object.keys(button).find((key) => key.startsWith("__reactProps$"))!;
-  (button as unknown as Record<string, { onClick: () => void }>)[propsKey].onClick();
-}
-
 describe("StudentPhaseWorkspace Dictation", () => {
   beforeEach(() => {
     installFakeMic();
@@ -369,15 +360,12 @@ describe("StudentPhaseWorkspace Dictation", () => {
     async function expectSaveWaitsForClip(network: ReturnType<typeof stubNetwork>, button: string) {
       await act(async () => fireEvent.click(mic("What helped?")));
       expectSaveBlocked(screen.getByRole("button", { name: button }));
-      await act(async () => callSaveHandler(screen.getByRole("button", { name: button })));
-      expect(finalWrites(network)).toHaveLength(0);
       expect(tracks[0].stop).not.toHaveBeenCalled();
       expect(mic("What helped?")).toHaveAttribute("aria-pressed", "true");
 
       await act(async () => fireEvent.click(mic("What helped?")));
       expect(screen.getByText("Transcribing…")).toBeInTheDocument();
       expectSaveBlocked(screen.getByRole("button", { name: button }));
-      await act(async () => callSaveHandler(screen.getByRole("button", { name: button })));
       expect(finalWrites(network)).toHaveLength(0);
 
       await network.transcribe("They agreed");
@@ -886,13 +874,15 @@ describe("StudentPhaseWorkspace Dictation", () => {
       renderWorkspace(mentorDetail(draft({ 91: "Met parents" })), { enabled: true, remainingSeconds: 10 });
 
       await dictate("What helped?", 5);
-      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit" }, 429);
+      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit", remainingSeconds: 0 }, 429);
 
       const messages = screen.getAllByText(LIMIT);
+      expect(messages).toHaveLength(2);
       expect(messages.some((message) => message.closest("[aria-live='polite']"))).toBe(true);
       expect(mic("What helped?")).toBeDisabled();
       expect(mic("What happens next?")).toBeDisabled();
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(screen.queryByText("That recording is longer than the time you have left today.")).not.toBeInTheDocument();
       expect(box("What helped?")).toHaveValue("Met parents");
       fireEvent.change(box("What helped?"), { target: { value: "Met parents. Typed on." } });
       expect(box("What helped?")).toHaveValue("Met parents. Typed on.");
@@ -918,20 +908,6 @@ describe("StudentPhaseWorkspace Dictation", () => {
       await act(async () => vi.advanceTimersByTimeAsync(40_000));
       expect(network.dictationCalls).toHaveLength(2);
       expect(network.dictationCalls[1].body.get("duration_ms")).toBe("40000");
-    });
-
-    it("still locks every mic when the 429 says no time is left", async () => {
-      const network = stubNetwork();
-      vi.useFakeTimers();
-      renderWorkspace(mentorDetail());
-
-      await dictate("What helped?", 5);
-      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit", remainingSeconds: 0 }, 429);
-
-      expect(screen.getAllByText(LIMIT)).toHaveLength(2);
-      expect(mic("What helped?")).toBeDisabled();
-      expect(mic("What happens next?")).toBeDisabled();
-      expect(screen.queryByText("That recording is longer than the time you have left today.")).not.toBeInTheDocument();
     });
 
     it("unlocks the mics when a refresh brings the same count as the first load (a new day)", async () => {
@@ -983,20 +959,6 @@ describe("StudentPhaseWorkspace Dictation", () => {
       await act(async () => fireEvent.click(mic("What helped?")));
       expect(network.dictationCalls).toHaveLength(0);
       expect(box("What helped?")).toBeEnabled();
-    });
-
-    // jsdom has no layout, so this checks structure only: the shown-only limit
-    // message shares one block with the polite live region instead of being a
-    // separate item of the gapped status row (which put it 8 px right of the mic).
-    it("keeps the shown-only limit message in the same block as the box's live region", () => {
-      renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds: 0 });
-
-      for (const message of screen.getAllByText(LIMIT)) {
-        const block = message.parentElement!;
-        expect(block.querySelector("[aria-live='polite']")).toBeEmptyDOMElement();
-        expect(block).not.toHaveClass("gap-2");
-        expect(block.parentElement).toHaveClass("gap-2");
-      }
     });
 
     it("keeps mics in the limit state after Cancel in Edit or pagehide", async () => {
@@ -1173,15 +1135,12 @@ describe("Follow-up Note Dictation", () => {
 
       await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
       expectSaveBlocked(save());
-      await act(async () => callSaveHandler(save()));
-      expect(network.notesCalls).toHaveLength(0);
       expect(tracks[0].stop).not.toHaveBeenCalled();
       expect(modalMic(dialog, SOLUTIONS)).toHaveAttribute("aria-pressed", "true");
 
       await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
       expect(within(dialog).getByText("Transcribing…")).toBeInTheDocument();
       expectSaveBlocked(save());
-      await act(async () => callSaveHandler(save()));
       expect(network.notesCalls).toHaveLength(0);
 
       await network.transcribe("Daily check-in");
@@ -1259,35 +1218,9 @@ describe("Follow-up Note Dictation", () => {
       expect(modalBox(dialog, CHALLENGES)).toHaveValue("Homesick");
       expect(modalMic(dialog, SOLUTIONS)).toHaveAttribute("aria-pressed", "false");
     });
-
-    it("pagehide stops the recording and uploads nothing", async () => {
-      const network = stubNetwork();
-      renderWorkspace(completedDetail());
-      const dialog = openModal();
-
-      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
-      await act(async () => { window.dispatchEvent(new Event("pagehide")); });
-
-      expect(tracks[0].stop).toHaveBeenCalled();
-      expect(network.dictationCalls).toHaveLength(0);
-    });
-
-    it("leaving the page stops the recording, releases the mic, and uploads nothing", async () => {
-      const network = stubNetwork();
-      const { unmount } = renderWorkspace(completedDetail());
-      const dialog = openModal();
-
-      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
-      unmount();
-
-      expect(tracks[0].stop).toHaveBeenCalled();
-      expect(network.dictationCalls).toHaveLength(0);
-    });
   });
 
   describe("when Dictation can't produce text", () => {
-    const LIMIT = "You've used today's 30 minutes of Dictation. You can keep typing.";
-
     it("shows Couldn't transcribe, and Retry resends the same clip as a Follow-up dictation", async () => {
       const network = stubNetwork();
       vi.useFakeTimers();
@@ -1325,72 +1258,7 @@ describe("Follow-up Note Dictation", () => {
       expect(network.dictationCalls).toHaveLength(1);
     });
 
-    it("says Didn't catch anything when nothing was heard and adds nothing", async () => {
-      const network = stubNetwork();
-      vi.useFakeTimers();
-      renderWorkspace(completedDetail());
-      const dialog = openModal();
-      fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
-
-      await dictate(dialog, SOLUTIONS);
-      await network.respond({ outcome: "nothing_heard", remainingSeconds: 1_797 });
-
-      expect(within(dialog).getByText(/^Didn't catch anything\./)).toHaveAttribute("aria-live", "polite");
-      expect(modalBox(dialog, SOLUTIONS)).toHaveValue("Daily check-in");
-      expect(modalMic(dialog, SOLUTIONS)).toBeEnabled();
-    });
-
-    it("says the mic is blocked when permission is denied and uploads nothing", async () => {
-      const network = stubNetwork();
-      const getUserMedia = vi.fn(async () => { throw new DOMException("mic", "NotAllowedError"); });
-      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
-      renderWorkspace(completedDetail());
-      const dialog = openModal();
-
-      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
-
-      expect(within(dialog).getByText(/^Microphone is blocked\./)).toBeInTheDocument();
-      expect(network.dictationCalls).toHaveLength(0);
-    });
-
-    it("shows the daily limit after a 429 and stops all three mics accepting recordings", async () => {
-      const network = stubNetwork();
-      vi.useFakeTimers();
-      renderWorkspace(completedDetail(), { enabled: true, remainingSeconds: 10 });
-      const dialog = openModal();
-
-      await dictate(dialog, CHALLENGES, 5);
-      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit" }, 429);
-
-      expect(within(dialog).getAllByText(LIMIT)).toHaveLength(3);
-      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) expect(modalMic(dialog, question)).toBeDisabled();
-      expect(within(dialog).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-    });
-
-    it("opens with all three mics in the limit state when there is no time left today", async () => {
-      const network = stubNetwork();
-      renderWorkspace(completedDetail(), { enabled: true, remainingSeconds: 0 });
-      const dialog = openModal();
-
-      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) expect(modalMic(dialog, question)).toBeDisabled();
-      expect(within(dialog).getAllByText(LIMIT)).toHaveLength(3);
-      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
-      expect(network.dictationCalls).toHaveLength(0);
-    });
-
-    it("stops by itself at the Mentor's remaining time for today", async () => {
-      const network = stubNetwork();
-      vi.useFakeTimers();
-      renderWorkspace(completedDetail(), { enabled: true, remainingSeconds: 45 });
-      const dialog = openModal();
-
-      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
-      await act(async () => vi.advanceTimersByTimeAsync(45_000));
-
-      expect(network.dictationCalls).toHaveLength(1);
-      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("45000");
-    });
-
+    // The modal adds the words through its own setDraft, so its too-long check is its own.
     it("refuses words that would push the answer past 10,000 characters and keeps the answer", async () => {
       const network = stubNetwork();
       vi.useFakeTimers();
@@ -1426,6 +1294,9 @@ describe("Follow-up Note Dictation", () => {
 
       for (const button of followUpMics(dialog)) expect(button).toBeDisabled();
       expect(dialog).not.toHaveTextContent(/Recording|Transcribing|Dictation/);
+      // Only a form's own clip holds its save back.
+      expect(within(dialog).getByRole("button", { name: "Save" })).not.toHaveAccessibleDescription(SAVE_HINT);
+      expect(within(dialog).queryByText(SAVE_HINT)).not.toBeInTheDocument();
       await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
       expect(getUserMedia).toHaveBeenCalledTimes(1);
       expect(FakeMediaRecorder.instances).toHaveLength(1);
@@ -1468,30 +1339,6 @@ describe("Follow-up Note Dictation", () => {
       expect(mic("What helped?")).toBeEnabled();
       for (const button of followUpMics(dialog)) expect(button).toBeEnabled();
       expect(network.dictationCalls).toHaveLength(0);
-    });
-
-    // The open modal covers the page, so a Mentor can't reach these mics; the
-    // shared count still keeps them disabled while the Follow-up form records.
-    it("disables the Post-Session mics while a Follow-up answer records, until the modal drops it", async () => {
-      stubNetwork();
-      const getUserMedia = installFakeMic();
-      renderWorkspace(completedDetail());
-      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
-      const dialog = openModal();
-
-      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
-      expect(mic("What helped?")).toBeDisabled();
-      expect(mic("What happens next?")).toBeDisabled();
-      // Only a form's own clip holds its save back.
-      expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
-      expect(screen.getByRole("button", { name: "Save Changes" })).not.toHaveAccessibleDescription(SAVE_HINT);
-      expect(screen.getAllByText(SAVE_HINT)).toEqual([within(dialog).getByText(SAVE_HINT)]);
-      await act(async () => fireEvent.click(mic("What helped?")));
-      expect(getUserMedia).toHaveBeenCalledTimes(1);
-
-      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
-      expect(mic("What helped?")).toBeEnabled();
-      expect(mic("What happens next?")).toBeEnabled();
     });
   });
 

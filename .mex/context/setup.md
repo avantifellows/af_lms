@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-11-16
+last_updated: 2026-11-18
 ---
 
 # Setup
@@ -56,7 +56,7 @@ Never commit real values — `.env.local` is gitignored; CI injects prod/preview
 - `npm run dev` — dev server on :3000 (hot reload).
 - `npm test` / `npm run test:unit` — full Vitest run; `npm run test:unit:watch` for watch; `npm run test:unit:coverage` for coverage.
 - `npm run test:e2e` — Playwright E2E (`:ui`/`:headed` variants exist).
-  Global setup runs db-service migrations with `mix` from `../db-service_holistic_mentorship` (hard-coded in `e2e/helpers/db.ts`). If that checkout is absent, holistic tables are on `db-service` main, so a temporary symlink to `../db-service` works. With asdf and no `.tool-versions`, put `~/.asdf/installs/elixir/<ver>/bin` and `~/.asdf/installs/erlang/<ver>/bin` on `PATH` directly. The web server preloads a provider fake from `e2e/helpers/` through `NODE_OPTIONS` (set in `playwright.config.ts`): the e2e preload fakes both providers (ElevenLabs Scribe and the OpenRouter translation), logs each call to a temp file the specs read, refuses any other request to those hosts, and is the only thing that sets the dummy Dictation keys, so a server without it has Dictation off.
+  Global setup runs db-service migrations with `mix` from `../db-service_holistic_mentorship` (hard-coded in `e2e/helpers/db.ts`). If that checkout is absent, holistic tables are on `db-service` main, so a temporary symlink to `../db-service` works. With asdf and no `.tool-versions`, put `~/.asdf/installs/elixir/<ver>/bin` and `~/.asdf/installs/erlang/<ver>/bin` on `PATH` directly. The web server preloads a provider fake from `e2e/helpers/` through `NODE_OPTIONS` (set in `playwright.config.ts`): the e2e preload fakes both providers (ElevenLabs Scribe and the OpenRouter translation) with fixed replies from `e2e/helpers/fake-providers.json`, refuses any other request to those hosts, and is the only thing that sets the dummy Dictation keys, so a server without it has Dictation off. By default Scribe hears English and the translation succeeds; a spec steers the next calls (Hindi, a failing translation) with `steerFakeProviders`, which writes a small control file in the temp directory that the fake reads on each call, and the Holistic spec removes it after every test. This relies on e2e running one test at a time (`workers: 1`).
 - `npm run lint` — ESLint (`eslint-config-next`).
 - `npm run build` — production Next build.
 - `npm run fallow:health` — codebase health/hotspots; `fallow:dead-code`, `fallow:audit` for cleanup/PR risk.

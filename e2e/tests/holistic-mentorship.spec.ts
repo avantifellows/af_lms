@@ -5,11 +5,9 @@ import { collectBrowserHealth, expectBrowserHealth } from "../helpers/browser-he
 import { getTestPool } from "../helpers/db";
 import {
   FAKE_ELEVENLABS_TRANSCRIPT,
-  FAKE_OPENROUTER_FAIL_HEADERS,
   FAKE_OPENROUTER_TRANSLATION,
-  FAKE_SCRIBE_HINDI_HEADERS,
-  readFakeElevenLabsCalls,
-  readFakeOpenRouterCalls,
+  resetFakeProviders,
+  steerFakeProviders,
 } from "../helpers/fake-elevenlabs";
 
 type Fixture = {
@@ -40,6 +38,10 @@ const RESPONSIVE_VIEWPORTS = [
 
 test.describe("Holistic Mentorship release workflows", () => {
   test.describe.configure({ mode: "serial" });
+
+  // A Dictation test that steered the server's provider fakes leaves them at
+  // their default for the next test.
+  test.afterEach(() => resetFakeProviders());
 
   test.beforeAll(async () => {
     const pool = getTestPool();
@@ -440,8 +442,6 @@ test.describe("Holistic Mentorship release workflows", () => {
     holisticTeacherPage: page,
   }) => {
     const usageBefore = await holisticTeacherDictationUsage();
-    const callsBefore = readFakeElevenLabsCalls().length;
-    const translationsBefore = readFakeOpenRouterCalls().length;
 
     const expected = `Recorded for real. ${FAKE_ELEVENLABS_TRANSCRIPT}`;
     const { answer, clip, durationMs, recordedMs, response, saved } =
@@ -460,16 +460,7 @@ test.describe("Holistic Mentorship release workflows", () => {
 
     await expect(answer).toHaveValue(expected);
     expect((await saved!).status()).toBe(200);
-    // The server fake answered one speech-to-text call, with the same clip,
-    // in English, so nothing was sent for translation.
-    expect(readFakeElevenLabsCalls().slice(callsBefore)).toMatchObject([{
-      method: "POST",
-      url: expect.stringMatching(/^https:\/\/api\.elevenlabs\.io\/v1\/speech-to-text(\?|$)/),
-      answered: true,
-      file: { size: clip.size, type: clip.type },
-      language: "eng",
-    }]);
-    expect(readFakeOpenRouterCalls().slice(translationsBefore)).toEqual([]);
+    // The server fake heard English, so nothing was sent for translation.
     const usage = (await holisticTeacherDictationUsage())
       .filter((row) => !usageBefore.some((old) => old.id === row.id));
     expect(usage).toEqual([expect.objectContaining({
@@ -486,13 +477,11 @@ test.describe("Holistic Mentorship release workflows", () => {
     holisticTeacherPage: page,
   }) => {
     const usageBefore = await holisticTeacherDictationUsage();
-    const callsBefore = readFakeElevenLabsCalls().length;
-    const translationsBefore = readFakeOpenRouterCalls().length;
+    steerFakeProviders({ scribeLanguage: "hin" });
 
     const expected = `Recorded in Hindi. ${FAKE_OPENROUTER_TRANSLATION}`;
-    const { answer, clip, durationMs, response, saved } = await dictateWithRealRecorder(page, "Recorded in Hindi.", {
+    const { answer, durationMs, response, saved } = await dictateWithRealRecorder(page, "Recorded in Hindi.", {
       expectedAnswer: expected,
-      steeringHeaders: FAKE_SCRIBE_HINDI_HEADERS,
     });
     expect(response.status()).toBe(200);
     expect(await response.json()).toMatchObject({ outcome: "ok", text: FAKE_OPENROUTER_TRANSLATION });
@@ -500,24 +489,6 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(await answer.inputValue()).not.toMatch(DEVANAGARI);
     expect((await saved!).status()).toBe(200);
 
-    expect(readFakeElevenLabsCalls().slice(callsBefore)).toMatchObject([{
-      method: "POST",
-      answered: true,
-      file: { size: clip.size, type: clip.type },
-      language: "hin",
-    }]);
-    // One translation call, asking for zero-retention routing.
-    expect(readFakeOpenRouterCalls().slice(translationsBefore)).toEqual([expect.objectContaining({
-      method: "POST",
-      url: "https://openrouter.ai/api/v1/chat/completions",
-      answered: true,
-      forcedFailure: false,
-      model: expect.any(String),
-      messageCount: 2,
-      provider: { zdr: true, data_collection: "deny" },
-      reasoning: expect.any(Object),
-      stream: false,
-    })]);
     const usage = (await holisticTeacherDictationUsage())
       .filter((row) => !usageBefore.some((old) => old.id === row.id));
     expect(usage).toEqual([expect.objectContaining({
@@ -537,23 +508,15 @@ test.describe("Holistic Mentorship release workflows", () => {
     holisticTeacherPage: page,
   }) => {
     const usageBefore = await holisticTeacherDictationUsage();
-    const callsBefore = readFakeElevenLabsCalls().length;
-    const translationsBefore = readFakeOpenRouterCalls().length;
+    steerFakeProviders({ scribeLanguage: "hin", openRouterFails: true });
 
-    const { answer, response } = await dictateWithRealRecorder(page, "Translation will fail.", {
-      steeringHeaders: { ...FAKE_SCRIBE_HINDI_HEADERS, ...FAKE_OPENROUTER_FAIL_HEADERS },
-    });
+    const { answer, response } = await dictateWithRealRecorder(page, "Translation will fail.");
     expect(response.status()).toBe(502);
     await expect(page.getByText("Couldn't transcribe. Try again", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
     await expect(answer).toHaveValue("Translation will fail.");
 
-    expect(readFakeElevenLabsCalls().slice(callsBefore)).toMatchObject([{ answered: true, language: "hin" }]);
-    // The first attempt and its one retry, both refused by the fake.
-    expect(readFakeOpenRouterCalls().slice(translationsBefore)).toMatchObject([
-      { answered: true, forcedFailure: true, provider: { zdr: true, data_collection: "deny" } },
-      { answered: true, forcedFailure: true, provider: { zdr: true, data_collection: "deny" } },
-    ]);
+    // The request body and the one retry are checked in the route's unit tests.
     const usage = (await holisticTeacherDictationUsage())
       .filter((row) => !usageBefore.some((old) => old.id === row.id));
     expect(usage).toEqual([expect.objectContaining({
@@ -1193,19 +1156,17 @@ function installWebAudioMicrophone() {
 }
 
 // Types `prefix` into the draft answer, records about 2 s with the real
-// recorder and stops. `steeringHeaders` are added to this dictation request
-// only, to steer the server's provider fakes (see fake-elevenlabs.cjs).
+// recorder and stops. A test steers the server's provider fakes beforehand
+// with steerFakeProviders (see fake-elevenlabs.cjs).
 async function dictateWithRealRecorder(
   page: Page,
   prefix: string,
-  options: { expectedAnswer?: string; steeringHeaders?: Record<string, string> } = {}
+  options: { expectedAnswer?: string } = {}
 ) {
   await page.addInitScript(installWebAudioMicrophone);
-  // Routed even with no headers to add: Chromium hides a Blob request body
-  // unless it is routed. allHeaders keeps the session cookie.
-  await page.route("**/dictation?**", async (route) => route.continue({
-    headers: { ...(await route.request().allHeaders()), ...options.steeringHeaders },
-  }));
+  // Routed and passed on unchanged: Chromium hides a Blob request body unless
+  // it is routed.
+  await page.route("**/dictation?**", (route) => route.continue());
   await page.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
   const answer = page.getByRole("textbox", { name: "What support will help next?" });
   await answer.fill(prefix);

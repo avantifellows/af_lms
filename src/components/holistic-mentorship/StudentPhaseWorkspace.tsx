@@ -681,10 +681,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
   };
   const dictation = useNotesDictation(props, value.answers, updateAnswer);
-  // Autosave doesn't wait for a clip: its words arrive later like typing.
-  const dictating = dictationBusy(dictation.state);
   const submit = async () => {
-    if (dictating) return;
     dictation.discard();
     if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
@@ -712,7 +709,6 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     }
   };
   const saveCorrection = async () => {
-    if (dictating) return;
     dictation.discard();
     if (!validateFinalWrite(SAVE_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
@@ -1839,7 +1835,6 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
   }
 
   async function save() {
-    if (dictating) return;
     recorder.discard();
     setError("");
     setSaving(true);

@@ -13,9 +13,9 @@ export type TranscribeSpeechInput = {
   signal: AbortSignal;
 };
 
-// Scribe's own guess at the spoken language (e.g. "eng", "hin") and how sure
-// it is, or null when the reply leaves them out.
-export type SpokenLanguage = { languageCode: string | null; languageProbability: number | null };
+// Scribe's own guess at the spoken language (e.g. "eng", "hin"), or null when
+// the reply leaves it out.
+export type SpokenLanguage = { languageCode: string | null };
 
 export type TranscribeSpeechResult =
   | ({ kind: "text"; text: string; lastWordEndSeconds: number } & SpokenLanguage)
@@ -57,22 +57,18 @@ async function readScribeBody(response: Response, signal: AbortSignal) {
   } catch {
     throw new ScribeTranscriptionError(signal.aborted ? "timeout" : "malformed");
   }
-  const { text, words, ...language } = (body ?? {}) as {
-    text?: unknown; words?: unknown; language_code?: unknown; language_probability?: unknown;
+  const { text, words, language_code: languageCode } = (body ?? {}) as {
+    text?: unknown; words?: unknown; language_code?: unknown;
   };
   if (typeof text !== "string" || (words !== undefined && !Array.isArray(words))) {
     throw new ScribeTranscriptionError("malformed");
   }
-  return { text, words: (words ?? []) as ScribeWord[], language: spokenLanguage(language) };
+  return { text, words: (words ?? []) as ScribeWord[], language: spokenLanguage(languageCode) };
 }
 
-function spokenLanguage(body: { language_code?: unknown; language_probability?: unknown }): SpokenLanguage {
-  const code = typeof body.language_code === "string" ? body.language_code.trim() : "";
-  const probability = body.language_probability;
-  return {
-    languageCode: code || null,
-    languageProbability: typeof probability === "number" && Number.isFinite(probability) ? probability : null,
-  };
+function spokenLanguage(languageCode: unknown): SpokenLanguage {
+  const code = typeof languageCode === "string" ? languageCode.trim() : "";
+  return { languageCode: code || null };
 }
 
 export async function transcribeSpeech(input: TranscribeSpeechInput): Promise<TranscribeSpeechResult> {

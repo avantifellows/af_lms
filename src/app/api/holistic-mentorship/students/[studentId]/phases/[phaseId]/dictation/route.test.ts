@@ -34,35 +34,45 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: mockAccess }));
 vi.mock("@/lib/db", () => {
   const usageTable = "holistic_mentorship_dictation_usage_records";
+  const fields: Record<string, string> = {
+    mentor_user_id: "mentorUserId", school_id: "schoolId", program_id: "programId", note_kind: "noteKind",
+    audio_seconds: "audioSeconds", characters_returned: "charactersReturned", outcome: "outcome",
+    detected_language: "detectedLanguage", translation: "translation",
+  };
+  // A $n placeholder, NULL, a quoted string or a number; anything else (now()) as written.
+  function valueOf(expression: string, params: unknown[]) {
+    const text = expression.trim();
+    const placeholder = /^\$(\d+)/.exec(text);
+    if (placeholder) return params[Number(placeholder[1]) - 1];
+    if (/^NULL$/i.test(text)) return null;
+    if (/^\d+$/.test(text)) return Number(text);
+    return /^'(.*)'$/.exec(text)?.[1] ?? text;
+  }
+  // Writes what the statement set into the record, so tests check the rows.
+  function assign(record: Record<string, unknown>, columns: string[], values: unknown[]) {
+    columns.forEach((column, index) => {
+      if (column === "completed_at") record.completed = values[index] !== null;
+      else if (fields[column]) record[fields[column]] = values[index];
+    });
+  }
+  const split = (list: string) => list.split(",").map((part) => part.trim());
   async function query(text: string, params: unknown[] = []) {
     if (text.includes(usageTable) && /SUM\(/i.test(text)) {
       const recorded = db.records.reduce((sum, record) => sum + record.audioSeconds, 0);
       return [{ used_seconds: db.usedTodaySeconds + recorded }];
     }
-    if (text.includes(`INSERT INTO ${usageTable}`)) {
-      const [mentorUserId, schoolId, programId, noteKind, audioSeconds] = params as [
-        number, number, number, string, number,
-      ];
-      if (!/detected_language, translation/.test(text) || !/NULL, 'not_run'/.test(text)) {
-        throw new Error("The insert must start the record with no language and translation not_run");
-      }
-      const record = {
-        id: db.records.length + 1, mentorUserId, schoolId, programId, noteKind,
-        audioSeconds, charactersReturned: 0, outcome: "failed", detectedLanguage: null, translation: "not_run",
-        completed: false,
-      };
+    const insert = /INSERT INTO \S+\s*\(([^)]*)\)\s*VALUES\s*\(([\s\S]*)\)\s*RETURNING/i.exec(text);
+    if (insert && text.includes(usageTable)) {
+      const record = { id: db.records.length + 1 } as UsageRecord;
+      assign(record, split(insert[1]), split(insert[2]).map((value) => valueOf(value, params)));
       db.records.push(record);
       return [{ id: record.id }];
     }
-    if (text.includes(`UPDATE ${usageTable}`)) {
-      const [id, outcome, charactersReturned, audioSeconds, detectedLanguage, translation] = params as [
-        number, string, number, number, string | null, string,
-      ];
-      if (!/detected_language = \$5, translation = \$6/.test(text)) throw new Error(`Unexpected update: ${text}`);
-      Object.assign(db.records.find((record) => record.id === id)!, {
-        outcome, charactersReturned, audioSeconds, detectedLanguage, translation,
-        completed: /completed_at\s*=/.test(text),
-      });
+    const update = /UPDATE \S+\s+SET([\s\S]*)WHERE id = (\$\d+)/i.exec(text);
+    if (update && text.includes(usageTable)) {
+      const pairs = split(update[1]).map((pair) => pair.split("=").map((part) => part.trim()));
+      const record = db.records.find((row) => row.id === valueOf(update[2], params))!;
+      assign(record, pairs.map(([column]) => column), pairs.map(([, value]) => valueOf(value, params)));
       return [];
     }
     throw new Error(`Unexpected query: ${text}`);

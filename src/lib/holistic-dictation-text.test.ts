@@ -38,6 +38,6 @@ describe("appendDictation", () => {
   });
 
   it("refuses text that would go past 10,000 characters", () => {
-    expect(appendDictation("a".repeat(9_995), "hello")).toEqual({ ok: false, reason: "too_long" });
+    expect(appendDictation("a".repeat(9_995), "hello")).toEqual({ ok: false });
   });
 });

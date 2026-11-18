@@ -1,6 +1,6 @@
 # The LMS calls ElevenLabs directly for Dictation
 
-Amended by ADR 0013 (2026-11-16): Dictation text is now always English. A transcript that is not already English is translated in full by one OpenRouter call from the LMS, so "verbatim speech-to-text only" and "calls no LLM" below no longer hold, and the 25 s ElevenLabs limit now sits inside one 27 s deadline for transcription and translation. The rest of this record stands.
+Amended by ADR 0013 (2026-11-16): Dictation text is now always English. A transcript that is not already English is translated in full by one OpenRouter call from the LMS, so "verbatim speech-to-text only" and "calls no LLM" below no longer hold, and the ElevenLabs limit now sits inside one deadline shared with the translation (ADR 0013 has the timings). The rest of this record stands.
 
 Dictation (issue #500) turns a Holistic Mentor's short spoken clip into text while they wait at the Notes form. An LMS server route sends the clip to ElevenLabs Scribe with a key held by the LMS and returns the text in the same request. This is a deliberate, narrow exception to ADR 0009, which keeps provider keys and AI work in etl-next. etl-next runs one flow at a time behind `master_flow` and has no endpoint a browser can wait on, so it cannot answer a Mentor within seconds.
 

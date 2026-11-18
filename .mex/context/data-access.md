@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-16
+last_updated: 2026-11-18
 ---
 
 # Data Access
@@ -227,8 +227,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
   is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
   still counts), so do not wire `request.signal` into `transcribeSpeech` or `translateToEnglish`
-  without a new decision. Scribe and translation share one 27 s deadline (Scribe 25 s cap; each
-  translation attempt min(15 s, time left); one retry only with at least 5 s left).
+  without a new decision. Scribe and translation share one deadline, with a shorter cap for Scribe
+  and for each translation attempt and one retry only when enough time is left (the numbers are in
+  ADR 0013 and the constants in `src/lib/holistic-dictation.ts`).
   The route refuses an empty (0-byte) clip with 422 "Attach one audio clip" before this path, so
   it writes no row and makes no provider call.
 - **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be

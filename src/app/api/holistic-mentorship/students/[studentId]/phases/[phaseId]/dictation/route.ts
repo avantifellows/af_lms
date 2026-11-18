@@ -31,9 +31,6 @@ const ALLOWED_AUDIO_TYPES = new Set(["audio/webm", "audio/mp4", "audio/ogg", "au
 const MAX_CLIP_BYTES = 10 * 1024 * 1024;
 // Five minutes plus 5 s of client timer slop.
 const MAX_DURATION_MS = HOLISTIC_DICTATION_MAX_CLIP_SECONDS * 1000;
-const FALLBACK_EXTENSION: Record<string, string> = {
-  "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/mpeg": "mp3",
-};
 
 type ValidClip = { audio: Blob; filename: string; durationMs: number };
 
@@ -42,10 +39,11 @@ function refuse(error: string, status: number) {
 }
 
 // The attached clip, or null when there is none or it holds no audio (an
-// empty clip is refused before any usage record or provider call).
-function attachedAudio(form: FormData): Blob | null {
+// empty clip is refused before any usage record or provider call). A file part
+// keeps the filename it was sent with; the recorder names it dictation.<type>.
+function attachedAudio(form: FormData): File | null {
   const audio = form.get("audio");
-  return audio instanceof Blob && audio.size > 0 ? audio : null;
+  return audio instanceof Blob && audio.size > 0 ? audio as File : null;
 }
 
 function validateClip(form: FormData): { ok: true; clip: ValidClip } | { ok: false; response: NextResponse } {
@@ -62,9 +60,7 @@ function validateClip(form: FormData): { ok: true; clip: ValidClip } | { ok: fal
   if (durationMs < 1 || durationMs > MAX_DURATION_MS) {
     return { ok: false, response: refuse("Invalid recording duration", 422) };
   }
-  const name = audio instanceof File && audio.name ? audio.name : "";
-  const filename = name || `dictation.${FALLBACK_EXTENSION[contentType]}`;
-  return { ok: true, clip: { audio, filename, durationMs } };
+  return { ok: true, clip: { audio, filename: audio.name, durationMs } };
 }
 
 // Dictation (#500): one recorded clip in, everything said out as English text

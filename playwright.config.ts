@@ -1,13 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-import {
-  FAKE_ELEVENLABS_CALL_LOG,
-  FAKE_ELEVENLABS_HINDI_TRANSCRIPT,
-  FAKE_ELEVENLABS_PRELOAD,
-  FAKE_ELEVENLABS_TRANSCRIPT,
-  FAKE_OPENROUTER_CALL_LOG,
-  FAKE_OPENROUTER_TRANSLATION,
-} from "./e2e/helpers/fake-elevenlabs";
+import { FAKE_ELEVENLABS_PRELOAD } from "./e2e/helpers/fake-elevenlabs";
 
 const TEST_PORT = 3001;
 
@@ -100,16 +93,10 @@ export default defineConfig({
       GOOGLE_SERVICE_ACCOUNT_JSON: " ",
       // Holistic Dictation never reaches ElevenLabs or OpenRouter. The
       // preload fakes Scribe and the translation inside the server (fixed
-      // replies, content-free call logs, any other request to either host
-      // refused) and only then sets dummy keys: without it both keys stay
-      // blank and Dictation is off. Most specs also fake the dictation route
-      // with page.route.
+      // replies, any other request to either host refused) and only then sets
+      // dummy keys: without it both keys stay blank and Dictation is off. Most
+      // specs also fake the dictation route with page.route.
       NODE_OPTIONS: `--require "${FAKE_ELEVENLABS_PRELOAD}"`,
-      E2E_FAKE_ELEVENLABS_CALL_LOG: FAKE_ELEVENLABS_CALL_LOG,
-      E2E_FAKE_ELEVENLABS_TRANSCRIPT: FAKE_ELEVENLABS_TRANSCRIPT,
-      E2E_FAKE_ELEVENLABS_HINDI_TRANSCRIPT: FAKE_ELEVENLABS_HINDI_TRANSCRIPT,
-      E2E_FAKE_OPENROUTER_CALL_LOG: FAKE_OPENROUTER_CALL_LOG,
-      E2E_FAKE_OPENROUTER_TRANSLATION: FAKE_OPENROUTER_TRANSLATION,
       HOLISTIC_DICTATION_ENABLED: "true",
       HOLISTIC_DICTATION_ELEVENLABS_API_KEY: " ",
       HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: "false",
