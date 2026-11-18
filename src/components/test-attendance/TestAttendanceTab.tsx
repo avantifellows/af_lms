@@ -237,7 +237,7 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
         <>
           <MonthBanner test={selected} data={data} refreshing={state.refreshing} onRefresh={refresh} />
           {/* Keyed so a newly opened month starts on its default list filter. */}
-          <MonthPage key={selected.key} test={selected} students={students} />
+          <MonthPage key={selected.key} test={selected} monthlyTests={data.monthlyTests} students={students} />
         </>
       ) : data.monthlyTests.length > 0 ? (
         <AllYearPage monthlyTests={data.monthlyTests} students={students} />

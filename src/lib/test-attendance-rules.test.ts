@@ -17,6 +17,7 @@ import {
   monthTiles,
   monthlyTestsFrom,
   percentText,
+  previousTestsWindow,
   tagWindow,
   testAttendanceFrom,
   type ListedStudent,
@@ -906,6 +907,97 @@ describe("followUpFor — Follow Up patterns", () => {
   it("has no pattern without the Follow Up Tag", () => {
     expect(patternOf({ august: "opened", september: "opened", october: "submitted" }).pattern).toBeNull();
     expect(patternOf({ august: "not_opened", september: "submitted", october: "submitted" }).pattern).toBeNull();
+  });
+});
+
+// "Previous 3 tests" on a month page (#529): the same rule, with the window set
+// to the 3 closed Monthly Tests before the selected one.
+describe("previousTestsWindow", () => {
+  const keysBefore = (tests: Parameters<typeof previousTestsWindow>[0], key: string) =>
+    previousTestsWindow(tests, key).map((t) => t.key);
+
+  it("is empty for the first Monthly Test of the year", () => {
+    expect(keysBefore([jul, aug, sep, oct, nov], "july")).toEqual([]);
+  });
+
+  it("holds the one closed Monthly Test before the second", () => {
+    expect(keysBefore([jul, aug, sep, oct, nov], "august")).toEqual(["july"]);
+  });
+
+  it("holds the 3 closed Monthly Tests before the fourth, oldest first", () => {
+    expect(keysBefore([jul, aug, sep, oct, nov], "october")).toEqual(["july", "august", "september"]);
+  });
+
+  it("holds the 3 closed Monthly Tests before a running selected month", () => {
+    expect(keysBefore([jul, aug, sep, oct, nov], "november")).toEqual(["august", "september", "october"]);
+  });
+
+  it("never counts a running Monthly Test before the selected one", () => {
+    const earlyRunning = monthly("october", "October", "running");
+    const alsoRunning = monthly("november", "November", "running");
+    expect(keysBefore([aug, sep, earlyRunning, alsoRunning], "november")).toEqual(["august", "september"]);
+  });
+
+  it("is empty for an unknown Monthly Test", () => {
+    expect(keysBefore([jul, aug], "december")).toEqual([]);
+  });
+});
+
+describe("monthStudents — Previous 3 tests", () => {
+  // November is running and selected; its window is Aug, Sep, Oct.
+  const novStudent = (userId: string, name: string, attendance: TestAttendanceStudent["attendance"]) => ({
+    userId,
+    name,
+    studentId: `NVS${userId}`,
+    grade: 11,
+    examPreparingFor: "Engineering" as const,
+    attendance: { ...attendance, november: "not_opened" as const },
+  });
+  const novFixture = [
+    novStudent("1", "Asha Roy", { august: "submitted", september: "submitted", october: "submitted" }),
+    novStudent("2", "Bina Shah", { august: "submitted", september: "not_opened", october: "submitted" }),
+    novStudent("3", "Charu Pal", { august: "submitted", september: "submitted", october: "opened" }),
+    novStudent("4", "Dev Iyer", { august: "not_opened", september: "submitted", october: "opened" }),
+    novStudent("5", "Esha Nair", { september: "opened", october: "opened" }), // not counted for August
+    novStudent("6", "Farah Ali", { august: "submitted", september: "not_opened", october: "not_opened" }),
+  ];
+  const november = { key: "november", state: "running" as const };
+  const notes = (window: Parameters<typeof monthStudents>[3]) =>
+    monthStudents(novFixture, november, "all", window).map((row) => [row.student.name, row.previous.note, row.previous.tone]);
+
+  it("names the earlier months missed or not submitted, red with a miss and amber with only non-submissions", () => {
+    expect(notes(previousTestsWindow([jul, aug, sep, oct, nov], "november"))).toEqual([
+      ["Asha Roy", null, null],
+      ["Bina Shah", "Missed Sep", "red"],
+      ["Charu Pal", "Not submitted Oct", "amber"],
+      ["Dev Iyer", "Missed Aug · Not submitted Oct", "red"],
+      ["Esha Nair", "Not submitted Sep, Oct", "amber"],
+      ["Farah Ali", "Missed Sep, Oct in a row", "red"],
+    ]);
+  });
+
+  it("is blank for everyone on the first Monthly Test of the year", () => {
+    expect(notes(previousTestsWindow([nov], "november"))).toEqual([
+      ["Asha Roy", null, null],
+      ["Bina Shah", null, null],
+      ["Charu Pal", null, null],
+      ["Dev Iyer", null, null],
+      ["Esha Nair", null, null],
+      ["Farah Ali", null, null],
+    ]);
+  });
+
+  it("judges only the window's tests, so a later miss is not named on an earlier month", () => {
+    // Selected September: window is August only.
+    const rows = monthStudents(novFixture, { key: "september", state: "closed" }, "all", previousTestsWindow([aug, sep, oct, nov], "september"));
+    expect(rows.map((row) => [row.student.name, row.previous.note])).toEqual([
+      ["Asha Roy", null],
+      ["Bina Shah", null],
+      ["Charu Pal", null],
+      ["Dev Iyer", "Missed Aug"],
+      ["Esha Nair", null],
+      ["Farah Ali", null],
+    ]);
   });
 });
 

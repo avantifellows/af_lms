@@ -298,8 +298,8 @@ describe("TestAttendanceTab — month page", () => {
 
     expect(screen.getByRole("button", { name: "Yet to start" })).toHaveAttribute("aria-pressed", "true");
     expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Yet to start"],
-      ["Charu Pal", "11", "NDA", "Yet to start"],
+      ["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"],
+      ["Charu Pal", "11", "NDA", "Yet to start", ""],
     ]);
   });
 
@@ -310,8 +310,8 @@ describe("TestAttendanceTab — month page", () => {
 
     expect(screen.getByRole("button", { name: "Absent" })).toHaveAttribute("aria-pressed", "true");
     expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Absent"],
-      ["Ekta Jain", "12", "CLAT", "Absent"],
+      ["Arun Mehta", "11", "Not set", "Absent", ""],
+      ["Ekta Jain", "12", "CLAT", "Absent", ""],
     ]);
   });
 
@@ -321,7 +321,7 @@ describe("TestAttendanceTab — month page", () => {
     const user = await openMonth("November live");
     await user.click(screen.getByRole("button", { name: "In progress" }));
 
-    expect(studentRows()).toEqual([["Bina Shah", "11", "Medical", "In progress"]]);
+    expect(studentRows()).toEqual([["Bina Shah", "11", "Medical", "In progress", "Not submitted Oct"]]);
   });
 
   it("shows every counted Student under All", async () => {
@@ -331,12 +331,53 @@ describe("TestAttendanceTab — month page", () => {
     await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "All" }));
 
     expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Absent"],
-      ["Bina Shah", "11", "Medical", "Opened, not submitted"],
-      ["Charu Pal", "11", "NDA", "Submitted"],
-      ["Zara Khan", "11", "Engineering", "Submitted"],
-      ["Ekta Jain", "12", "CLAT", "Absent"],
+      ["Arun Mehta", "11", "Not set", "Absent", ""],
+      ["Bina Shah", "11", "Medical", "Opened, not submitted", ""],
+      ["Charu Pal", "11", "NDA", "Submitted", ""],
+      ["Zara Khan", "11", "Engineering", "Submitted", ""],
+      ["Ekta Jain", "12", "CLAT", "Absent", ""],
     ]);
+  });
+
+  it("has the columns Student, Grade, Exam Preparing For, Status and Previous 3 tests", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    await openMonth("November live");
+
+    const table = screen.getByRole("table", { name: "Students" });
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "Student",
+      "Grade",
+      "Exam Preparing For",
+      "Status",
+      "Previous 3 tests",
+    ]);
+  });
+
+  it("notes the earlier tests a Student missed or did not submit, red with a miss and amber without", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    const user = await openMonth("November live");
+    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "All" }));
+
+    // November's window is October, the one closed Monthly Test before it.
+    expect(studentRows()).toEqual([
+      ["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"],
+      ["Bina Shah", "11", "Medical", "In progress", "Not submitted Oct"],
+      ["Charu Pal", "11", "NDA", "Yet to start", ""],
+      ["Zara Khan", "11", "Engineering", "Submitted", ""],
+    ]);
+    expect(screen.getByText("Missed Oct")).toHaveClass("text-danger");
+    expect(screen.getByText("Not submitted Oct")).toHaveClass("text-warning-text");
+  });
+
+  it("leaves Previous 3 tests blank on the first Monthly Test of the year", async () => {
+    mockFetch.mockResolvedValue(ok(monthData));
+
+    const user = await openMonth("October");
+    await user.click(within(screen.getByRole("group", { name: "Show Students" })).getByRole("button", { name: "All" }));
+
+    expect(studentRows().map((row) => row[4])).toEqual(["", "", "", "", ""]);
   });
 
   it("shows 25 rows, then all of them after Show all", async () => {
@@ -456,7 +497,7 @@ describe("TestAttendanceTab — filters", () => {
     expect(tile("Submitted")).toHaveTextContent("0 of 1");
     expect(tile("Opened, not submitted")).toHaveTextContent("0 of 1");
     expect(tile("Absent")).toHaveTextContent("1 of 1");
-    expect(studentRows()).toEqual([["Ekta Jain", "12", "CLAT", "Absent"]]);
+    expect(studentRows()).toEqual([["Ekta Jain", "12", "CLAT", "Absent", ""]]);
     expect(groupRows()).toEqual([["Grade 12 · CLAT", "0 of 1 (0%)", "0", "1"]]);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
@@ -474,7 +515,7 @@ describe("TestAttendanceTab — filters", () => {
 
     expect(filterButton("Exam Preparing For", "Not set")).toHaveAttribute("aria-pressed", "true");
     expect(tile("Yet to start")).toHaveTextContent("1 of 1");
-    expect(studentRows()).toEqual([["Arun Mehta", "11", "Not set", "Yet to start"]]);
+    expect(studentRows()).toEqual([["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"]]);
     expect(groupRows()).toEqual([["Grade 11 · Not set", "0 of 1 (0%)", "0", "1"]]);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });

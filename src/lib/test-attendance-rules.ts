@@ -297,16 +297,23 @@ export const DEFAULT_MONTH_FILTER: MonthListFilter = "not_opened";
 export interface MonthStudentRow {
   student: TestAttendanceStudent;
   status: TestAttendanceStatus;
+  /** The "Previous 3 tests" note and its colour; both null when blank. */
+  previous: Pick<FollowUp, "note" | "tone">;
 }
 
 /** Sorted by grade, then name. */
 const byGradeThenName = (a: ListedStudent, b: ListedStudent) => a.grade - b.grade || a.name.localeCompare(b.name);
 
-/** The month page's Students: those counted for the Monthly Test, filtered, by grade then name. */
+/**
+ * The month page's Students: those counted for the Monthly Test, filtered, by
+ * grade then name. `previousWindow` (from `previousTestsWindow`) gives each
+ * row its "Previous 3 tests" note: the All year follow-up note over that window.
+ */
 export function monthStudents(
   students: TestAttendanceStudent[],
   test: Pick<TestAttendanceMonthlyTest, "key" | "state">,
   filter: MonthListFilter = DEFAULT_MONTH_FILTER,
+  previousWindow: WindowTest[] = [],
 ): MonthStudentRow[] {
   return students
     .filter((student) => {
@@ -314,7 +321,10 @@ export function monthStudents(
       return mark != null && (filter === "all" || mark === filter);
     })
     .sort(byGradeThenName)
-    .map((student) => ({ student, status: attendanceStatus(test.state, student.attendance[test.key]) }));
+    .map((student) => {
+      const { note, tone } = followUpFor(student, previousWindow);
+      return { student, status: attendanceStatus(test.state, student.attendance[test.key]), previous: { note, tone } };
+    });
 }
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -446,6 +456,19 @@ const TAG_WINDOW_SIZE = 3;
  */
 export function tagWindow<T extends Pick<TestAttendanceMonthlyTest, "state">>(monthlyTests: T[]): T[] {
   return monthlyTests.filter((test) => test.state === "closed").slice(-TAG_WINDOW_SIZE);
+}
+
+/**
+ * A month page's "Previous 3 tests" window: the tag window over the Monthly
+ * Tests before the selected one, so the selected test is never in its own
+ * window and a running one never counts. Empty for the first test of the year.
+ */
+export function previousTestsWindow<T extends Pick<TestAttendanceMonthlyTest, "key" | "state">>(
+  monthlyTests: T[],
+  testKey: string,
+): T[] {
+  const index = monthlyTests.findIndex((test) => test.key === testKey);
+  return index < 0 ? [] : tagWindow(monthlyTests.slice(0, index));
 }
 
 /** Follow Up (red): Absent in 2 or more. Not Submitting (amber): Opened, not submitted in 2 or more. */

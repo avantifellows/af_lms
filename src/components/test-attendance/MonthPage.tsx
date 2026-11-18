@@ -1,7 +1,8 @@
 "use client";
 
 // A Monthly Test's page on the Test Attendance tab (#517): four tiles, the
-// "By grade and Exam Preparing For" block and the Students list. Every number comes from the client-safe rules module, from
+// "By grade and Exam Preparing For" block and the Students list with its
+// "Previous 3 tests" note. Every number comes from the client-safe rules module, from
 // the response the tab already loaded.
 import { useState } from "react";
 
@@ -13,6 +14,7 @@ import {
   monthStudents,
   monthTiles,
   percentText,
+  previousTestsWindow,
   type MonthGroupRow,
   type MonthListFilter,
   type TestAttendanceMonthlyTest,
@@ -104,9 +106,12 @@ function GroupBlock({ rows, label }: { rows: MonthGroupRow[]; label: (mark: "ope
 
 export default function MonthPage({
   test,
+  monthlyTests,
   students,
 }: {
   test: TestAttendanceMonthlyTest;
+  /** Every opened Monthly Test, for the "Previous 3 tests" window. */
+  monthlyTests: TestAttendanceMonthlyTest[];
   students: TestAttendanceStudent[];
 }) {
   const [filter, setFilter] = useState<MonthListFilter>(DEFAULT_MONTH_FILTER);
@@ -114,7 +119,7 @@ export default function MonthPage({
 
   const tiles = monthTiles(students, test.key);
   const groups = monthGroupRows(students, test.key);
-  const rows = monthStudents(students, test, filter);
+  const rows = monthStudents(students, test, filter, previousTestsWindow(monthlyTests, test.key));
   const shown = showAll ? rows : rows.slice(0, PAGE_SIZE);
   const label = (mark: "not_opened" | "opened" | "submitted") => attendanceStatus(test.state, mark);
   const filters: { value: MonthListFilter; label: string }[] = [
@@ -175,16 +180,24 @@ export default function MonthPage({
                   <th scope="col" className="py-2 pr-4 font-medium">Student</th>
                   <th scope="col" className="py-2 pr-4 font-medium">Grade</th>
                   <th scope="col" className="py-2 pr-4 font-medium">Exam Preparing For</th>
-                  <th scope="col" className="py-2 font-medium">Status</th>
+                  <th scope="col" className="py-2 pr-4 font-medium">Status</th>
+                  <th scope="col" className="py-2 font-medium">Previous 3 tests</th>
                 </tr>
               </thead>
               <tbody>
-                {shown.map(({ student, status }) => (
+                {shown.map(({ student, status, previous }) => (
                   <tr key={student.userId} className="border-b border-border last:border-0">
                     <td className="py-2 pr-4 text-text-primary">{student.name}</td>
                     <td className="py-2 pr-4 text-text-secondary">{student.grade}</td>
                     <td className="py-2 pr-4 text-text-secondary">{student.examPreparingFor ?? "Not set"}</td>
-                    <td className={`py-2 font-medium ${statusTone[status]}`}>{status}</td>
+                    <td className={`py-2 pr-4 font-medium ${statusTone[status]}`}>{status}</td>
+                    <td className="py-2">
+                      {previous.note && (
+                        <span className={`text-xs font-medium ${previous.tone === "red" ? "text-danger" : "text-warning-text"}`}>
+                          {previous.note}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
