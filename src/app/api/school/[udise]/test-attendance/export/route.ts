@@ -1,8 +1,8 @@
 import ExcelJS from "exceljs";
 import { NextRequest, NextResponse } from "next/server";
 
-import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { loadTestAttendance } from "@/lib/test-attendance";
+import { authorizeTestAttendance } from "@/lib/test-attendance-gate";
 import { parseTestAttendanceExport, testAttendanceSheet } from "@/lib/test-attendance-export";
 
 // Test Attendance export (#517): the list on screen as one Excel sheet. The
@@ -15,11 +15,8 @@ export async function GET(
   { params }: { params: Promise<{ udise: string }> },
 ) {
   const { udise } = await params;
-  const auth = await authorizeSchoolAccess(udise, { feature: "test_attendance" });
+  const auth = await authorizeTestAttendance(udise);
   if (!auth.authorized) return auth.response;
-  if (auth.school.af_school_category !== "JNV") {
-    return NextResponse.json({ error: "Access denied" }, { status: 403 });
-  }
 
   const parsed = parseTestAttendanceExport(request.nextUrl.searchParams);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });

@@ -167,11 +167,15 @@ function MonthBanner({
   );
 }
 
-export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string }) {
+/**
+ * Loads the tab's data and keeps it fresh: one fetch on mount, Retry after a
+ * failure, Refresh on demand, and a 15-minute timer while a running Monthly
+ * Test is selected.
+ */
+function useTestAttendance(schoolUdise: string) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // Null until the first successful load picks the default; a later fetch never changes it.
   const [period, setPeriod] = useState<Period | null>(null);
-  const [filters, setFilters] = useState<TestAttendanceFilters>(ALL_STUDENTS);
   // Only the latest request may set state, and none after unmount.
   const latestRequest = useRef(0);
 
@@ -217,6 +221,99 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
     return () => clearTimeout(timer);
   }, [runningSelected, loaded, refresh]);
 
+  return { state, period, setPeriod, retry, refresh };
+}
+
+/** A School with no Monthly Tests in the PMU test set list yet: the Enrolled count only. */
+function NoMonthlyTests({ enrolled }: { enrolled: number }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <section aria-label="Enrolled">
+          <Card elevation="sm" className="p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Enrolled</p>
+            <p className="mt-1 text-2xl font-bold text-text-primary">{enrolled}</p>
+          </Card>
+        </section>
+      </div>
+      <Card elevation="sm" className="p-6 text-center">
+        <p className="text-sm text-text-muted">No Monthly Tests yet</p>
+      </Card>
+    </>
+  );
+}
+
+/** The loaded tab: filters, the period strip, and the selected period's page. */
+function LoadedTab({
+  schoolUdise,
+  data,
+  refreshing,
+  period,
+  filters,
+  onPeriodChange,
+  onFiltersChange,
+  onRefresh,
+}: {
+  schoolUdise: string;
+  data: TestAttendanceResponse;
+  refreshing: boolean;
+  period: Period | null;
+  filters: TestAttendanceFilters;
+  onPeriodChange: (period: Period) => void;
+  onFiltersChange: (filters: TestAttendanceFilters) => void;
+  onRefresh: () => void;
+}) {
+  const selected = data.monthlyTests.find((test) => test.key === period);
+  const periodKey = selected ? selected.key : "all";
+  // Filtering and counting happen here, from the response already loaded: no new request.
+  const students = filterStudents(data.students, filters);
+  // The file holds the list on screen: this period, these filters, that list filter.
+  const download = (list: MonthListFilter | AllYearListFilter) =>
+    window.location.assign(
+      `/api/school/${encodeURIComponent(schoolUdise)}/test-attendance/export?${testAttendanceExportQuery({
+        period: periodKey,
+        filters,
+        list,
+      })}`,
+    );
+
+  if (data.monthlyTests.length === 0) {
+    return (
+      <div className="space-y-4">
+        <Filters students={data.students} filters={filters} onChange={onFiltersChange} />
+        <NoMonthlyTests enrolled={students.length} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Filters students={data.students} filters={filters} onChange={onFiltersChange} />
+      <PeriodStrip monthlyTests={data.monthlyTests} period={periodKey} onChange={onPeriodChange} />
+      {selected ? (
+        <>
+          <MonthBanner test={selected} data={data} refreshing={refreshing} onRefresh={onRefresh} />
+          {/* Keyed so a newly opened month starts on its default list filter. */}
+          <MonthPage
+            key={selected.key}
+            test={selected}
+            monthlyTests={data.monthlyTests}
+            students={students}
+            onDownload={download}
+          />
+        </>
+      ) : (
+        <AllYearPage monthlyTests={data.monthlyTests} students={students} onDownload={download} />
+      )}
+    </div>
+  );
+}
+
+export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string }) {
+  const { state, period, setPeriod, retry, refresh } = useTestAttendance(schoolUdise);
+  // Held here, not in LoadedTab, so the filters survive a failed re-fetch and Retry.
+  const [filters, setFilters] = useState<TestAttendanceFilters>(ALL_STUDENTS);
+
   if (state.status === "loading") {
     return <p className="py-8 text-center text-sm text-text-muted">Loading Test Attendance…</p>;
   }
@@ -232,54 +329,16 @@ export default function TestAttendanceTab({ schoolUdise }: { schoolUdise: string
     );
   }
 
-  const { data } = state;
-  const selected = data.monthlyTests.find((test) => test.key === period);
-  // Filtering and counting happen here, from the response already loaded: no new request.
-  const students = filterStudents(data.students, filters);
-  // The file holds the list on screen: this period, these filters, that list filter.
-  const download = (list: MonthListFilter | AllYearListFilter) =>
-    window.location.assign(
-      `/api/school/${encodeURIComponent(schoolUdise)}/test-attendance/export?${testAttendanceExportQuery({
-        period: selected ? selected.key : "all",
-        filters,
-        list,
-      })}`,
-    );
   return (
-    <div className="space-y-4">
-      <Filters students={data.students} filters={filters} onChange={setFilters} />
-      {data.monthlyTests.length > 0 && (
-        <PeriodStrip monthlyTests={data.monthlyTests} period={selected ? selected.key : "all"} onChange={setPeriod} />
-      )}
-      {selected ? (
-        <>
-          <MonthBanner test={selected} data={data} refreshing={state.refreshing} onRefresh={refresh} />
-          {/* Keyed so a newly opened month starts on its default list filter. */}
-          <MonthPage
-            key={selected.key}
-            test={selected}
-            monthlyTests={data.monthlyTests}
-            students={students}
-            onDownload={download}
-          />
-        </>
-      ) : data.monthlyTests.length > 0 ? (
-        <AllYearPage monthlyTests={data.monthlyTests} students={students} onDownload={download} />
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <section aria-label="Enrolled">
-              <Card elevation="sm" className="p-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Enrolled</p>
-                <p className="mt-1 text-2xl font-bold text-text-primary">{students.length}</p>
-              </Card>
-            </section>
-          </div>
-          <Card elevation="sm" className="p-6 text-center">
-            <p className="text-sm text-text-muted">No Monthly Tests yet</p>
-          </Card>
-        </>
-      )}
-    </div>
+    <LoadedTab
+      schoolUdise={schoolUdise}
+      data={state.data}
+      refreshing={state.refreshing}
+      period={period}
+      filters={filters}
+      onPeriodChange={setPeriod}
+      onFiltersChange={setFilters}
+      onRefresh={refresh}
+    />
   );
 }

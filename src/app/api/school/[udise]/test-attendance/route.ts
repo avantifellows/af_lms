@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { loadTestAttendance } from "@/lib/test-attendance";
+import { authorizeTestAttendance } from "@/lib/test-attendance-gate";
 
 // Test Attendance tab read (#517). Gate before any data read: signed in (401),
 // School exists (404), School access + `test_attendance` view (403), School is
@@ -11,11 +11,8 @@ export async function GET(
   { params }: { params: Promise<{ udise: string }> },
 ) {
   const { udise } = await params;
-  const auth = await authorizeSchoolAccess(udise, { feature: "test_attendance" });
+  const auth = await authorizeTestAttendance(udise);
   if (!auth.authorized) return auth.response;
-  if (auth.school.af_school_category !== "JNV") {
-    return NextResponse.json({ error: "Access denied" }, { status: 403 });
-  }
 
   try {
     const data = await loadTestAttendance(auth.school.id);

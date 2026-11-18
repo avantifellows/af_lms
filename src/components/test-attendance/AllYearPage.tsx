@@ -7,8 +7,9 @@
 // client-safe rules module, from the response the tab already loaded.
 import { useState } from "react";
 
-import { Button, Card } from "@/components/ui";
+import { Card } from "@/components/ui";
 import AttendanceChart from "@/components/test-attendance/AttendanceChart";
+import StudentListHeader from "@/components/test-attendance/StudentListHeader";
 import { Tile } from "@/components/test-attendance/MonthPage";
 import {
   allYearStudents,
@@ -132,31 +133,13 @@ export default function AllYearPage({
       {chart}
 
       <Card elevation="sm" className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-bold text-text-primary">All students</h3>
-          <div className="flex flex-wrap items-center gap-3">
-            <div role="group" aria-label="Show Students" className="inline-flex flex-wrap gap-1">
-              {LIST_FILTERS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-pressed={filter === option.value}
-                  onClick={() => setFilter(option.value)}
-                  className={`min-h-[44px] rounded-md border px-3 text-xs font-bold transition-colors ${
-                    filter === option.value
-                      ? "border-accent bg-accent text-text-on-accent"
-                      : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <Button variant="secondary" onClick={() => onDownload(filter)}>
-              Download
-            </Button>
-          </div>
-        </div>
+        <StudentListHeader
+          title="All students"
+          options={LIST_FILTERS}
+          value={filter}
+          onChange={setFilter}
+          onDownload={() => onDownload(filter)}
+        />
         <p className="text-xs text-text-muted">{countedTestsLine(monthlyTests)}</p>
 
         {rows.length === 0 ? (

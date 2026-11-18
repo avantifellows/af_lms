@@ -7,6 +7,7 @@
 import { useState } from "react";
 
 import { Button, Card } from "@/components/ui";
+import StudentListHeader from "@/components/test-attendance/StudentListHeader";
 import {
   attendanceStatus,
   DEFAULT_MONTH_FILTER,
@@ -149,34 +150,16 @@ export default function MonthPage({
       <GroupBlock rows={groups} label={label} />
 
       <Card elevation="sm" className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-bold text-text-primary">Students</h3>
-          <div className="flex flex-wrap items-center gap-3">
-            <div role="group" aria-label="Show Students" className="inline-flex flex-wrap gap-1">
-              {filters.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-pressed={filter === option.value}
-                  onClick={() => {
-                    setFilter(option.value);
-                    setShowAll(false);
-                  }}
-                  className={`min-h-[44px] rounded-md border px-3 text-xs font-bold transition-colors ${
-                    filter === option.value
-                      ? "border-accent bg-accent text-text-on-accent"
-                      : "border-border text-text-secondary hover:bg-hover-bg hover:text-text-primary"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <Button variant="secondary" onClick={() => onDownload(filter)}>
-              Download
-            </Button>
-          </div>
-        </div>
+        <StudentListHeader
+          title="Students"
+          options={filters}
+          value={filter}
+          onChange={(value) => {
+            setFilter(value);
+            setShowAll(false);
+          }}
+          onDownload={() => onDownload(filter)}
+        />
 
         {rows.length === 0 ? (
           <p className="py-4 text-center text-sm text-text-muted">No Students in this list.</p>
