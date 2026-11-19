@@ -116,6 +116,26 @@ describe("ProgressWorkspace", () => {
     );
   });
 
+  it("labels a Phase that is no longer the Grade's Active one as Closed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ...payload, rows: [{ ...payload.rows[0], phaseState: "closed", progress: "pending", completedAt: null }],
+      }),
+      json: async () => ({
+        ...payload, rows: [{ ...payload.rows[0], phaseState: "closed", progress: "pending", completedAt: null }],
+      }),
+    }));
+    render(<ProgressWorkspace />);
+
+    // findByText, as in the tests above: a role query over the whole table is slow.
+    const row = (await screen.findByText("Student One")).closest("tr")!;
+    expect(within(row).getByText("Closed")).toBeInTheDocument();
+    expect(within(row).queryByText("Active")).not.toBeInTheDocument();
+    // Still openable to read: only a Locked Phase has no Student page.
+    expect(within(row).getByRole("link", { name: /Open Student One/ })).toBeInTheDocument();
+  });
+
   it("says Assigned instead of mapped in cards, the Progress filter, and pagination", async () => {
     render(<ProgressWorkspace />);
     await screen.findByText("Student One");

@@ -528,17 +528,38 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(page.getByText("Notes submitted. Phase completed.")).toBeVisible();
     await expectSubmittedCategories(page, ["No major issue reported"], ["Adjustment difficulties"]);
 
-    // The seeded submitted Note predates Challenge Categories.
+    // The seeded submitted Note predates Challenge Categories. Its Phase closed when
+    // the Grade's next Phase opened (#536), so it is readable but can't be corrected.
     await page.goto(studentPhaseUrl(fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId));
+    await expect(page.getByRole("region", { name: "Challenge Categories", exact: true }))
+      .toContainText("Categories not recorded");
+    await expect(page.getByRole("note")).toContainText("This Phase is closed.");
+    await expect(page.getByRole("button", { name: "Edit Notes" })).toHaveCount(0);
+
+    // A pre-release Note on the Active Phase: drop the Categories just submitted
+    // above, as if the Note had been submitted before Challenge Categories existed.
+    const pool = getTestPool();
+    try {
+      await pool.query(
+        `DELETE FROM holistic_mentorship_post_session_note_challenges
+         WHERE notes_id IN (SELECT id FROM holistic_mentorship_post_session_notes
+                            WHERE student_id = $1 AND phase_id = $2)`,
+        [fixture.historicalGrade12StudentId, fixture.activeGrade12PhaseId],
+      );
+    } finally {
+      await pool.end();
+    }
+    await page.goto(studentPhaseUrl(fixture.historicalGrade12StudentId, fixture.activeGrade12PhaseId));
     await expect(page.getByRole("region", { name: "Challenge Categories", exact: true }))
       .toContainText("Categories not recorded");
     await page.getByRole("button", { name: "Edit Notes" }).click();
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Choose at least one Academic and one Non-academic Challenge Category", { exact: true }))
       .toBeVisible();
-    await challengeGroup(page, "Academic").getByRole("checkbox", { name: "Exam/Test related issues" }).check();
+    // The same Categories as before, so later specs see the Note as it was submitted.
+    await challengeGroup(page, "Academic").getByRole("checkbox", { name: "No major issue reported" }).check();
     await challengeGroup(page, "Non-academic")
-      .getByRole("checkbox", { name: "Wellness (health, sleep etc.)" }).check();
+      .getByRole("checkbox", { name: "Adjustment difficulties" }).check();
     const correction = page.waitForResponse((response) =>
       response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"edit"') === true
     );
@@ -546,20 +567,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await page.getByRole("button", { name: "Save Changes" }).click();
     expect((await correction).status()).toBe(200);
     await expect(page.getByText("Submitted Notes updated.")).toBeVisible();
-    await expectSubmittedCategories(page, ["Exam/Test related issues"], ["Wellness (health, sleep etc.)"]);
-
-    // Restore the pre-release fixture for later specs.
-    const pool = getTestPool();
-    try {
-      await pool.query(
-        `DELETE FROM holistic_mentorship_post_session_note_challenges
-         WHERE notes_id IN (SELECT id FROM holistic_mentorship_post_session_notes
-                            WHERE student_id = $1 AND phase_id = $2)`,
-        [fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId],
-      );
-    } finally {
-      await pool.end();
-    }
+    await expectSubmittedCategories(page, ["No major issue reported"], ["Adjustment difficulties"]);
     expectBrowserHealth(health);
   });
 
@@ -586,18 +594,23 @@ test.describe("Holistic Mentorship release workflows", () => {
         .toContainText("Categories not recorded");
     }
 
-    await mentor.goto(earlierNotesUrl);
-    await mentor.getByRole("button", { name: "Edit Notes" }).click();
-    await challengeGroup(mentor, "Academic").getByRole("checkbox", { name: "Backlogs, revision & workload" }).check();
-    await challengeGroup(mentor, "Non-academic").getByRole("checkbox", { name: "Financial challenges" }).check();
-    await challengeGroup(mentor, "Non-academic").getByRole("checkbox", { name: "Career uncertainty" }).check();
-    const correction = mentor.waitForResponse((response) =>
-      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"edit"') === true
-    );
-    mentor.once("dialog", (dialog) => dialog.accept());
-    await mentor.getByRole("button", { name: "Save Changes" }).click();
-    expect((await correction).status()).toBe(200);
-    await expect(mentor.getByText("Submitted Notes updated.")).toBeVisible();
+    // Phase 1 is Closed (#536), so the Mentor can't add Categories to its Note now.
+    // Seed them as if the Note had been submitted with Categories before it closed.
+    const seedPool = getTestPool();
+    try {
+      await seedPool.query(
+        `INSERT INTO holistic_mentorship_post_session_note_challenges
+           (notes_id, category_code, inserted_at, updated_at)
+         SELECT notes.id, code, now(), now()
+         FROM holistic_mentorship_post_session_notes notes,
+              unnest($3::text[]) AS code
+         WHERE notes.student_id = $1 AND notes.phase_id = $2`,
+        [fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId,
+          ["academic.backlogs_workload", "non_academic.financial", "non_academic.career_uncertainty"]],
+      );
+    } finally {
+      await seedPool.end();
+    }
 
     const academic = ["Backlogs, revision & workload"];
     const nonAcademic = ["Career uncertainty", "Financial challenges"];

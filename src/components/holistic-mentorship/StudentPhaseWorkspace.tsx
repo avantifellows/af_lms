@@ -979,11 +979,14 @@ function NotesSaveFailure({ error, showError, canRetry, disabled, onRetry }: {
   </>;
 }
 
-type PhaseStage = "Completed" | "Open" | "Skipped" | "Locked";
+type PhaseStage = "Completed" | "Open" | "Skipped" | "Closed" | "Locked";
 
+// A Closed Phase without submitted Notes can no longer be worked on, so it
+// shows Closed rather than Open or Skipped; Completed stays Completed.
 function phaseStage(phase: PhaseNavigationItem): PhaseStage {
   if (phase.phaseId === null || ("locked" in phase && phase.locked)) return "Locked";
   if (phase.progress === "completed") return "Completed";
+  if (phase.closed) return "Closed";
   return phase.progress === "skipped" ? "Skipped" : "Open";
 }
 
@@ -992,6 +995,7 @@ function PhaseStatusBadge({ stage }: { stage: PhaseStage }) {
     Completed: "success",
     Open: "info",
     Skipped: "warning",
+    Closed: "default",
     Locked: "default",
   };
   return <Badge variant={variant[stage]} className="mt-1 gap-1 px-2 py-0.5">
@@ -1194,6 +1198,7 @@ const ADMIN_PHASE_STAGE_TEXT: Record<PhaseStage, string> = {
   Completed: "text-success",
   Open: "text-info",
   Skipped: "text-warning-text",
+  Closed: "text-text-muted",
   Locked: "text-text-muted",
 };
 
@@ -1281,6 +1286,7 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
   return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
     className="space-y-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
     <PhaseHeading phase={phase} />
+    {phase.closed && <ClosedPhaseNotice />}
     <PreparationSwitch mobilePanel={mobilePanel} onSelect={setMobilePanel} />
     <div className="grid gap-4 lg:grid-cols-2">
       <Card elevation="sm"
@@ -1316,6 +1322,16 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
       { school_code: schoolCode, academic_year: academicYear, program_id: String(programId) }
     )}`} />
   </section>;
+}
+
+function ClosedPhaseNotice() {
+  return <div role="note" className="flex items-start gap-3 rounded-md bg-warning-bg p-3 text-sm text-text-secondary">
+    <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+    <p>
+      <strong className="text-text-primary">This Phase is closed.</strong>{" "}
+      You can read its Notes, but Notes can be added or changed only in the Active Phase.
+    </p>
+  </div>;
 }
 
 function PreparationSwitch({ mobilePanel, onSelect }: {
@@ -1396,7 +1412,7 @@ function AdminPhaseContextHead({ phase }: {
         Phase {phase.number} - {phase.title}
       </h2>
       <p className="mt-0.5 text-sm text-text-muted">
-        {profileSource ? "Student Profile context" : `Open Phase - ${progressLabel}`}
+        {profileSource ? "Student Profile context" : `${phase.closed ? "Closed" : "Open"} Phase - ${progressLabel}`}
       </p>
     </div>
   </div>;
@@ -1631,10 +1647,14 @@ function AdminNotesPanel({ phase }: { phase: OpenSelectedPhase }) {
       Submitted Notes are visible here. Draft answers are never shown to Admins.
     </p>
     {submitted
-      ? <AdminSubmittedNotes notes={submitted} questions={phase.questions} />
-      : <AdminInfoAlert icon={EyeOff} title="Pending">
-          Submitted Notes will appear here after the Mentor completes this Phase.
-        </AdminInfoAlert>}
+      ? <AdminSubmittedNotes notes={submitted} questions={phase.questions} closed={phase.closed} />
+      : phase.closed
+        ? <AdminInfoAlert icon={Lock} title="Closed without Notes">
+            This Phase closed before the Mentor submitted Notes. Notes can no longer be added to it.
+          </AdminInfoAlert>
+        : <AdminInfoAlert icon={EyeOff} title="Pending">
+            Submitted Notes will appear here after the Mentor completes this Phase.
+          </AdminInfoAlert>}
   </Card>;
 }
 
@@ -1657,10 +1677,13 @@ const FOLLOW_UP_MAYBE_SAVED =
 function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiUrl: string }) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
-  const canAdd = phase.progress === "completed";
+  // A Closed Phase takes no new Follow-up Notes, even with submitted Notes.
+  const blocked = phase.closed ? "This Phase is closed"
+    : phase.progress === "completed" ? null : "Submit Post-Session Notes first";
+  const canAdd = blocked === null;
   return <>
     <FollowUpNotesSection notes={phase.followUpNotes} action={<div className="flex items-center gap-2">
-      {!canAdd && <span id={hintId} className="text-xs text-text-muted">Submit Post-Session Notes first</span>}
+      {!canAdd && <span id={hintId} className="text-xs text-text-muted">{blocked}</span>}
       <Button type="button" variant="secondary" size="sm" disabled={!canAdd}
         aria-describedby={canAdd ? undefined : hintId} onClick={() => setOpen(true)}>Add notes</Button>
     </div>} />
@@ -1787,9 +1810,10 @@ function FollowUpNoteCard({ note }: { note: OpenSelectedPhase["followUpNotes"][n
   </article>;
 }
 
-function AdminSubmittedNotes({ notes, questions }: {
+function AdminSubmittedNotes({ notes, questions, closed }: {
   notes: NonNullable<OpenSelectedPhase["notes"]>;
   questions: OpenSelectedPhase["questions"];
+  closed: boolean;
 }) {
   const questionText = new Map(questions.map((question) => [question.questionId, question.text]));
   const submittedAt = notes.firstSubmittedAt ?? notes.lastEditedAt;
@@ -1809,9 +1833,13 @@ function AdminSubmittedNotes({ notes, questions }: {
       </div>)}
       <SubmittedChallengeCategories codes={notes.challengeCategories ?? []} headingLevel={4} />
     </div>
-    <AdminInfoAlert icon={Lock} title="Read-only for Admins">
-      Only the author while currently assigned can edit submitted Notes.
-    </AdminInfoAlert>
+    {closed
+      ? <AdminInfoAlert icon={Lock} title="Closed Phase">
+          These Notes are final. Notes in a Closed Phase can no longer be changed, by the Mentor or anyone else.
+        </AdminInfoAlert>
+      : <AdminInfoAlert icon={Lock} title="Read-only for Admins">
+          Only the author while currently assigned can edit submitted Notes.
+        </AdminInfoAlert>}
   </>;
 }
 
@@ -1832,9 +1860,9 @@ function AdminInfoAlert({ icon: Icon, title, children }: {
 function PhaseHeading({ phase }: { phase: OpenSelectedPhase }) {
   return <section aria-labelledby="phase-heading">
     <h2 id="phase-heading" className="text-xl font-semibold text-text-primary">Phase {phase.number} - {phase.title}</h2>
-    <p className="mt-1 text-sm text-text-muted">
+    {!phase.closed && <p className="mt-1 text-sm text-text-muted">
       Prep material stays read-only. Complete Notes after the offline conversation.
-    </p>
+    </p>}
   </section>;
 }
 

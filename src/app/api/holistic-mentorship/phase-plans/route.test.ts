@@ -105,6 +105,65 @@ describe("/api/holistic-mentorship/phase-plans", () => {
     expect(await response.json()).toEqual({ plan: null });
   });
 
+  describe("what opening a Locked Phase would close", () => {
+    const impactUrl = (phaseId: string) =>
+      `http://localhost/api/holistic-mentorship/phase-plans?program_id=1&open_impact_phase_id=${phaseId}`;
+    const admin = {
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    };
+
+    it("is denied to a Program Manager before any count is read", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: "pm@example.com" } });
+      mockQuery
+        .mockResolvedValueOnce([{ ...admin, email: "pm@example.com", role: "program_manager" }])
+        .mockResolvedValue([]);
+
+      const response = await GET(new NextRequest(impactUrl("16")));
+
+      expect(response.status).toBe(403);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["abc", "0", "-3", "1.5", ""])("rejects the Phase id %j", async (phaseId) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: admin.email } });
+      mockQuery.mockResolvedValueOnce([admin]);
+
+      const response = await GET(new NextRequest(impactUrl(phaseId)));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid Phase" });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it("is not found for a Phase outside the Program or not Locked", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: admin.email } });
+      mockQuery.mockResolvedValueOnce([admin]).mockResolvedValueOnce([]);
+
+      const response = await GET(new NextRequest(impactUrl("16")));
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "Phase not found" });
+    });
+
+    it("returns counts only for the Phase that will close", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: admin.email } });
+      mockQuery
+        .mockResolvedValueOnce([admin])
+        .mockResolvedValueOnce([{ phase_plan_id: "7", grade_id: "3", grade: "12", position: 4, academic_year: "2026-2027" }])
+        .mockResolvedValueOnce([{ id: "2", title: "Stress management", number: "2" }])
+        .mockResolvedValueOnce([{ without_notes: "45", drafts: "1" }]);
+
+      const response = await GET(new NextRequest(impactUrl("16")));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        impact: { closing: { number: 2, title: "Stress management", menteesWithoutNotes: 45, unsubmittedDrafts: 1 } },
+      });
+      expect(mockQuery.mock.calls[1][1]).toEqual([16, 1]);
+    });
+  });
+
   it("lets a Holistic Mentorship Admin create the blank current-year Plan", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "hm-admin@example.com" } });
     mockQuery.mockResolvedValueOnce([{

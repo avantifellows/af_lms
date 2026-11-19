@@ -83,6 +83,65 @@ async function persistDraft(
   return request("POST", { action: "add", academic_year: academicYear, ...draftPayload(draft) }, false);
 }
 
+type OpenImpact = { closing: { menteesWithoutNotes: number; unsubmittedDrafts: number } | null };
+
+// Opening a Phase closes the Grade's Active Phase for Mentors (#536).
+function activePhaseOfGrade(plan: Plan | null | undefined, phase: Phase) {
+  return plan?.phases.find((item) => item.active && item.grade === phase.grade && item.id !== phase.id);
+}
+
+// A later Open Phase of the same Grade blocks opening an earlier one.
+function laterOpenPhaseOfGrade(plan: Plan | null | undefined, phase: Phase) {
+  return plan?.phases.findLast((item) =>
+    item.grade === phase.grade && item.state === "open" && item.number > phase.number);
+}
+
+// The Phase that becomes Active again when this Active Phase returns to Locked.
+function previousOpenPhaseOfGrade(plan: Plan | null | undefined, phase: Phase) {
+  return plan?.phases.findLast((item) =>
+    item.grade === phase.grade && item.state === "open" && item.number < phase.number);
+}
+
+async function fetchOpenImpact(phaseId: number, programId: number): Promise<OpenImpact | null> {
+  try {
+    const params = new URLSearchParams({ program_id: String(programId), open_impact_phase_id: String(phaseId) });
+    const response = await fetch(`/api/holistic-mentorship/phase-plans?${params}`, { cache: "no-store" });
+    if (!response.ok) return null;
+    return ((await response.json()).impact ?? null) as OpenImpact | null;
+  } catch {
+    return null;
+  }
+}
+
+function pendingMenteesLine(closing: Phase, impact: OpenImpact | null) {
+  const counts = impact?.closing;
+  if (!counts) return `Check Students & Progress for Mentees still pending in Phase ${closing.number}.`;
+  if (counts.menteesWithoutNotes === 0) {
+    return `Every assigned Mentee has submitted Notes in Phase ${closing.number}.`;
+  }
+  const mentees = counts.menteesWithoutNotes === 1 ? "1 assigned Mentee has" : `${counts.menteesWithoutNotes} assigned Mentees have`;
+  const drafts = counts.unsubmittedDrafts > 0 ? ` (${counts.unsubmittedDrafts} with an unsubmitted draft)` : "";
+  return `${mentees} no submitted Notes in Phase ${closing.number}${drafts}. Their Notes cannot be added after this.`;
+}
+
+function openPhasePrompt(phase: Phase, closing: Phase | undefined, impact: OpenImpact | null) {
+  if (!closing) return `Open Phase ${phase.number}?`;
+  return [
+    `Open Phase ${phase.number}?`,
+    `Phase ${closing.number} will close for Grade ${phase.grade}. Mentors will still be able to read its Notes, but not add or change them.`,
+    pendingMenteesLine(closing, impact),
+  ].join("\n\n");
+}
+
+function returnToLockedPrompt(phase: Phase, plan: Plan | null | undefined) {
+  const previous = phase.active ? previousOpenPhaseOfGrade(plan, phase) : undefined;
+  if (!previous) return `Return to Locked Phase ${phase.number}?`;
+  return [
+    `Return to Locked Phase ${phase.number}?`,
+    `Phase ${previous.number} will become the Active Phase for Grade ${phase.grade} again, and Mentors will be able to add and change Notes in it.`,
+  ].join("\n\n");
+}
+
 function confirmPreviouslyOpenedPhase(phase: Phase | null | undefined) {
   if (!phase?.everOpened) return true;
   return window.confirm("Save changes to this previously opened Phase?");
@@ -253,7 +312,15 @@ export default function PhasePlanSetup({
 
   async function changeState(phase: Phase) {
     const next = phase.state === "locked" ? "open" : "locked";
-    if (!window.confirm(`${next === "open" ? "Open" : "Return to Locked"} Phase ${phase.number}?`)) return;
+    let prompt = returnToLockedPrompt(phase, plan);
+    if (next === "open") {
+      const closing = activePhaseOfGrade(plan, phase);
+      setBusy(true);
+      const impact = closing ? await fetchOpenImpact(phase.id, programId) : null;
+      setBusy(false);
+      prompt = openPhasePrompt(phase, closing, impact);
+    }
+    if (!window.confirm(prompt)) return;
     const changed = await request("PATCH",
       { action: "state", phase_id: phase.id, expected_revision: phase.revision, state: next, confirmed: true }, false);
     if (changed) await load(academicYear, phase.id);
@@ -435,11 +502,13 @@ function PhaseListStatus({ phase }: { phase: Phase }) {
       <Lock aria-hidden="true" className="h-3 w-3" />Locked
     </span>;
   }
-  return <span className="text-[11px] font-bold text-text-muted">Open</span>;
+  return <span className="text-[11px] font-bold text-text-muted">Closed</span>;
 }
 
+// An opened Phase that is no longer the Grade's Active one is Closed: Mentors
+// read its Notes but cannot add or change them.
 function phaseStatusLabel(phase: Phase) {
-  return phase.active ? "Active" : phase.state === "open" ? "Open" : "Locked";
+  return phase.active ? "Active" : phase.state === "open" ? "Closed" : "Locked";
 }
 
 function InlineAlert({ tone, icon, title, copy }: {
@@ -473,7 +542,7 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
     <PhaseEditorHeader draft={draft} phase={phase} plan={plan} busy={busy}
       onChangeState={onChangeState} onMove={onMove} onRemove={onRemove} />
     <div className="space-y-5 px-4 py-4">
-      <PhaseEditorAlerts phase={phase} editable={plan.editable} />
+      <PhaseEditorAlerts phase={phase} plan={plan} />
       <PhaseDefinition draft={draft} readOnly={definitionReadOnly} onChange={onChange}
         blockedGrades={fullGrades(plan.phases, draft.id).filter((grade) => grade !== phase?.grade)} />
       <section>
@@ -509,8 +578,15 @@ function PhaseEditorHeader({ draft, phase, plan, busy, onChangeState, onMove, on
   </div>;
 }
 
-function PhaseEditorAlerts({ phase, editable }: { phase: Phase | undefined; editable: boolean }) {
+function PhaseEditorAlerts({ phase, plan }: { phase: Phase | undefined; plan: Plan }) {
+  const editable = plan.editable;
+  const closed = phase?.state === "open" && !phase.active;
+  const blockedBy = editable && phase?.state === "locked" ? laterOpenPhaseOfGrade(plan, phase) : undefined;
   return <>
+    {editable && closed && <InlineAlert tone="info" icon={<Lock className="h-4 w-4" />} title="Closed for Mentors."
+      copy={`A later Phase is Active for Grade ${phase.grade}. Mentors can read this Phase's Notes but cannot add or change them.`} />}
+    {blockedBy && <InlineAlert tone="warning" icon={<Lock className="h-4 w-4" />} title="This Phase cannot be opened."
+      copy={`Phase ${blockedBy.number}, a later Phase for Grade ${blockedBy.grade}, is already Open.`} />}
     {phase?.used && <InlineAlert tone="info" icon={<Snowflake className="h-4 w-4" />} title="Definition frozen."
       copy="A Mentor has saved Notes for this Phase. Title, Grade, Guidance, Questions, and position are now read-only." />}
     {!editable && <InlineAlert tone="info" icon={<History className="h-4 w-4" />} title="Historical Phase Plan."
@@ -649,7 +725,9 @@ function PhaseLifecycleActions({ phase, plan, busy, onChangeState, onMove, onRem
   const canMoveDown = mutable && phaseIsMutable(gradeNeighbour(plan.phases, phase, 1), plan.editable);
   return <div className="flex items-center gap-2">
     <Button type="button" variant={phase.state === "locked" ? "primary" : "secondary"}
-      onClick={() => void onChangeState(phase)} disabled={busy || phase.frozen || phase.used}>
+      onClick={() => void onChangeState(phase)}
+      disabled={busy || phase.frozen || phase.used ||
+        (phase.state === "locked" && !!laterOpenPhaseOfGrade(plan, phase))}>
       {phase.state === "locked"
         ? <><Eye aria-hidden="true" className="h-4 w-4" /> Open Phase</>
         : <><EyeOff aria-hidden="true" className="h-4 w-4" /> Return to Locked</>}

@@ -38,11 +38,11 @@ function dispatchTraverse(navigation: EventTarget, destinationKey: string) {
 const adminDetail = (overrides: Partial<OpenPhase> = {}): HolisticStudentPhaseDetail => ({
   student: { id: 41, name: "Meera Singh", externalStudentId: "S41", grade: 12 as const },
   phases: [
-    { phaseId: 70, number: 5, title: "Reconnecting", locked: false as const, active: false, progress: "completed" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027" },
-    { phaseId: 73, number: 6, title: "Decision Making", locked: false as const, active: true, progress: "pending" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027" },
+    { phaseId: 70, number: 5, title: "Reconnecting", locked: false as const, active: false, closed: true, progress: "completed" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027" },
+    { phaseId: 73, number: 6, title: "Decision Making", locked: false as const, active: true, closed: false, progress: "pending" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027" },
   ],
   selectedPhase: {
-    phaseId: 73, number: 6, title: "Decision Making", locked: false as const, active: true,
+    phaseId: 73, number: 6, title: "Decision Making", locked: false as const, active: true, closed: false,
     progress: "pending" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027",
     revision: 5, mappingId: 300, notesRevision: 0, canEditNotes: false,
     guidanceMarkdown: "## Prepare\nListen first.",
@@ -61,9 +61,9 @@ const adminDetail = (overrides: Partial<OpenPhase> = {}): HolisticStudentPhaseDe
 
 const teacherDetail = (notes: OpenPhase["notes"] = null): HolisticStudentPhaseDetail => ({
   student: { id: 41, name: "Asha Rao", externalStudentId: "S41", grade: 11 as const },
-  phases: [{ phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true, progress: "pending" as const, draftSaved: false, grade: 11 as const, academicYear: "2026-2027" }],
+  phases: [{ phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true, closed: false, progress: "pending" as const, draftSaved: false, grade: 11 as const, academicYear: "2026-2027" }],
   selectedPhase: {
-    phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true,
+    phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true, closed: false,
     progress: "pending" as const, draftSaved: false, grade: 11 as const, academicYear: "2026-2027",
     revision: 5, mappingId: 300, notesRevision: notes?.revision ?? 0, canEditNotes: true, guidanceMarkdown: "Listen.",
     context: { label: null, items: [] as [], missing: "No previous session notes available" as const },
@@ -144,11 +144,11 @@ describe("StudentPhaseWorkspace", () => {
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={{
       student: { id: 41, name: "Asha Rao", externalStudentId: "S41", grade: 12 },
       phases: [
-        { phaseId: 70, number: 4, title: "Building confidence", locked: false, active: false, progress: "completed", draftSaved: false, grade: 11, academicYear: "2025-2026" },
-        { phaseId: 73, number: 5, title: "Next steps", locked: false, active: true, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 70, number: 4, title: "Building confidence", locked: false, active: false, closed: true, progress: "completed", draftSaved: false, grade: 11, academicYear: "2025-2026" },
+        { phaseId: 73, number: 5, title: "Next steps", locked: false, active: true, closed: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
       ],
       selectedPhase: {
-        phaseId: 73, number: 5, title: "Next steps", locked: false, active: true,
+        phaseId: 73, number: 5, title: "Next steps", locked: false, active: true, closed: false,
         progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027",
         guidanceMarkdown: "## Prepare\nListen first.",
         context: { label: "From Phase 4 - Building confidence", items: [{ label: "What helped?", content: "A weekly plan" }], lastUpdatedAt: "2026-05-03T00:00:00Z" },
@@ -201,7 +201,7 @@ describe("StudentPhaseWorkspace", () => {
       ...base,
       phases: [
         ...base.phases,
-        { phaseId: 74, number: 7, title: "Looking ahead", locked: false, active: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 74, number: 7, title: "Looking ahead", locked: false, active: true, closed: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
         { phaseId: 75, number: 8, title: "Wrap-up", locked: true },
       ],
     }} />);
@@ -730,9 +730,10 @@ describe("StudentPhaseWorkspace", () => {
       ...base,
       student: { ...base.student, grade: 12 },
       phases: [
-        { phaseId: 75, number: 2, title: "Start Grade 12", locked: false, active: true, progress: "completed", draftSaved: false, grade: 12, academicYear: "2026-2027" },
-        { phaseId: 76, number: 3, title: "Study choices", locked: false, active: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
-        { phaseId: 77, number: 4, title: "Staying on track", locked: false, active: false, progress: "skipped", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        // Phase 4 is the Active one; Phases 2 and 3 closed when it opened.
+        { phaseId: 75, number: 2, title: "Start Grade 12", locked: false, active: false, closed: true, progress: "completed", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 76, number: 3, title: "Study choices", locked: false, active: false, closed: true, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 77, number: 4, title: "Staying on track", locked: false, active: true, closed: false, progress: "skipped", draftSaved: false, grade: 12, academicYear: "2026-2027" },
         { phaseId: 78, number: 5, title: "Next steps", locked: true },
       ],
       selectedPhase: {
@@ -750,7 +751,7 @@ describe("StudentPhaseWorkspace", () => {
     const tabs = screen.getAllByRole("tab");
     expect(tabs).toHaveLength(4);
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Phase 2Completed", "Phase 3Open", "Phase 4Skipped", "Phase 5Locked",
+      "Phase 2Completed", "Phase 3Closed", "Phase 4Skipped", "Phase 5Locked",
     ]);
     const selectedTab = screen.getByRole("tab", { name: "Phase 2 - Start Grade 12 - Completed" });
     expect(selectedTab)
@@ -773,7 +774,7 @@ describe("StudentPhaseWorkspace", () => {
       ...base,
       phases: [
         ...base.phases,
-        { phaseId: 74, number: 2, title: "Follow up", locked: false, active: false, progress: "pending", draftSaved: false, grade: 11, academicYear: "2026-2027" },
+        { phaseId: 74, number: 2, title: "Follow up", locked: false, active: false, closed: true, progress: "pending", draftSaved: false, grade: 11, academicYear: "2026-2027" },
       ],
     };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ revision: 1 }), { status: 200 }));
@@ -1333,6 +1334,113 @@ describe("StudentPhaseWorkspace", () => {
         detail={adminDetail({ context })} />);
       expect(screen.getByText(context.items[0].content)).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Challenge Categories" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Closed Phases (#536)", () => {
+    const submittedNotes = {
+      state: "submitted" as const, revision: 2, authorName: "Nila Sen",
+      firstSubmittedAt: "2026-07-05T00:00:00Z", lastEditedAt: "2026-07-06T00:00:00Z",
+      answers: [{ questionId: 91, question: "What helped?", answer: "A weekly plan" }],
+      challengeCategories: [],
+    };
+
+    // The Mentor is on Phase 1, which closed when Phase 2 opened for the Grade.
+    function closedTeacherDetail(notes: OpenPhase["notes"], progress: "completed" | "pending" | "skipped") {
+      const detail = teacherDetail(notes);
+      const closedPhase = { ...detail.phases[0], active: false, closed: true, progress, draftSaved: notes?.state === "draft" };
+      detail.phases = [
+        closedPhase,
+        { phaseId: 74, number: 2, title: "Follow up", locked: false, active: true, closed: false, progress: "pending", draftSaved: false, grade: 11, academicYear: "2026-2027" },
+      ];
+      Object.assign(detail.selectedPhase, closedPhase, { canEditNotes: false });
+      return detail;
+    }
+
+    it("shows submitted Notes read-only with a closed notice and no way to edit or add", () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={closedTeacherDetail(submittedNotes, "completed")} />);
+
+      expect(screen.getByRole("note")).toHaveTextContent(
+        "This Phase is closed. You can read its Notes, but Notes can be added or changed only in the Active Phase."
+      );
+      expect(screen.getByText("A weekly plan")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Edit Notes" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Submit Notes/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+
+      const addFollowUp = within(screen.getByRole("region", { name: "Follow-up Notes" }))
+        .getByRole("button", { name: "Add notes" });
+      expect(addFollowUp).toBeDisabled();
+      expect(addFollowUp).toHaveAccessibleDescription("This Phase is closed");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps a completed Closed Phase labelled Completed and the other Phase Open", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={closedTeacherDetail(submittedNotes, "completed")} />);
+
+      expect(screen.getAllByRole("tab").map((tab) => tab.textContent))
+        .toEqual(["Phase 1Completed", "Phase 2Open"]);
+    });
+
+    it.each(["pending", "skipped"] as const)(
+      "labels a Closed Phase left %s as Closed and offers no Notes form",
+      (progress) => {
+        render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+          detail={closedTeacherDetail(null, progress)} />);
+
+        expect(screen.getByRole("tab", { name: "Phase 1 - Belonging - Closed" })).toBeInTheDocument();
+        expect(screen.getByRole("note")).toHaveTextContent("This Phase is closed.");
+        expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Submit Notes/ })).not.toBeInTheDocument();
+        expect(screen.getByText("Not submitted")).toBeInTheDocument();
+      }
+    );
+
+    it("shows the author their unsubmitted draft read-only, without autosaving", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={closedTeacherDetail({ ...submittedNotes, state: "draft", firstSubmittedAt: null }, "pending")} />);
+
+      expect(screen.getByText("A weekly plan")).toBeInTheDocument();
+      expect(screen.getByText(/Draft saved/)).toBeInTheDocument();
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Submit Notes/ })).not.toBeInTheDocument();
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("does not show the closed notice on the Active Phase", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "What helped?" })).toBeInTheDocument();
+    });
+
+    it("tells an Admin that a Closed Phase's submitted Notes are final", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
+        active: false, closed: true, progress: "completed",
+        notes: { ...submittedNotes, answers: [{ questionId: 91, question: "Which decision is the student working through?", answer: "A weekly plan" }] },
+      })} />);
+
+      expect(screen.getByText("Closed Phase - Completed")).toBeInTheDocument();
+      expect(screen.getByText("These Notes are final. Notes in a Closed Phase can no longer be changed, by the Mentor or anyone else."))
+        .toBeInTheDocument();
+      expect(screen.queryByText("Read-only for Admins")).not.toBeInTheDocument();
+    });
+
+    it("tells an Admin when a Phase closed without Notes", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={adminDetail({ active: false, closed: true, progress: "pending" })} />);
+
+      expect(screen.getByText("Closed Phase - Pending")).toBeInTheDocument();
+      expect(screen.getByText("Closed without Notes")).toBeInTheDocument();
+      expect(screen.getByText("This Phase closed before the Mentor submitted Notes. Notes can no longer be added to it."))
+        .toBeInTheDocument();
     });
   });
 

@@ -665,7 +665,37 @@ async function validatePhaseStateChange(
   if (input.state === "locked" && (phase.used || phase.frozen_at)) {
     return { ok: false, status: 422, error: "A used Phase cannot return to Locked" };
   }
-  return input.state === "open" ? validateOpenReadiness(client, input.phaseId) : null;
+  if (input.state === "locked") return null;
+  return await validateOpenOrder(client, input.phaseId) ??
+    validateOpenReadiness(client, input.phaseId);
+}
+
+// Opening a Phase closes the Grade's earlier Phases (#536). A Phase ordered
+// before one that is already Open would be Closed the moment it opened, so it
+// cannot be opened.
+async function validateOpenOrder(
+  client: PoolClient,
+  phaseId: number
+): Promise<PhasePlanResult | null> {
+  const later = await client.query<{ number: number | string }>(
+    `SELECT (SELECT COUNT(*) FROM holistic_mentorship_phases numbered
+             WHERE numbered.phase_plan_id = later.phase_plan_id
+               AND numbered.position <= later.position) AS number
+     FROM holistic_mentorship_phases target
+     JOIN holistic_mentorship_phases later
+       ON later.phase_plan_id = target.phase_plan_id AND later.grade_id = target.grade_id
+      AND later.state = 'open' AND later.position > target.position
+     WHERE target.id = $1
+     ORDER BY later.position DESC LIMIT 1`,
+    [phaseId]
+  );
+  return later.rows[0]
+    ? {
+        ok: false,
+        status: 422,
+        error: `Phase ${Number(later.rows[0].number)} is already Open for this Grade, so an earlier Phase cannot be opened`,
+      }
+    : null;
 }
 
 async function setPhaseStateTransaction(
@@ -712,6 +742,108 @@ export async function setHolisticPhaseState(input: {
 } & AuditActor): Promise<PhasePlanResult> {
   if (!input.confirmed) return { ok: false, status: 422, error: "Confirmation is required" };
   return withTransaction((client) => setPhaseStateTransaction(client, input));
+}
+
+export type HolisticPhaseOpenImpact = {
+  /**
+   * The Grade's Active Phase today, which opening this Phase closes for
+   * Mentors. null when the Grade has no Open Phase yet.
+   */
+  closing: {
+    number: number;
+    title: string;
+    /** Currently assigned Mentees of the Grade with no submitted Notes in it. */
+    menteesWithoutNotes: number;
+    /** How many of those have a saved, unsubmitted draft with content. */
+    unsubmittedDrafts: number;
+  } | null;
+};
+
+// What an Admin is told before opening a Locked Phase: who can still write in
+// the Phase about to close. The Mentee set is the Mentor write scope's.
+export async function getHolisticPhaseOpenImpact(
+  programId: number,
+  phaseId: number
+): Promise<HolisticPhaseOpenImpact | null> {
+  const [target] = await query<{
+    phase_plan_id: number | string;
+    grade_id: number | string;
+    grade: number | string;
+    position: number;
+    academic_year: string;
+  }>(
+    `SELECT phase.phase_plan_id, phase.grade_id, grade.number AS grade, phase.position,
+            plan.academic_year
+     FROM holistic_mentorship_phases phase
+     JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+     JOIN grade ON grade.id = phase.grade_id
+     WHERE phase.id = $1 AND plan.program_id = $2 AND phase.state = 'locked'`,
+    [phaseId, programId]
+  );
+  if (!target) return null;
+
+  const [active] = await query<{ id: number | string; title: string; number: number | string }>(
+    `SELECT active.id, active.title,
+            (SELECT COUNT(*) FROM holistic_mentorship_phases numbered
+             WHERE numbered.phase_plan_id = active.phase_plan_id
+               AND numbered.position <= active.position) AS number
+     FROM holistic_mentorship_phases active
+     WHERE active.phase_plan_id = $1 AND active.grade_id = $2 AND active.state = 'open'
+       AND active.position < $3
+       AND NOT EXISTS (
+         SELECT 1 FROM holistic_mentorship_phases later
+         WHERE later.phase_plan_id = active.phase_plan_id AND later.grade_id = active.grade_id
+           AND later.state = 'open' AND later.position > active.position
+       )`,
+    [Number(target.phase_plan_id), Number(target.grade_id), target.position]
+  );
+  if (!active) return { closing: null };
+
+  const [counts] = await query<{ without_notes: number | string; drafts: number | string }>(
+    `WITH mentees AS (
+       SELECT mapping.student_id
+       FROM holistic_mentorship_mentor_mentee_mappings mapping
+       JOIN student st ON st.id = mapping.student_id AND st.status IS DISTINCT FROM 'dropout'
+       JOIN LATERAL (
+         SELECT MIN(roster_student.grade) AS grade
+         FROM centre_students roster_student
+         JOIN centres roster_centre
+           ON roster_centre.id = roster_student.centre_id
+          AND roster_centre.school_id = mapping.school_id
+          AND roster_centre.program_id = mapping.program_id
+          AND roster_centre.is_active IS TRUE
+         WHERE roster_student.user_id = st.user_id
+           AND roster_student.academic_year = mapping.academic_year
+           AND roster_student.program_id = mapping.program_id
+           AND roster_student.grade IN (11, 12)
+         HAVING COUNT(DISTINCT roster_student.grade) = 1
+       ) current_roster ON current_roster.grade = $3
+       WHERE mapping.program_id = $1 AND mapping.academic_year = $2 AND mapping.ended_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
+           WHERE deletion.student_id = mapping.student_id
+         )
+     )
+     SELECT COUNT(DISTINCT mentees.student_id)
+              FILTER (WHERE notes.state IS DISTINCT FROM 'submitted') AS without_notes,
+            COUNT(DISTINCT mentees.student_id) FILTER (WHERE notes.state = 'draft' AND (
+              EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
+                      WHERE answer.notes_id = notes.id)
+              OR EXISTS (SELECT 1 FROM holistic_mentorship_post_session_note_challenges challenge
+                         WHERE challenge.notes_id = notes.id))) AS drafts
+     FROM mentees
+     LEFT JOIN holistic_mentorship_post_session_notes notes
+       ON notes.student_id = mentees.student_id AND notes.phase_id = $4`,
+    [programId, target.academic_year, Number(target.grade), Number(active.id)]
+  );
+  return {
+    closing: {
+      number: Number(active.number),
+      title: active.title,
+      menteesWithoutNotes: Number(counts?.without_notes ?? 0),
+      unsubmittedDrafts: Number(counts?.drafts ?? 0),
+    },
+  };
 }
 
 type DeletePhaseInput = {

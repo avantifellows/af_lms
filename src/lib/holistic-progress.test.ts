@@ -381,6 +381,8 @@ describe("Holistic progress", () => {
     });
     expect(sql).toContain("$3::bigint IS NULL OR selected_phase.id IS NOT NULL");
     expect(sql).toContain("THEN 'active'");
+    // An opened Phase that is not the Grade's Active one is Closed (#536).
+    expect(sql).toContain("ELSE 'closed' END AS phase_availability");
     expect(sql).toContain("WHEN notes.state = 'submitted' THEN 'completed'");
     expect(sql).toContain("ELSE 'pending'");
     expect(sql).toContain("notes.state = 'submitted' THEN notes.last_edited_at");

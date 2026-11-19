@@ -7,6 +7,7 @@ import {
   addHolisticPhase,
   createHolisticPhasePlan,
   deleteHolisticPhase,
+  getHolisticPhaseOpenImpact,
   getHolisticPhasePlan,
   reorderHolisticPhases,
   setHolisticPhaseState,
@@ -199,6 +200,14 @@ export async function GET(request: NextRequest) {
   if (!programId) return holisticApiError("Invalid Program");
   const { access } = await sessionAccess("phase_configuration_read", programId);
   if (!access.ok) return holisticApiError(access.error, access.status);
+  // What opening this Locked Phase would close, for the Admin's confirmation.
+  const impactPhase = request.nextUrl.searchParams.get("open_impact_phase_id");
+  if (impactPhase !== null) {
+    const phaseId = positiveInteger(Number(impactPhase));
+    if (!phaseId) return holisticApiError("Invalid Phase");
+    const impact = await getHolisticPhaseOpenImpact(programId, phaseId);
+    return impact ? NextResponse.json({ impact }) : holisticApiError("Phase not found", 404);
+  }
   const academicYear = request.nextUrl.searchParams.get("academic_year") ?? CURRENT_ACADEMIC_YEAR;
   if (!validateAcademicYear(academicYear)) return holisticApiError("Invalid Academic Year");
   return NextResponse.json({ plan: await getHolisticPhasePlan(academicYear, programId) });

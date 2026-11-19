@@ -198,12 +198,45 @@ Evidence: sibling `release-records/holistic-phase-label-20260917/` and
 
 Mentor-owned Holistic writes (Post-Session Notes and Follow-up Notes) share one
 guard in `src/lib/holistic-mentor-write-scope.ts`. `loadHolisticMentorWriteScope(client, { studentId, phaseId, schoolId, programId, academicYear })`
-runs inside the caller's transaction and takes `FOR UPDATE OF mapping, phase`. It requires
+runs inside the caller's transaction and takes `FOR UPDATE OF mapping, phase FOR SHARE OF plan`. It requires
 an active Mapping, a non-dropout Student, a single current Grade 11/12 roster Grade, no
 privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 11 Phase
 for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
 itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
-missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+missing scope or a non-Mentor actor, 422 `Phase is not Open` for a Locked Phase, and 422
+`This Phase is closed. …` (`HOLISTIC_PHASE_CLOSED_ERROR`) for a Closed one. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+
+### Closed Phases (#536)
+
+Only the **Active Phase** of the Mentee's current Grade takes Mentor writes: the latest
+ordered `open` Phase of the current Academic Year's Plan for that Grade. Every other
+opened Phase is **Closed**: an earlier Open Phase of the Grade, and every prior-year Phase.
+Closed is derived, never stored (`holistic_mentorship_phases.state` is still only
+`locked` / `open`; no db-service change).
+
+- **Write path:** the loader returns `phase_active`. After the scope query has share-locked
+  the Plan row, it reads the Grade's latest Open Phase in a **second statement**. Every Phase
+  state change locks the Plan row `FOR UPDATE` (`getMutablePhase`), so a write that raced an
+  Admin opening the next Phase waits, then sees the new Phase and is refused. Keep it two
+  statements: a subquery in the scope query would read the snapshot taken before the wait.
+  A prior-year or Locked Phase skips the second read.
+- **Read model:** `getHolisticStudentPhase` adds `closed` to every unlocked Phase summary and
+  to the selected Phase, with the same rule; `canEditNotes` is false when closed. Mentor tabs
+  read Closed instead of Open/Skipped (Completed stays Completed); the selected Phase shows a
+  closed notice, read-only Notes (an author still reads their unsubmitted draft) and a
+  disabled Add notes. Admin/PM drill-down says "Closed Phase" and "Closed without Notes".
+- **Progress:** `phaseState` / the CSV **Availability** column is `active` | `closed` | `locked`
+  (`closed` replaced `open`). Derived Pending / Skipped / Completed progress is unchanged.
+- **Phase Setup:** `setHolisticPhaseState` refuses to open a Phase ordered before an Open Phase
+  of the same Grade (`validateOpenOrder`, 422). `GET /api/holistic-mentorship/phase-plans?program_id=&open_impact_phase_id=`
+  (gate `phase_configuration_read`) returns `getHolisticPhaseOpenImpact`: the Phase that will
+  close and counts only (assigned Mentees of the Grade without submitted Notes in it, and how
+  many of those hold a draft with content), over the write scope's Mentee set. `PhasePlanSetup`
+  puts them in the Open Phase confirmation; a failed count still warns that the Phase closes.
+- **Undo:** returning the unused Active Phase to Locked makes the previous Open Phase Active
+  and writable again. There is no other reopen.
+- **Tests:** `holistic-closed-phases.integration.test.ts` (opt-in `HOLISTIC_NOTES_TEST_DATABASE`,
+  real Postgres, including the racing-write case), plus the unit tests beside each module.
 
 ## Holistic Follow-up Notes (#377)
 
@@ -218,7 +251,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   normalises answers with `normalizeHolisticFollowUpAnswers`, then `addHolisticFollowUpNote`
   runs one transaction: the per-Student privacy advisory lock first (same order as privacy
   deletion), then the shared Mentor write-scope loader's `FOR UPDATE` on Mapping/Phase
-  (404/422), then a submitted Post-Session Notes check (422), then `INSERT ... RETURNING id`.
+  (404/422, including 422 for a Closed Phase, #536), then a submitted Post-Session Notes check (422), then `INSERT ... RETURNING id`.
   The trigger re-takes the same advisory lock. Success is 201 `{ id }`; the UI refreshes server
   data.
 - **Read audience:** the same as submitted Post-Session Notes. `getHolisticStudentPhase` loads

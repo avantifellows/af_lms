@@ -84,6 +84,11 @@ export type HolisticPhaseSummary =
       academicYear: string;
       locked: false;
       active: boolean;
+      /**
+       * Opened, but no longer the Active Phase of the Mentee's current Grade:
+       * Notes stay readable and nothing can be added or changed (#536).
+       */
+      closed: boolean;
       progress: HolisticPhaseProgress;
       draftSaved: boolean;
     };
@@ -347,6 +352,7 @@ type OpenSelectedPhaseParams = {
   questionsByPhase: Map<number, Array<{ questionId: number; text: string; position: number }>>;
   progress: Map<number, HolisticPhaseProgress>;
   active: Map<string, number>;
+  academicYear: string;
   profileRows: ProfileRow[];
   historicalRows: HistoricalRow[];
   currentGrade: 11 | 12;
@@ -667,11 +673,23 @@ function studentSummary(student: StudentRow, grade: 11 | 12) {
   };
 }
 
+function isActivePhase(phase: NumberedPhase, active: Map<string, number>) {
+  return active.get(`${phase.academic_year}:${phase.grade}`) === phase.id;
+}
+
+// The same rule as the Mentor write scope: only the Active Phase of the viewed
+// Academic Year's Plan takes writes. An earlier Open Phase, and a prior-year
+// Grade 11 Phase shown to a Grade 12 Mentee, are Closed.
+function isClosedPhase(phase: NumberedPhase, active: Map<string, number>, academicYear: string) {
+  return !(isActivePhase(phase, active) && phase.academic_year === academicYear);
+}
+
 function summarizePhase(
   phase: NumberedPhase | { phaseId: null; number: number; title: string; placeholder: true },
   notesByPhase: Map<number, PhaseNotes>,
   progress: Map<number, HolisticPhaseProgress>,
-  active: Map<string, number>
+  active: Map<string, number>,
+  academicYear: string
 ): HolisticPhaseSummary {
   if (!("id" in phase)) return phase;
   if (phase.state === "locked") {
@@ -685,7 +703,8 @@ function summarizePhase(
     grade: phase.grade,
     academicYear: phase.academic_year,
     locked: false,
-    active: active.get(`${phase.academic_year}:${phase.grade}`) === phase.id,
+    active: isActivePhase(phase, active),
+    closed: isClosedPhase(phase, active, academicYear),
     progress: progress.get(phase.id) ?? "pending",
     draftSaved: notes?.state === "draft",
   };
@@ -775,6 +794,7 @@ function canEditSelectedNotes(
 ) {
   if (!teacher) return false;
   if (!params.canEdit) return false;
+  if (isClosedPhase(params.selected, params.active, params.academicYear)) return false;
   if (!notes) return true;
   if (notes.authorUserId === params.actorUserId) return true;
   return erasedDraft;
@@ -792,8 +812,8 @@ function openSelectedPhase(params: OpenSelectedPhaseParams) {
     grade: params.selected.grade,
     academicYear: params.selected.academic_year,
     locked: false as const,
-    active: params.active.get(`${params.selected.academic_year}:${params.selected.grade}`) ===
-      params.selected.id,
+    active: isActivePhase(params.selected, params.active),
+    closed: isClosedPhase(params.selected, params.active, params.academicYear),
     progress: params.progress.get(params.selected.id) ?? "pending",
     draftSaved: notes?.state === "draft" && !erasedDraft,
     revision: params.selected.revision,
@@ -861,8 +881,9 @@ export async function getHolisticStudentPhase(params: {
     notesByPhase,
   });
   const active = activePhases(numbered);
-  const phases = applicable.map((phase) => summarizePhase(phase, notesByPhase, progress, active));
-  const selectedSummary = summarizePhase(selected, notesByPhase, progress, active);
+  const phases = applicable.map((phase) =>
+    summarizePhase(phase, notesByPhase, progress, active, params.academicYear));
+  const selectedSummary = summarizePhase(selected, notesByPhase, progress, active, params.academicYear);
   const readOnly = params.role !== "teacher" || !params.canEdit;
   if (selected.state === "locked") {
     return {
@@ -883,6 +904,7 @@ export async function getHolisticStudentPhase(params: {
       questionsByPhase,
       progress,
       active,
+      academicYear: params.academicYear,
       profileRows,
       historicalRows,
       currentGrade,

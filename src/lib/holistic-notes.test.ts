@@ -3,10 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
 import { query, withTransaction } from "./db";
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "./holistic-mentor-write-scope";
 import { saveHolisticNotes } from "./holistic-notes";
 
 const mockWithTransaction = vi.mocked(withTransaction);
 const mockQuery = vi.mocked(query);
+
+// The scope row's Plan columns, and the read after it that finds Phase 73 to be
+// the Active Phase of that Plan and Grade.
+const currentPlan = { phase_plan_id: "7", phase_grade_id: "3", current_year_plan: true };
+const activePhase73 = { rows: [{ id: "73" }] };
 
 describe("Holistic Post-Session Notes", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -34,7 +40,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("does not create Notes for a valid empty initial draft", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
@@ -51,7 +58,7 @@ describe("Holistic Post-Session Notes", () => {
       challengeCategories: [],
     })).resolves.toEqual({ ok: true, changed: false, revision: 0 });
 
-    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   it("does not restore Notes content for a tombstoned Student", async () => {
@@ -77,16 +84,12 @@ describe("Holistic Post-Session Notes", () => {
     );
   });
 
-  it("allows applicable prior-year Grade 11 Notes for a current Grade 12 Mentee", async () => {
+  it("finds a prior-year Grade 11 Phase for a current Grade 12 Mentee, and treats it as Closed", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
-      .mockResolvedValueOnce({ rows: [{ id: "91" }] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
-      .mockResolvedValue({ rows: [] }) };
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open", ...currentPlan, current_year_plan: false }] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
-    await saveHolisticNotes({
+    await expect(saveHolisticNotes({
       programId: 1,
       mode: "draft",
       studentId: 41,
@@ -97,8 +100,10 @@ describe("Holistic Post-Session Notes", () => {
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "Finish earlier work" }],
       challengeCategories: [],
-    });
+    })).resolves.toEqual({ ok: false, status: 422, error: HOLISTIC_PHASE_CLOSED_ERROR });
 
+    // Only the scope read ran: no Active-Phase read, and nothing was written.
+    expect(client.query).toHaveBeenCalledOnce();
     expect(client.query.mock.calls[0][1]).toEqual([70, 41, 4, 1, "2026-2027", "2025-2026"]);
     const sql = String(client.query.mock.calls[0][0]);
     expect(sql).toContain("phase_grade.number = current_roster.grade");
@@ -108,9 +113,39 @@ describe("Holistic Post-Session Notes", () => {
     expect(sql).toContain("holistic_mentorship_privacy_deletions");
   });
 
+  it.each([
+    ["draft", { expectedRevision: 0 }],
+    ["submit", { expectedRevision: 1, expectedMappingId: 300, expectedPhaseRevision: 5, confirmed: true }],
+    ["edit", { expectedRevision: 2, expectedMappingId: 300, expectedPhaseRevision: 5, confirmed: true }],
+  ] as const)("rejects a %s on an Open Phase once a later Phase is the Active one", async (mode, tokens) => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open", ...currentPlan }] })
+      // Phase 75, opened later for the same Grade, is the Active Phase.
+      .mockResolvedValueOnce({ rows: [{ id: "75" }] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await expect(saveHolisticNotes({
+      programId: 1,
+      mode,
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      answers: [{ questionId: 91, answer: "A late answer" }],
+      challengeCategories: ["academic.exam_related", "non_academic.time_management"],
+      ...tokens,
+    })).resolves.toEqual({ ok: false, status: 422, error: HOLISTIC_PHASE_CLOSED_ERROR });
+
+    // The scope read and the Active-Phase read, then nothing: no Notes read or write.
+    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query.mock.calls[1][1]).toEqual([7, 3]);
+  });
+
   it("creates and freezes the first non-empty draft atomically", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }, { id: "92" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
@@ -133,7 +168,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("rejects Submit until every configured Question has an answer", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }, { id: "92" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 2 }] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
@@ -160,7 +196,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("submits a complete current draft with optimistic revisions", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }, { id: "92" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 2 }] })
       .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
@@ -189,7 +226,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("does not let a replacement Mentor edit another author's submitted Notes", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "submitted", revision: 3 }] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
@@ -213,7 +251,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("lets a replacement Mentor claim an erased draft without receiving its revision", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 4, has_content: false }] })
       .mockResolvedValueOnce({ rows: [{ revision: 5 }] })
@@ -240,7 +279,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("lets the same Mentor continue an empty draft at its current revision", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 2, has_content: false }] })
       .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
@@ -267,7 +307,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("corrects the author's submitted Notes without another Submit", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "submitted", revision: 3 }] })
       .mockResolvedValueOnce({ rows: [{ revision: 4 }] })
@@ -293,7 +334,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("creates and freezes a Categories-only first draft", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
@@ -342,7 +384,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("stores the trimmed draft Category codes", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
@@ -369,7 +412,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("does not let a replacement Mentor claim a draft that still holds Categories", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 4, has_content: true }] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
@@ -399,7 +443,8 @@ describe("Holistic Post-Session Notes", () => {
       existingState = overrides.mode === "edit" ? "submitted" : "draft",
     ) => {
       const client = { query: vi.fn()
-        .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+        .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+        .mockResolvedValueOnce(activePhase73)
         .mockResolvedValueOnce({ rows: [{ id: "91" }] })
         .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: existingState, revision: 2, has_content: true }] }) };
       mockWithTransaction.mockImplementation(async (work) => work(client as never));
@@ -450,7 +495,8 @@ describe("Holistic Post-Session Notes", () => {
 
   it("returns the safe current revision without replacing a stale draft", async () => {
     const client = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" , ...currentPlan }] })
+      .mockResolvedValueOnce(activePhase73)
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
       .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 3 }] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
@@ -472,7 +518,7 @@ describe("Holistic Post-Session Notes", () => {
       error: "Notes changed; reload the latest version",
       currentRevision: 3,
     });
-    expect(client.query).toHaveBeenCalledTimes(3);
+    expect(client.query).toHaveBeenCalledTimes(4);
   });
 
   it("returns 409 when concurrent first drafts race on the logical Notes set", async () => {
