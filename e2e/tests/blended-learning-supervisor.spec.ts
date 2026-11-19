@@ -1,6 +1,7 @@
 import { test, expect, signInAs } from "../fixtures/auth";
 import type { Page } from "@playwright/test";
 import { getTestPool } from "../helpers/db";
+import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 import {
   BLENDED_MENTOR_A,
   BLENDED_MENTOR_B,
@@ -234,6 +235,76 @@ test.describe("Blended Learning supervisor view", () => {
     await mentor.selectOption({ label: "My students" });
     await expect(page).toHaveURL(/mentor=\d+/);
     await expect(feed.getByText("No Mentor Flags match these filters.")).toBeVisible();
+  });
+
+  test("the Mentor filter goes by whose Student it is now: one moved from the lead to a reportee is the reportee's", async ({ page }) => {
+    const lataId = await studentId(SUPERVISOR_MENTEE);
+    const [leadId, mentorBId] = [await mentorId(BLENDED_SUPERVISOR.email), await mentorId(BLENDED_MENTOR_B.email)];
+    const comment = "Synthetic: flagged by the lead before the move";
+    // The lead logged and flagged Lata, then Lata moved to Mentor B. Undone below.
+    const added = await withPool(async (pool) => {
+      const conversation = await pool.query<{ id: string }>(
+        `INSERT INTO blended_learning_conversations
+           (student_id, program_id, academic_year, mentor_user_id, logged_by_email, kind, occurred_on,
+            mode, spoke_with, duration_minutes, summary)
+         VALUES ($1, $2, $3, $4, $5, 'conversation', (now() AT TIME ZONE 'Asia/Kolkata')::date - 5,
+                 'call', 'student', 10, 'Synthetic: before the move')
+         RETURNING id`,
+        [lataId, SUPERVISOR_MENTEE.programId, CURRENT_ACADEMIC_YEAR, leadId, BLENDED_SUPERVISOR.email]
+      );
+      const conversationId = Number(conversation.rows[0].id);
+      await pool.query(
+        `INSERT INTO blended_learning_mentor_flags (conversation_id, student_id, recipient, comment, raised_by_email, inserted_at)
+         VALUES ($1, $2, 'maths', $3, $4, now() - interval '5 days')`,
+        [conversationId, lataId, comment, BLENDED_SUPERVISOR.email]
+      );
+      const ended = await pool.query<{ id: string }>(
+        `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = now(), end_source = 'e2e_fixture', end_reason = 'reassigned'
+         WHERE student_id = $1 AND mentor_user_id = $2 AND academic_year = $3 AND ended_at IS NULL
+         RETURNING id`,
+        [lataId, leadId, CURRENT_ACADEMIC_YEAR]
+      );
+      const moved = await pool.query<{ id: string }>(
+        `INSERT INTO blended_learning_mentor_mentee_mappings
+           (student_id, mentor_user_id, program_id, academic_year, started_at, assignment_source)
+         VALUES ($1, $2, $3, $4, now(), 'e2e_fixture')
+         RETURNING id`,
+        [lataId, mentorBId, SUPERVISOR_MENTEE.programId, CURRENT_ACADEMIC_YEAR]
+      );
+      return { conversationId, endedMapping: Number(ended.rows[0].id), movedMapping: Number(moved.rows[0].id) };
+    });
+    try {
+      const feed = page.getByRole("region", { name: "Mentor Flags" });
+      await page.goto(`/blended-learning?tab=flags&mentor=${leadId}`);
+      await expect(feed.getByText("No Mentor Flags match these filters.")).toBeVisible();
+      await expect(feed.getByText(comment)).toHaveCount(0);
+
+      await page.goto(`/blended-learning?tab=flags&mentor=${mentorBId}`);
+      await expect(feed.getByText(comment)).toBeVisible();
+      await expect(feed.getByText(FEED_FLAGS.taraMaths.comment)).toBeVisible();
+    } finally {
+      await withPool(async (pool) => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(`DELETE FROM blended_learning_mentor_mentee_mappings WHERE id = $1`, [added.movedMapping]);
+          await client.query(
+            `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = NULL, end_source = NULL, end_reason = NULL WHERE id = $1`,
+            [added.endedMapping]
+          );
+          await client.query(`DELETE FROM blended_learning_mentor_flags WHERE conversation_id = $1`, [added.conversationId]);
+          // Conversations are append-only (a trigger); skip it for this test-DB cleanup only.
+          await client.query("SET LOCAL session_replication_role = replica");
+          await client.query(`DELETE FROM blended_learning_conversations WHERE id = $1`, [added.conversationId]);
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          client.release();
+        }
+      });
+    }
   });
 
   test("a supervisor gets no Manage page", async ({ page }) => {

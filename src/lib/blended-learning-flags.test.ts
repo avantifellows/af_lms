@@ -57,7 +57,7 @@ describe("listFlags", () => {
     expect(listSql).toContain("flag.inserted_at > $1::timestamp");
     expect(listSql).not.toContain("blended_learning_flag_views");
     // An admin's feed is not narrowed to one Mentor's Students.
-    expect(listParams).toEqual(["2026-10-21T09:30:00", 9001, null, null, 51, "2026-2027", false, null]);
+    expect(listParams).toEqual(["2026-10-21T09:30:00", 9001, null, null, 51, "2026-2027", false, null, null]);
     const [countSql, countParams] = mockQuery.mock.calls.find(([sql]) => /count\(\*\)/.test(sql))!;
     expect(countSql).not.toContain("blended_learning_flag_views");
     expect(countParams).toEqual(["2026-10-21T09:30:00", false, null, "2026-2027"]);
@@ -137,7 +137,7 @@ describe("a Mentor's flags", () => {
     const [, mentorParam, yearParam] = OWN_STUDENTS.exec(listSql)!;
     expect(listParams![Number(mentorParam) - 1]).toEqual([9001]);
     expect(listParams![Number(yearParam) - 1]).toBe("2026-2027");
-    expect(listParams).toEqual([null, null, "maths", null, 51, "2026-2027", true, [9001]]);
+    expect(listParams).toEqual([null, null, "maths", null, 51, "2026-2027", true, [9001], null]);
     const [countSql, countParams] = mockQuery.mock.calls.find(([sql]) => /count\(\*\)/.test(sql))!;
     expect(countSql).toMatch(OWN_STUDENTS);
     expect(countParams).toEqual([null, true, [9001], "2026-2027"]);
@@ -178,21 +178,48 @@ describe("a supervisor's flags", () => {
 
     const [listSql, listParams] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
     expect(listSql).toMatch(OWN_STUDENTS);
-    expect(listParams).toEqual([null, null, null, null, 51, "2026-2027", true, [9001, 9002]]);
+    expect(listParams).toEqual([null, null, null, null, 51, "2026-2027", true, [9001, 9002], null]);
     const [, countParams] = mockQuery.mock.calls.find(([sql]) => /count\(\*\)/.test(sql))!;
     expect(countParams).toEqual([null, true, [9001, 9002], "2026-2027"]);
   });
 
-  it("filters by their own or a supervised Mentor, and ignores any other Mentor", async () => {
+  it("filters by whose Student it is now (own or a supervised Mentor's), and ignores any other Mentor", async () => {
     mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 0 }] : []));
-    const mentorParam = async (mentorUserId: number) => {
+    const mentorParams = async (mentorUserId: number) => {
       mockQuery.mockClear();
       await listFlags(SUPERVISOR, { mentorUserId }, { lastSeenAt: null });
-      return mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))![1]![1];
+      const [, params] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
+      // [the Conversation's Mentor, the Student's current Mentor]
+      return [params![1], params![8]];
     };
 
-    expect(await mentorParam(9002)).toBe(9002);
-    expect(await mentorParam(9001)).toBe(9001);
-    expect(await mentorParam(9003)).toBeNull();
+    expect(await mentorParams(9002)).toEqual([null, 9002]);
+    expect(await mentorParams(9001)).toEqual([null, 9001]);
+    expect(await mentorParams(9003)).toEqual([null, null]);
+  });
+
+  it("matches the Mentor filter on the Student's active current-year Mapping, dropouts left out, not the flag's author", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 0 }] : []));
+
+    await listFlags(SUPERVISOR, { mentorUserId: 9001 }, { lastSeenAt: null });
+
+    const [sql, params] = mockQuery.mock.calls.find(([text]) => /AS in_scope/.test(text))!;
+    const filter = /\$9::bigint IS NULL OR EXISTS \(([\s\S]*?)\)\)\n/.exec(sql)![1];
+    expect(filter).toContain("FROM blended_learning_mentor_mentee_mappings current_mapping");
+    expect(filter).toContain("current_mapping.student_id = flag.student_id AND current_mapping.mentor_user_id = $9::bigint");
+    expect(filter).toContain("current_mapping.ended_at IS NULL");
+    expect(filter).toContain("dropout_student.status = 'dropout'");
+    expect(params![1]).toBeNull();
+  });
+});
+
+describe("an admin's Mentor filter", () => {
+  it("still matches the Mentor who logged the flagged Conversation", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 0 }] : []));
+
+    await listFlags(ADMIN, { mentorUserId: 9002 }, { lastSeenAt: null });
+
+    const [, params] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
+    expect([params![1], params![8]]).toEqual([9002, null]);
   });
 });
