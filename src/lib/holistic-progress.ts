@@ -629,12 +629,13 @@ export async function getHolisticProgressOptions(
   return {
     schools,
     mentors: mentors.map((mentor) => ({ userId: Number(mentor.user_id), name: mentor.name || mentor.email })),
+    // Listed by displayed number (Grade 11's Phases, then Grade 12's), not Plan order.
     phases: withHolisticPhaseNumbers(
       phases.map((phase) => ({ ...phase, grade: Number(phase.grade) as 11 | 12 }))
     ).map((phase) => ({
       id: Number(phase.id), number: phase.number, title: phase.title,
       grade: phase.grade, state: phase.state,
-    })),
+    })).sort((a, b) => a.number - b.number),
   };
 }
 

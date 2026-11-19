@@ -41,6 +41,11 @@ function fullGrades(phases: Phase[], exceptPhaseId?: number): Array<11 | 12> {
   );
 }
 
+// The Phase the list shows first: Grade 11's first, else Grade 12's first.
+function firstListedPhase(phases: Phase[]): Phase | undefined {
+  return phases.find((phase) => phase.grade === 11) ?? phases[0];
+}
+
 // The Phase just before (-1) or after (1) this one within its own Grade, in Plan order.
 function gradeNeighbour(phases: Phase[], phase: Phase, offset: -1 | 1): Phase | undefined {
   const sameGrade = phases.filter((item) => item.grade === phase.grade);
@@ -187,8 +192,8 @@ export default function PhasePlanSetup({
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!plan || draft || plan.phases.length === 0) return;
-    setDraft(draftFromPhase(plan.phases[0]));
+    const first = plan && !draft ? firstListedPhase(plan.phases) : undefined;
+    if (first) setDraft(draftFromPhase(first));
   }, [plan, draft]);
 
   async function request(method: string, payload: Record<string, unknown>, reload = true) {
@@ -241,9 +246,8 @@ export default function PhasePlanSetup({
   }
 
   function discard() {
-    if (selectedPhase) setDraft(draftFromPhase(selectedPhase));
-    else if (plan && plan.phases.length > 0) setDraft(draftFromPhase(plan.phases[0]));
-    else setDraft(null);
+    const shown = selectedPhase ?? firstListedPhase(plan?.phases ?? []);
+    setDraft(shown ? draftFromPhase(shown) : null);
     setMessage("");
   }
 
@@ -299,11 +303,13 @@ function AddPhaseButton({ phases, busy, onAdd }: {
   busy: boolean;
   onAdd: (grade: 11 | 12) => void;
 }) {
+  const noteId = useId();
   const full = fullGrades(phases);
   const openGrade = GRADES.find((grade) => !full.includes(grade));
   return <div className="flex flex-wrap items-center gap-3">
-    {!openGrade && <p className="text-xs text-text-muted">Each Grade already has {HOLISTIC_PHASES_PER_GRADE} Phases.</p>}
-    <Button type="button" onClick={() => openGrade && onAdd(openGrade)} disabled={busy || !openGrade}>
+    {!openGrade && <p id={noteId} className="text-xs text-text-muted">Each Grade already has {HOLISTIC_PHASES_PER_GRADE} Phases.</p>}
+    <Button type="button" onClick={() => openGrade && onAdd(openGrade)} disabled={busy || !openGrade}
+      aria-describedby={openGrade ? undefined : noteId}>
       <Plus className="h-4 w-4" aria-hidden="true" /> Add Phase
     </Button>
   </div>;
@@ -469,7 +475,7 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
     <div className="space-y-5 px-4 py-4">
       <PhaseEditorAlerts phase={phase} editable={plan.editable} />
       <PhaseDefinition draft={draft} readOnly={definitionReadOnly} onChange={onChange}
-        fullGrades={fullGrades(plan.phases, draft.id)} />
+        blockedGrades={fullGrades(plan.phases, draft.id).filter((grade) => grade !== phase?.grade)} />
       <section>
         <h4 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-text-secondary">Phase Guidance</h4>
         <GuidanceEditor value={draft.guidanceMarkdown} readOnly={definitionReadOnly}
@@ -514,12 +520,15 @@ function PhaseEditorAlerts({ phase, editable }: { phase: Phase | undefined; edit
   </>;
 }
 
-function PhaseDefinition({ draft, readOnly, onChange, fullGrades: full }: {
+// `blockedGrades`: full Grades this Phase is not already saved in.
+function PhaseDefinition({ draft, readOnly, onChange, blockedGrades }: {
   draft: Draft;
   readOnly: boolean;
   onChange: (draft: Draft) => void;
-  fullGrades: Array<11 | 12>;
+  blockedGrades: Array<11 | 12>;
 }) {
+  const hintId = useId();
+  const blocked = readOnly ? [] : blockedGrades.filter((grade) => grade !== draft.grade);
   return <section>
     <h4 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-text-secondary">Definition</h4>
     <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -530,16 +539,18 @@ function PhaseDefinition({ draft, readOnly, onChange, fullGrades: full }: {
       </label>
       <fieldset disabled={readOnly}>
         <legend className="text-[11px] font-extrabold uppercase tracking-wide text-text-muted">Grade</legend>
-        <div role="group" aria-label="Grade" className="mt-1 inline-flex rounded-md border border-border bg-bg-card-alt p-1">
+        <div role="group" aria-label="Grade" aria-describedby={blocked.length ? hintId : undefined}
+          className="mt-1 inline-flex rounded-md border border-border bg-bg-card-alt p-1">
           {GRADES.map((grade) => <button key={grade} type="button"
             aria-pressed={draft.grade === grade} onClick={() => onChange({ ...draft, grade })}
-            disabled={full.includes(grade) && draft.grade !== grade}
-            className={`min-h-9 rounded px-3 text-sm font-semibold transition-colors disabled:opacity-50 ${
-              draft.grade === grade ? "bg-bg-card text-accent shadow-sm" : "text-text-secondary"
-            }`}>Grade {grade}</button>)}
+            disabled={blocked.includes(grade)}
+            className={`min-h-9 rounded px-3 text-sm font-semibold transition-colors ${
+              blocked.includes(grade) ? "opacity-50 " : ""
+            }${draft.grade === grade ? "bg-bg-card text-accent shadow-sm" : "text-text-secondary"}`}>Grade {grade}</button>)}
         </div>
-        {!readOnly && full.map((grade) =>
-          <p key={grade} className="mt-1 text-xs text-text-muted">{holisticGradeFullError(grade)}.</p>)}
+        {blocked.length > 0 && <p id={hintId} className="mt-1 text-xs text-text-muted">
+          {blocked.map((grade) => `${holisticGradeFullError(grade)}.`).join(" ")}
+        </p>}
       </fieldset>
     </div>
   </section>;

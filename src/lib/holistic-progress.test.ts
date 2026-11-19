@@ -693,12 +693,11 @@ describe("Holistic progress", () => {
     expect(options).toMatchObject({
       schools: [{ code: "SCH001", name: "School One" }],
       mentors: [{ userId: 9, name: "Current Mentor" }],
-      phases: [
-        { id: 69, number: 4, grade: 12 },
-        { id: 70, number: 1, grade: 11 },
-        { id: 71, number: 5, grade: 12 },
-      ],
     });
+    // Numbered per Grade and listed by that number, not in Plan order.
+    expect(options.phases.map(({ id, number, grade }) => [id, number, grade])).toEqual([
+      [70, 1, 11], [69, 4, 12], [71, 5, 12],
+    ]);
     for (const call of mockQuery.mock.calls.slice(0, 2)) {
       const sql = String(call[0]);
       expect(sql).toContain("SELECT DISTINCT ON (mapping.student_id) mapping.*");
