@@ -56,15 +56,36 @@ async function linkedUserId(email: string, linkedUserId: number | null | undefin
   return rows[0] ? Number(rows[0].id) : null;
 }
 
-// The Mentors a supervisor supervises this academic year, ascending.
+// The `user` id a user_permission row (`alias`) points at, resolved as
+// getBlendedLearningAccess resolves a Mentor: user_permission.user_id, else
+// the lowest-id `user` row whose email matches case-insensitively.
+export function permissionUserIdSql(alias: string): string {
+  return `COALESCE(${alias}.user_id,
+           (SELECT account.id FROM "user" account
+            WHERE LOWER(account.email) = LOWER(${alias}.email) ORDER BY account.id LIMIT 1))`;
+}
+
+// The `user` id (`userIdSql`) still holds a live (not revoked) permission with
+// the role bound to `roleParam` (BLENDED_MENTOR_ROLE): a Mentor who has left or
+// been revoked is no longer one, whatever Mappings or Supervisions remain.
+function liveBlendedMentorSql(userIdSql: string, roleParam: string): string {
+  return `EXISTS (SELECT 1 FROM user_permission live_permission
+            WHERE live_permission.role = ${roleParam} AND live_permission.revoked_at IS NULL
+              AND ${permissionUserIdSql("live_permission")} = ${userIdSql})`;
+}
+
+// The Mentors a supervisor supervises this academic year, ascending. A
+// reportee who is no longer a live Blended Learning Mentor drops out, so the
+// team lead stops seeing their Students even before the Supervision is ended.
 async function supervisedMentorIds(supervisorUserId: number | null): Promise<number[]> {
   if (supervisorUserId == null) return [];
   const rows = await query<{ mentor_user_id: number | string }>(
     `SELECT DISTINCT supervision.mentor_user_id
      FROM blended_learning_mentor_supervisions supervision
      WHERE supervision.supervisor_user_id = $1 AND ${activeBlendedSupervisionSql("supervision", "$2")}
+       AND ${liveBlendedMentorSql("supervision.mentor_user_id", "$3")}
      ORDER BY supervision.mentor_user_id`,
-    [supervisorUserId, CURRENT_ACADEMIC_YEAR]
+    [supervisorUserId, CURRENT_ACADEMIC_YEAR, BLENDED_MENTOR_ROLE]
   );
   return rows.map((row) => Number(row.mentor_user_id)).filter((id) => id !== supervisorUserId);
 }

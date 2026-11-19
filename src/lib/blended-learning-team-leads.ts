@@ -1,5 +1,7 @@
+import type { PoolClient } from "pg";
+
 import { query, withTransaction } from "./db";
-import { activeBlendedMappingSql, canBlendedLearning, type BlendedLearningAccess } from "./blended-learning-access";
+import { canBlendedLearning, permissionUserIdSql, type BlendedLearningAccess } from "./blended-learning-access";
 import type { FieldErrors } from "./blended-learning-manage-input";
 import { insertSupervision, type SupervisionAudit } from "./blended-learning-supervisions-load";
 import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
@@ -28,29 +30,22 @@ const NOT_FOUND: TeamLeadResult = { ok: false, status: 404, error: "Not found" }
 const NAME_SQL = (alias: string) =>
   `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${alias}.first_name, ${alias}.last_name)), ''), ${alias}.email, CONCAT('Mentor ', ${alias}.id))`;
 
-// Blended Learning Mentors' `user` ids: every Mentor with an active
-// current-year Mapping ($1), and every live blended_mentor permission ($2),
-// resolved as the app resolves a Mentor (user_permission.user_id, else the
-// lowest-id `user` with that email).
+// Blended Learning Mentors' `user` ids: every live (not revoked)
+// blended_mentor permission ($1), resolved as the app resolves a Mentor
+// (permissionUserIdSql). Mappings alone do not make someone a Mentor: one who
+// has left keeps their Mappings until they are moved.
 const BLENDED_MENTOR_IDS_SQL = `
-  SELECT mapping.mentor_user_id AS id
-  FROM blended_learning_mentor_mentee_mappings mapping
-  WHERE ${activeBlendedMappingSql("mapping", "$1")}
-  UNION
-  SELECT COALESCE(permission.user_id,
-                  (SELECT account.id FROM "user" account
-                   WHERE LOWER(account.email) = LOWER(permission.email) ORDER BY account.id LIMIT 1))
+  SELECT DISTINCT ${permissionUserIdSql("permission")} AS id
   FROM user_permission permission
-  WHERE permission.role = $2 AND permission.revoked_at IS NULL`;
+  WHERE permission.role = $1 AND permission.revoked_at IS NULL`;
 
-async function blendedMentors(ids: number[] | null): Promise<TeamLeadPerson[]> {
+async function blendedMentors(): Promise<TeamLeadPerson[]> {
   const rows = await query<{ id: number | string; name: string }>(
     `SELECT mentor.id, ${NAME_SQL("mentor")} AS name
      FROM (${BLENDED_MENTOR_IDS_SQL}) mentors
      JOIN "user" mentor ON mentor.id = mentors.id
-     WHERE $3::bigint[] IS NULL OR mentor.id = ANY($3::bigint[])
      ORDER BY name, mentor.id`,
-    [CURRENT_ACADEMIC_YEAR, BLENDED_MENTOR_ROLE, ids]
+    [BLENDED_MENTOR_ROLE]
   );
   return rows.map((row) => ({ userId: Number(row.id), name: row.name }));
 }
@@ -58,7 +53,7 @@ async function blendedMentors(ids: number[] | null): Promise<TeamLeadPerson[]> {
 // Who can be a team lead or a reportee, A–Z.
 export async function listBlendedMentorOptions(access: BlendedLearningAccess): Promise<TeamLeadPerson[]> {
   if (!canBlendedLearning(access, "manage")) return [];
-  return blendedMentors(null);
+  return blendedMentors();
 }
 
 type LinkRow = {
@@ -118,9 +113,19 @@ function parsePair(raw: unknown): { ok: true; pair: Pair } | { ok: false; fieldE
   return { ok: true, pair: { supervisorUserId, mentorUserId } };
 }
 
-// Both must be Blended Learning Mentors.
-async function notMentors(pair: Pair): Promise<FieldErrors | null> {
-  const found = new Set((await blendedMentors([pair.supervisorUserId, pair.mentorUserId])).map((m) => m.userId));
+// Inside the insert's transaction: which of the pair are not live Blended
+// Learning Mentors. Their permission rows are locked FOR SHARE, so a revoke
+// waits for the insert (or the insert sees the revoke): no check-then-act gap.
+async function notMentors(client: PoolClient, pair: Pair): Promise<FieldErrors | null> {
+  const result = await client.query<{ id: number | string | null }>(
+    `SELECT ${permissionUserIdSql("permission")} AS id
+     FROM user_permission permission
+     WHERE permission.role = $1 AND permission.revoked_at IS NULL
+       AND ${permissionUserIdSql("permission")} = ANY($2::bigint[])
+     FOR SHARE OF permission`,
+    [BLENDED_MENTOR_ROLE, [pair.supervisorUserId, pair.mentorUserId]]
+  );
+  const found = new Set(result.rows.map((row) => Number(row.id)));
   const errors: FieldErrors = {};
   if (!found.has(pair.supervisorUserId)) errors.supervisorUserId = "Choose a Blended Learning mentor.";
   if (!found.has(pair.mentorUserId)) errors.mentorUserId = "Choose a Blended Learning mentor.";
@@ -136,10 +141,13 @@ export async function createTeamLeadLink(access: BlendedLearningAccess, raw: unk
   if (!canBlendedLearning(access, "manage")) return FORBIDDEN;
   const parsed = parsePair(raw);
   if (!parsed.ok) return invalid(parsed.fieldErrors);
-  const people = await notMentors(parsed.pair);
-  if (people) return invalid(people);
-  const written = await withTransaction((client) => insertSupervision(client, parsed.pair, audit(access)));
-  if (written === 0) return { ok: false, status: 409, error: "This team lead already leads this mentor." };
+  // Field errors when either is not a live Mentor, else the rows inserted.
+  const outcome = await withTransaction(async (client) => {
+    const people = await notMentors(client, parsed.pair);
+    return people ?? (await insertSupervision(client, parsed.pair, audit(access)));
+  });
+  if (typeof outcome !== "number") return invalid(outcome);
+  if (outcome === 0) return { ok: false, status: 409, error: "This team lead already leads this mentor." };
   return { ok: true };
 }
 

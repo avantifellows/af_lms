@@ -34,19 +34,32 @@ type Row = {
   user_id: number | null;
 };
 
-type Supervision = { supervisor_user_id: number; mentor_user_id: number; academic_year: string };
+type Supervision = {
+  supervisor_user_id: number;
+  mentor_user_id: number;
+  academic_year: string;
+  ended_at?: string | null;
+};
 
-// Fixture tables: one live user_permission row, the `user` table and the
-// active (ended_at IS NULL) Supervisions.
+// Fixture tables: one live user_permission row, the `user` table, the
+// Supervisions (running unless `ended_at` is set) and the `user` ids that
+// hold a live blended_mentor permission (by default every supervised Mentor).
+// The Supervisions read applies the statement's own predicates: the year and
+// running filter, and the live-permission check when the SQL has it.
 function givenTables(
   permission: Row | null,
   users: { id: number; email: string }[] = [],
-  supervisions: Supervision[] = []
+  supervisions: Supervision[] = [],
+  liveMentorUserIds: number[] = supervisions.map((row) => row.mentor_user_id)
 ) {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      const runningOnly = sql.includes("supervision.ended_at IS NULL");
+      const liveOnly = sql.includes("FROM user_permission live_permission") && params?.[2] === "blended_mentor";
       return supervisions
         .filter((row) => row.supervisor_user_id === params?.[0] && row.academic_year === params?.[1])
+        .filter((row) => !runningOnly || row.ended_at == null)
+        .filter((row) => !liveOnly || liveMentorUserIds.includes(row.mentor_user_id))
         .map((row) => ({ mentor_user_id: String(row.mentor_user_id) }));
     }
     if (sql.includes("FROM user_permission")) return permission ? [{
@@ -103,6 +116,38 @@ describe("getBlendedLearningAccess", () => {
     // A Supervision has no Student, so the Mapping's dropout filter is not on it.
     expect(sql).not.toContain(DROPOUT_PREDICATE);
     expect(sql).not.toContain("supervision.student_id");
+  });
+
+  it("grants nothing through an ended Supervision", async () => {
+    givenTables(
+      { email: "lead@test.local", level: 1, role: "blended_mentor", read_only: false, user_id: 9001 },
+      [],
+      [
+        { supervisor_user_id: 9001, mentor_user_id: 9002, academic_year: CURRENT_ACADEMIC_YEAR, ended_at: "2026-11-15T00:00:00Z" },
+        { supervisor_user_id: 9001, mentor_user_id: 9004, academic_year: CURRENT_ACADEMIC_YEAR, ended_at: null },
+      ],
+    );
+
+    const access = await getBlendedLearningAccess("lead@test.local");
+    expect(access).toMatchObject({ supervisedMentorUserIds: [9004] });
+    expect(supervisedMentor(access!, 9002)).toBeNull();
+    expect(viewableMentorUserIds(access!)).toEqual([9001, 9004]);
+  });
+
+  it("drops a reportee who no longer holds a live blended_mentor permission", async () => {
+    givenTables(
+      { email: "lead@test.local", level: 1, role: "blended_mentor", read_only: false, user_id: 9001 },
+      [],
+      [
+        { supervisor_user_id: 9001, mentor_user_id: 9002, academic_year: CURRENT_ACADEMIC_YEAR },
+        { supervisor_user_id: 9001, mentor_user_id: 9004, academic_year: CURRENT_ACADEMIC_YEAR },
+      ],
+      [9004],
+    );
+
+    const access = await getBlendedLearningAccess("lead@test.local");
+    expect(access).toMatchObject({ supervisedMentorUserIds: [9004] });
+    expect(viewableMentorUserIds(access!)).toEqual([9001, 9004]);
   });
 
   it("reads no Supervisions for a Mentor with no user id, or for an admin", async () => {

@@ -46,7 +46,8 @@ const DRAFTS: Record<number, { student_id: number; state: string; request_state:
 beforeEach(() => {
   vi.clearAllMocks();
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
-    if (sql.includes("FROM user_permission")) {
+    // The permission read (the Supervisions read also checks user_permission).
+    if (sql.includes("FROM user_permission") && !sql.includes("FROM blended_learning_mentor_supervisions")) {
       const email = String(params?.[0]).toLowerCase();
       const row = PERMISSIONS[email];
       return row ? [{ email, level: 1, school_codes: null, regions: null, program_ids: [], ...row }] : [];

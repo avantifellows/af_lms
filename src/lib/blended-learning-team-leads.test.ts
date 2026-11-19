@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
-import { query } from "./db";
+import { query, withTransaction } from "./db";
 import type { BlendedLearningAccess } from "./blended-learning-access";
 import {
   createTeamLeadLink,
@@ -12,6 +12,8 @@ import {
 } from "./blended-learning-team-leads";
 
 const mockQuery = vi.mocked(query);
+const mockWithTransaction = vi.mocked(withTransaction);
+const clientQuery = vi.fn();
 
 const ADMIN: BlendedLearningAccess = {
   kind: "admin", role: "blended_admin", readOnly: false, actorEmail: "admin@test.local",
@@ -24,6 +26,9 @@ const MENTOR: BlendedLearningAccess = {
 
 beforeEach(() => {
   mockQuery.mockReset();
+  clientQuery.mockReset();
+  mockWithTransaction.mockReset();
+  mockWithTransaction.mockImplementation(async (fn) => fn({ query: clientQuery } as never));
 });
 
 describe("listTeamLeadLinks", () => {
@@ -57,7 +62,7 @@ describe("listTeamLeadLinks", () => {
 });
 
 describe("listBlendedMentorOptions", () => {
-  it("lists Mentors with Mappings or a live blended_mentor permission, dropouts' Mappings left out", async () => {
+  it("lists only people with a live blended_mentor permission, Mappings alone not counting", async () => {
     mockQuery.mockResolvedValue([{ id: "9001", name: "Synthetic Reportee" }, { id: 9003, name: "Synthetic Lead" }]);
 
     expect(await listBlendedMentorOptions(ADMIN)).toEqual([
@@ -65,9 +70,9 @@ describe("listBlendedMentorOptions", () => {
       { userId: 9003, name: "Synthetic Lead" },
     ]);
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("NOT EXISTS (SELECT 1 FROM student dropout_student");
-    expect(sql).toContain("UNION");
-    expect(params).toEqual(["2026-2027", "blended_mentor", null]);
+    expect(sql).toContain("permission.role = $1 AND permission.revoked_at IS NULL");
+    expect(sql).not.toContain("blended_learning_mentor_mentee_mappings");
+    expect(params).toEqual(["blended_mentor"]);
   });
 });
 
@@ -123,12 +128,26 @@ describe("writes", () => {
     });
   });
 
-  it("names the team lead when only they aren't a Blended Learning Mentor", async () => {
-    mockQuery.mockResolvedValueOnce([{ id: 9002, name: "Synthetic Reportee" }]);
+  it("names the team lead when only they aren't a live Blended Learning Mentor, inserting nothing", async () => {
+    // Only the reportee still holds a live blended_mentor permission.
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: "9002" }] });
     expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 4242, mentorUserId: 9002 })).toMatchObject({
       status: 422,
       error: "Choose a Blended Learning mentor.",
       fieldErrors: { supervisorUserId: "Choose a Blended Learning mentor." },
     });
+    expect(clientQuery).toHaveBeenCalledTimes(1);
+    const [check, params] = clientQuery.mock.calls[0];
+    expect(check).toContain("permission.revoked_at IS NULL");
+    expect(check).toContain("FOR SHARE OF permission");
+    expect(params).toEqual(["blended_mentor", [4242, 9002]]);
+  });
+
+  it("checks both people and inserts in the same transaction", async () => {
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockResolvedValueOnce({ rows: [{ id: 7 }] });
+    expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).toEqual({ ok: true });
+    expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+    expect(clientQuery.mock.calls[1][0]).toContain("INSERT INTO blended_learning_mentor_supervisions");
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 });

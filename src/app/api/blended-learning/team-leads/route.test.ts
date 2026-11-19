@@ -22,9 +22,9 @@ function post(body: unknown) {
 
 let db: ReturnType<typeof mockBlendedDb>;
 
-// Both ids are Blended Learning Mentors (the lookup returns them).
+// These ids hold a live blended_mentor permission (the in-transaction check returns them).
 function givenMentors(...ids: number[]) {
-  db.query.mockResolvedValueOnce(ids.map((id) => ({ id: String(id), name: `Mentor ${id}` })));
+  db.clientQuery.mockResolvedValueOnce(rows(...ids.map((id) => ({ id: String(id) }))));
 }
 
 beforeEach(() => {
@@ -41,12 +41,13 @@ describe("POST /api/blended-learning/team-leads", () => {
     const res = await post({ supervisorUserId: 9003, mentorUserId: "9001" });
 
     expect(res.status).toBe(201);
-    // Both checked as Blended Learning Mentors: Mappings or a live blended_mentor permission.
-    const [lookup, lookupParams] = db.query.mock.calls[0];
-    expect(lookup).toContain("blended_learning_mentor_mentee_mappings");
-    expect(lookup).toContain("permission.role = $2 AND permission.revoked_at IS NULL");
-    expect(lookupParams).toEqual(["2026-2027", "blended_mentor", [9003, 9001]]);
-    const [insert, insertParams] = db.clientQuery.mock.calls[0];
+    // Both checked, in the insert's transaction, as live blended_mentor permissions.
+    const [lookup, lookupParams] = db.clientQuery.mock.calls[0];
+    expect(lookup).toContain("permission.role = $1 AND permission.revoked_at IS NULL");
+    expect(lookup).toContain("FOR SHARE OF permission");
+    expect(lookupParams).toEqual(["blended_mentor", [9003, 9001]]);
+    expect(db.query).not.toHaveBeenCalled();
+    const [insert, insertParams] = db.clientQuery.mock.calls[1];
     expect(insert).toContain("ON CONFLICT (supervisor_user_id, mentor_user_id, academic_year) WHERE ended_at IS NULL DO NOTHING");
     expect(insertParams).toEqual([9003, 9001, "2026-2027", "admin@test.local", "af_lms_manage_ui", null]);
   });
@@ -70,7 +71,8 @@ describe("POST /api/blended-learning/team-leads", () => {
 
     expect(res.status).toBe(422);
     expect((await res.json()).fieldErrors).toEqual({ mentorUserId: "Choose a Blended Learning mentor." });
-    expect(db.clientQuery).not.toHaveBeenCalled();
+    // The check ran; no insert followed.
+    expect(db.clientQuery).toHaveBeenCalledTimes(1);
   });
 
   it.each([
