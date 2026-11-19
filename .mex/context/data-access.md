@@ -214,29 +214,52 @@ opened Phase is **Closed**: an earlier Open Phase of the Grade, and every prior-
 Closed is derived, never stored (`holistic_mentorship_phases.state` is still only
 `locked` / `open`; no db-service change).
 
-- **Write path:** the loader returns `phase_active`. After the scope query has share-locked
-  the Plan row, it reads the Grade's latest Open Phase in a **second statement**. Every Phase
-  state change locks the Plan row `FOR UPDATE` (`getMutablePhase`), so a write that raced an
-  Admin opening the next Phase waits, then sees the new Phase and is refused. Keep it two
-  statements: a subquery in the scope query would read the snapshot taken before the wait.
-  A prior-year or Locked Phase skips the second read.
+- **Write path:** the loader returns `phase_active`. It share-locks the Plan row in its
+  **own first statement**, then locks the Mapping and Phase rows, then reads the Grade's latest
+  Open Phase in a **third statement**. Every Phase state change locks the Plan row `FOR UPDATE`
+  first (`checkedPhase` calls `lockPhasePlanForPhase` before `getMutablePhase`), so a write
+  that raced an Admin opening the next Phase waits, then sees the new Phase and is refused.
+  Keep the Active read its own statement: a subquery in the scope query would read the
+  snapshot taken before the wait. A Locked Phase, or one outside the current year's Plan,
+  skips that read.
+- **Lock order is Plan, then Phase, everywhere:** the Mentor write scope, state change,
+  definition update, reorder and delete. Locking a Phase row before the Plan row in any of
+  them deadlocks a Mentor save against an Admin reorder or delete (reproduced on the first
+  version of this change; Postgres aborts one side with `40P01`, a 500).
+- **Current year only:** "current" is `CURRENT_ACADEMIC_YEAR`, never the `academic_year` a
+  request or screen names. The write scope, `getHolisticStudentPhase` (`active` / `closed`),
+  the Progress `phase_availability` and `getHolisticPhasePlan` (`active`) all use it, so a
+  past year's Plan has no Active Phase and takes no Mentor writes. `active` and `closed` are
+  never both true.
 - **Read model:** `getHolisticStudentPhase` adds `closed` to every unlocked Phase summary and
   to the selected Phase, with the same rule; `canEditNotes` is false when closed. Mentor tabs
   read Closed instead of Open/Skipped (Completed stays Completed); the selected Phase shows a
-  closed notice, read-only Notes (an author still reads their unsubmitted draft) and a
-  disabled Add notes. Admin/PM drill-down says "Closed Phase" and "Closed without Notes".
+  closed notice naming the Phase that takes Notes, read-only Notes (an author still reads
+  their unsubmitted draft, labelled as not submitted before the Phase closed) and a disabled
+  Add notes. Admin/PM drill-down says "Closed Phase" and "Closed without Notes".
+- **A form open when its Phase closes:** the save is refused with `HOLISTIC_PHASE_CLOSED_ERROR`
+  (`src/lib/holistic-phase-messages.ts`, shared with the client). `PostSessionNotesEditor`
+  recognises it, stops autosave and Retry, drops the navigation guard, and shows what was
+  typed read-only under an alert, so the Mentor can copy it and leave.
 - **Progress:** `phaseState` / the CSV **Availability** column is `active` | `closed` | `locked`
   (`closed` replaced `open`). Derived Pending / Skipped / Completed progress is unchanged.
 - **Phase Setup:** `setHolisticPhaseState` refuses to open a Phase ordered before an Open Phase
-  of the same Grade (`validateOpenOrder`, 422). `GET /api/holistic-mentorship/phase-plans?program_id=&open_impact_phase_id=`
+  of the same Grade (`validateOpenOrder`, 422). `updateHolisticPhase` refuses a Grade change
+  while the Phase is Open (`HOLISTIC_OPEN_PHASE_GRADE_ERROR`, 422): it would close or reopen
+  other Phases without that check or the confirmation; the screen disables the Grade control.
+  `GET /api/holistic-mentorship/phase-plans?program_id=&open_impact_phase_id=`
   (gate `phase_configuration_read`) returns `getHolisticPhaseOpenImpact`: the Phase that will
   close and counts only (assigned Mentees of the Grade without submitted Notes in it, and how
-  many of those hold a draft with content), over the write scope's Mentee set. `PhasePlanSetup`
-  puts them in the Open Phase confirmation; a failed count still warns that the Phase closes.
+  many of those hold a draft with content), over the write scope's Mentee set, built from one
+  `MATERIALIZED` roster snapshot (not a roster read per Mapping, which timed out in #321).
+  `PhasePlanSetup` asks on every open and names the closing Phase from the server's answer,
+  because its own copy of the Plan can be stale; a failed count still warns that the Phase closes.
 - **Undo:** returning the unused Active Phase to Locked makes the previous Open Phase Active
   and writable again. There is no other reopen.
 - **Tests:** `holistic-closed-phases.integration.test.ts` (opt-in `HOLISTIC_NOTES_TEST_DATABASE`,
-  real Postgres, including the racing-write case), plus the unit tests beside each module.
+  real Postgres): the racing write and the reorder deadlock both drive the real Admin function,
+  paused on a Phase row held by a third connection, and wait on `pg_stat_activity` instead of a
+  timer. Unit tests sit beside each module.
 
 ## Holistic Follow-up Notes (#377)
 

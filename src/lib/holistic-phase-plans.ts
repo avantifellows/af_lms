@@ -103,13 +103,13 @@ type PhaseDefinition = {
 type MutablePhaseRow = {
   id: number | string;
   phase_plan_id: number | string;
-  grade: number | string;
   position: number;
   revision: number;
   state: "locked" | "open";
   guidance_markdown: string;
   academic_year: string;
   frozen_at: string | null;
+  grade: number | string;
   ever_opened: boolean;
   used: boolean;
 };
@@ -274,12 +274,12 @@ async function getMutablePhase(
   programId: number,
 ): Promise<MutablePhaseRow | null> {
   const result = await client.query<MutablePhaseRow>(
-    // FOR UPDATE has no OF list, so it locks the Plan row as well as the Phase row:
-    // every definition save in one Plan runs one at a time. Grade is a subquery so
-    // the shared grade row is not locked.
-    `SELECT p.id, p.phase_plan_id, (SELECT number FROM grade WHERE id = p.grade_id) AS grade,
-            p.position, p.revision, p.state, p.guidance_markdown,
+    // The caller already holds the Plan row lock (lockPhasePlanForPhase), so every
+    // definition save in one Plan runs one at a time. Grade is a subquery so the
+    // shared grade row is not locked.
+    `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.guidance_markdown,
             plan.academic_year, p.frozen_at,
+            (SELECT number FROM grade WHERE grade.id = p.grade_id) AS grade,
             EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
                     WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
             EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
@@ -287,7 +287,7 @@ async function getMutablePhase(
      FROM holistic_mentorship_phases p
      JOIN holistic_mentorship_phase_plans plan ON plan.id = p.phase_plan_id
      WHERE p.id = $1 AND plan.program_id = $2
-     FOR UPDATE`,
+     FOR UPDATE OF p`,
     [phaseId, programId]
   );
   return result.rows[0] ?? null;
@@ -304,15 +304,31 @@ function checkRevision(row: MutablePhaseRow | null, expectedRevision: number): P
   return null;
 }
 
+type CheckedPhase = { phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult };
+
+// For a caller that already holds the Plan lock (delete).
+async function loadCheckedPhase(
+  client: PoolClient,
+  phaseId: number,
+  expectedRevision: number,
+  programId: number,
+): Promise<CheckedPhase> {
+  const phase = await getMutablePhase(client, phaseId, programId);
+  const error = checkRevision(phase, expectedRevision);
+  return error ? { phase: null, error } : { phase: phase!, error: null };
+}
+
+// Plan first, then Phase: the order reorder, delete and the Mentor write scope
+// use, so none of them can deadlock with another. The Plan lock is also what
+// makes a Mentor save wait for a Phase state change in flight (#536).
 async function checkedPhase(
   client: PoolClient,
   phaseId: number,
   expectedRevision: number,
   programId: number,
-): Promise<{ phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult }> {
-  const phase = await getMutablePhase(client, phaseId, programId);
-  const error = checkRevision(phase, expectedRevision);
-  return error ? { phase: null, error } : { phase: phase!, error: null };
+): Promise<CheckedPhase> {
+  await lockPhasePlanForPhase(client, phaseId, programId);
+  return loadCheckedPhase(client, phaseId, expectedRevision, programId);
 }
 
 async function validateQuestionOwnership(
@@ -331,12 +347,21 @@ async function validateQuestionOwnership(
     : null;
 }
 
+export const HOLISTIC_OPEN_PHASE_GRADE_ERROR =
+  "Return this Phase to Locked before changing its Grade";
+
 function validateDefinitionChange(
   phase: MutablePhaseRow,
   input: PhaseDefinition
 ): PhasePlanResult | null {
   if (phase.frozen_at || phase.used) {
     return { ok: false, status: 422, error: "Used Phases are frozen" };
+  }
+  // An Open Phase decides which Phase of its Grade is Active. Moving it to the
+  // other Grade would close or reopen Phases without the open-order check or
+  // the Admin's confirmation (#536).
+  if (phase.state === "open" && Number(phase.grade) !== input.grade) {
+    return { ok: false, status: 422, error: HOLISTIC_OPEN_PHASE_GRADE_ERROR };
   }
   if ((phase.state === "open" || phase.ever_opened) && !input.guidanceMarkdown.trim()) {
     return { ok: false, status: 422, error: "Opened Phases require Guidance" };
@@ -441,8 +466,10 @@ export async function getHolisticPhasePlan(
         [rows.map((row) => Number(row.id))]
       )
     : [];
+  // Only the current Academic Year's Plan has Active Phases: in a past year's
+  // Plan every opened Phase is Closed (#536).
   const activeByGrade = new Map<number, number>();
-  for (const row of rows) {
+  for (const row of academicYear === CURRENT_ACADEMIC_YEAR ? rows : []) {
     if (row.state === "open") activeByGrade.set(Number(row.grade), Number(row.id));
   }
   const numbered = withHolisticPhaseNumbers(
@@ -800,24 +827,27 @@ export async function getHolisticPhaseOpenImpact(
   if (!active) return { closing: null };
 
   const [counts] = await query<{ without_notes: number | string; drafts: number | string }>(
-    `WITH mentees AS (
+    `WITH roster_snapshot AS MATERIALIZED (
+       -- Resolve the Centre membership view once for this Program and year;
+       -- reading it per Mapping timed out in production (#321).
+       SELECT centre_id, user_id, grade
+       FROM centre_students
+       WHERE program_id = $1 AND academic_year = $2 AND grade IN (11, 12)
+     ), school_roster AS (
+       SELECT roster_centre.school_id, roster_student.user_id
+       FROM roster_snapshot roster_student
+       JOIN centres roster_centre
+         ON roster_centre.id = roster_student.centre_id
+        AND roster_centre.program_id = $1
+        AND roster_centre.is_active IS TRUE
+       GROUP BY roster_centre.school_id, roster_student.user_id
+       HAVING COUNT(DISTINCT roster_student.grade) = 1 AND MIN(roster_student.grade) = $3
+     ), mentees AS (
        SELECT mapping.student_id
        FROM holistic_mentorship_mentor_mentee_mappings mapping
        JOIN student st ON st.id = mapping.student_id AND st.status IS DISTINCT FROM 'dropout'
-       JOIN LATERAL (
-         SELECT MIN(roster_student.grade) AS grade
-         FROM centre_students roster_student
-         JOIN centres roster_centre
-           ON roster_centre.id = roster_student.centre_id
-          AND roster_centre.school_id = mapping.school_id
-          AND roster_centre.program_id = mapping.program_id
-          AND roster_centre.is_active IS TRUE
-         WHERE roster_student.user_id = st.user_id
-           AND roster_student.academic_year = mapping.academic_year
-           AND roster_student.program_id = mapping.program_id
-           AND roster_student.grade IN (11, 12)
-         HAVING COUNT(DISTINCT roster_student.grade) = 1
-       ) current_roster ON current_roster.grade = $3
+       JOIN school_roster roster
+         ON roster.user_id = st.user_id AND roster.school_id = mapping.school_id
        WHERE mapping.program_id = $1 AND mapping.academic_year = $2 AND mapping.ended_at IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
@@ -891,7 +921,7 @@ async function deletePhaseTransaction(
     input.programId,
   );
   if (!planId) return { ok: false, status: 404, error: "Phase not found" };
-  const checked = await checkedPhase(
+  const checked = await loadCheckedPhase(
     client,
     input.phaseId,
     input.expectedRevision,

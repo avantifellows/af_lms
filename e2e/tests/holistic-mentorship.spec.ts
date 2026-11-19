@@ -823,7 +823,8 @@ test.describe("Holistic Mentorship release workflows", () => {
       fixture.profileGrade11StudentId,
       fixture.firstGrade11PhaseId
     ));
-    await expect(holisticAdminPage.getByText("Student Profile context", { exact: true })).toBeVisible();
+    // The first Grade 11 Phase is Closed (#536), and its heading says so.
+    await expect(holisticAdminPage.getByText("Closed Phase - Student Profile context", { exact: true })).toBeVisible();
     holisticAdminPage.once("dialog", (dialog) => dialog.accept());
     await holisticAdminPage.getByRole("button", { name: "Request Profile regeneration" }).click();
     await expect(holisticAdminPage.getByText("Regeneration queued.", { exact: true })).toBeVisible();

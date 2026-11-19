@@ -29,6 +29,7 @@ const input = {
 function transactionClient(...results: Array<{ rows: unknown[] }>) {
   const client = { query: vi.fn() };
   client.query.mockResolvedValueOnce({ rows: [] }); // per-Student privacy lock
+  client.query.mockResolvedValueOnce({ rows: [{ id: "7" }] }); // Plan share lock, taken before the scope row locks
   for (const result of results) client.query.mockResolvedValueOnce(result);
   mockWithTransaction.mockImplementation(async (work) => work(client as never));
   return client;
@@ -58,7 +59,8 @@ describe("addHolisticFollowUpNote", () => {
     await addHolisticFollowUpNote(input);
 
     expect(client.query.mock.calls[0]).toEqual(["SELECT pg_advisory_xact_lock($1, 0)", [41]]);
-    expect(String(client.query.mock.calls[1][0])).toContain("FOR UPDATE OF mapping, phase FOR SHARE OF plan");
+    expect(String(client.query.mock.calls[1][0])).toContain("FOR SHARE OF plan");
+    expect(String(client.query.mock.calls[2][0])).toContain("FOR UPDATE OF mapping, phase");
   });
 
   it("does not insert when the Mentor write scope is missing", async () => {
@@ -67,7 +69,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 404, error: "Not found",
     });
-    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   it("does not insert for an actor who is not the Mapping's Mentor", async () => {
@@ -76,7 +78,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 404, error: "Not found",
     });
-    expect(client.query).toHaveBeenCalledTimes(3);
+    expect(client.query).toHaveBeenCalledTimes(4);
   });
 
   it("does not insert on a Phase that is not Open", async () => {
@@ -85,7 +87,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 422, error: "Phase is not Open",
     });
-    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   it.each([
@@ -97,7 +99,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 422, error: "Submit Post-Session Notes first",
     });
-    expect(client.query).toHaveBeenCalledTimes(4);
+    expect(client.query).toHaveBeenCalledTimes(5);
   });
 
   it("does not insert on a Closed Phase, even with submitted Post-Session Notes", async () => {
@@ -108,7 +110,7 @@ describe("addHolisticFollowUpNote", () => {
       ok: false, status: 422, error: HOLISTIC_PHASE_CLOSED_ERROR,
     });
     // Lock, scope read, Active-Phase read; the Notes state is never read.
-    expect(client.query).toHaveBeenCalledTimes(3);
+    expect(client.query).toHaveBeenCalledTimes(4);
   });
 
   it("does not insert on a prior-year Phase", async () => {
@@ -117,6 +119,6 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 422, error: HOLISTIC_PHASE_CLOSED_ERROR,
     });
-    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 });

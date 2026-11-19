@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
+
 // Issue #536: only the Active Phase of a Grade takes Mentor writes. Runs against
 // real Postgres because the rule rests on row locks and statement snapshots.
 // Explicitly opt in with a migrated, disposable local DB. Synthetic rows remain;
@@ -22,6 +24,7 @@ let addFollowUp: typeof import("./holistic-follow-up-notes").addHolisticFollowUp
 let readStudentPhase: typeof import("./holistic-student-phase").getHolisticStudentPhase;
 let setPhaseState: typeof import("./holistic-phase-plans").setHolisticPhaseState;
 let openImpact: typeof import("./holistic-phase-plans").getHolisticPhaseOpenImpact;
+let reorder: typeof import("./holistic-phase-plans").reorderHolisticPhases;
 let mentorId: number;
 let schoolId: number;
 let grade11Id: number;
@@ -188,6 +191,7 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
     const plans = await import("./holistic-phase-plans");
     setPhaseState = plans.setHolisticPhaseState;
     openImpact = plans.getHolisticPhaseOpenImpact;
+    reorder = plans.reorderHolisticPhases;
     const [connection] = await db.query<{ name: string; address: string }>(
       "SELECT current_database() AS name, host(inet_server_addr()) AS address");
     expect(connection.name).toBe(database);
@@ -338,39 +342,87 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
     expect(await openImpact(program.programId + 1000000, phase3.phaseId)).toBeNull();
   });
 
+  // Both tests below pause the real Admin function mid-transaction by holding one
+  // Phase row from a third connection, and wait on what Postgres reports rather
+  // than on a timer.
+  async function lockWaiters() {
+    const [row] = await db.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM pg_stat_activity
+       WHERE datname = current_database() AND wait_event_type = 'Lock'`);
+    return Number(row.count);
+  }
+  async function waitForLockWaiters(expected: number) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (await lockWaiters() === expected) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`Expected ${expected} sessions waiting on a lock, found ${await lockWaiters()}`);
+  }
+  async function holdingPhaseRow<T>(phase: Phase, during: (release: () => Promise<void>) => Promise<T>) {
+    const blocker = await db.default.connect();
+    let held = true;
+    const release = async () => {
+      if (!held) return;
+      held = false;
+      await blocker.query("ROLLBACK");
+    };
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM holistic_mentorship_phases WHERE id = $1 FOR UPDATE", [phase.phaseId]);
+      return await during(release);
+    } finally {
+      await release();
+      blocker.release();
+    }
+  }
+
   it("refuses a write that was waiting while an Admin opened the next Phase", async () => {
     const program = await seedProgram();
     const phase1 = await seedPhase(program, 1);
     const phase3 = await seedPhase(program, 3, { state: "locked" });
     const mentee = await seedMentee(program);
 
-    // The Admin's transaction: holds the Plan row, as every Phase state change does.
-    const admin = await db.default.connect();
-    let write: Promise<Awaited<ReturnType<typeof save>>>;
-    let settled = false;
-    try {
-      await admin.query("BEGIN");
-      await admin.query(
-        `SELECT p.id FROM holistic_mentorship_phases p
-         JOIN holistic_mentorship_phase_plans plan ON plan.id = p.phase_plan_id
-         WHERE p.id = $1 FOR UPDATE`, [phase3.phaseId]);
-      await admin.query("UPDATE holistic_mentorship_phases SET state = 'open' WHERE id = $1", [phase3.phaseId]);
+    const [opened, write] = await holdingPhaseRow(phase3, async (release) => {
+      // The real state change: it takes the Plan row, then stops at the held Phase row.
+      const opening = changeState(program, phase3, "open");
+      await waitForLockWaiters(1);
+      // The Mentor saves into Phase 1 while the Admin's transaction is open.
+      const saving = draft(program, mentee, phase1, 0, "Written during the switch");
+      await waitForLockWaiters(2); // the save is waiting on the Plan row
+      await release();
+      return Promise.all([opening, saving]);
+    });
 
-      // The Mentor saves into Phase 1 before the Admin has committed.
-      write = draft(program, mentee, phase1, 0, "Written during the switch");
-      void write.finally(() => { settled = true; });
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      expect(settled).toBe(false); // waiting on the Plan row
-
-      await admin.query("COMMIT");
-    } catch (error) {
-      await admin.query("ROLLBACK");
-      throw error;
-    } finally {
-      admin.release();
-    }
-
-    expect(await write).toEqual({ ok: false, status: 422, error: CLOSED });
+    expect(opened).toMatchObject({ ok: true });
+    expect(write).toEqual({ ok: false, status: 422, error: CLOSED });
     expect(await notesRows(mentee, phase1)).toEqual([]);
+  });
+
+  it("does not deadlock a Mentor save with an Admin reordering Phases", async () => {
+    const program = await seedProgram();
+    // The reorder locks the Plan row, then every Phase row in order: it stops at
+    // the held first row while the Mentor's Active Phase row is still free.
+    const first = await seedPhase(program, 1, { state: "locked", gradeId: grade12Id });
+    const active = await seedPhase(program, 2);
+    const last = await seedPhase(program, 3, { state: "locked" });
+    const mentee = await seedMentee(program);
+
+    const [reordered, write] = await holdingPhaseRow(first, async (release) => {
+      const reordering = reorder({
+        programId: program.programId, academicYear: CURRENT_ACADEMIC_YEAR, actorEmail: "issue536-admin@example.test",
+        phases: [first, active, last].map((phase) => ({ id: phase.phaseId, expectedRevision: 1 })),
+      });
+      await waitForLockWaiters(1);
+      // With the Phase row locked before the Plan row, this save would hold the
+      // Active Phase and wait for the Plan, and the reorder would then wait for
+      // that Phase: a deadlock, and a 500 for one of them.
+      const saving = draft(program, mentee, active, 0, "Saved during a reorder");
+      await waitForLockWaiters(2);
+      await release();
+      return Promise.all([reordering, saving]);
+    });
+
+    expect(reordered).toHaveProperty("ok");
+    expect(write).toMatchObject({ ok: true, revision: 1 });
   });
 });

@@ -10,6 +10,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
 }));
 
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "@/lib/holistic-phase-messages";
 import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import StudentPhaseWorkspace from "./StudentPhaseWorkspace";
 
@@ -188,7 +189,7 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.getByText("Admin read-only view")).toBeInTheDocument();
     expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Phase 6 - Decision Making" })).toBeInTheDocument();
-    expect(screen.getByText("Open Phase - Pending")).toBeInTheDocument();
+    expect(screen.getByText("Active Phase - Pending")).toBeInTheDocument();
     const selectedTab = screen.getByRole("tab", { name: /Phase 6/ });
     expect(selectedTab).toHaveAttribute("aria-selected", "true");
     expect(selectedTab.className).toContain("border-accent");
@@ -1364,7 +1365,7 @@ describe("StudentPhaseWorkspace", () => {
         detail={closedTeacherDetail(submittedNotes, "completed")} />);
 
       expect(screen.getByRole("note")).toHaveTextContent(
-        "This Phase is closed. You can read its Notes, but Notes can be added or changed only in the Active Phase."
+        "This Phase is closed. You can read its Notes. Notes can be added or changed only in Phase 2."
       );
       expect(screen.getByText("A weekly plan")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Edit Notes" })).not.toBeInTheDocument();
@@ -1407,11 +1408,90 @@ describe("StudentPhaseWorkspace", () => {
         detail={closedTeacherDetail({ ...submittedNotes, state: "draft", firstSubmittedAt: null }, "pending")} />);
 
       expect(screen.getByText("A weekly plan")).toBeInTheDocument();
-      expect(screen.getByText(/Draft saved/)).toBeInTheDocument();
+      // Not "Draft saved": it reads as reassurance, and this draft can never be submitted.
+      expect(screen.getByText(/^Draft, not submitted before this Phase closed \| Last edited/)).toBeInTheDocument();
+      expect(screen.queryByText(/Draft saved/)).not.toBeInTheDocument();
       expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Submit Notes/ })).not.toBeInTheDocument();
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("leaves out the Phase to use when the Grade has no Active Phase this year", () => {
+      const detail = closedTeacherDetail(submittedNotes, "completed");
+      detail.phases = [detail.phases[0]];
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
+
+      expect(screen.getByRole("note")).toHaveTextContent(
+        "This Phase is closed. You can read its Notes, but they can no longer be added or changed."
+      );
+    });
+
+    describe("when the Phase closes while the Mentor has the form open", () => {
+      const refusal = () => new Response(JSON.stringify({ error: HOLISTIC_PHASE_CLOSED_ERROR }), { status: 422 });
+
+      async function typeAndAutosave(fetchMock: ReturnType<typeof vi.fn>) {
+        vi.stubGlobal("fetch", fetchMock);
+        render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+        vi.useFakeTimers();
+        fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), {
+          target: { value: "Typed after the Phase closed" },
+        });
+        await act(async () => vi.advanceTimersByTimeAsync(750));
+      }
+
+      afterEach(() => vi.useRealTimers());
+
+      it("says so, keeps what was typed readable, and stops offering to save", async () => {
+        const fetchMock = vi.fn().mockImplementation(async () => refusal());
+        await typeAndAutosave(fetchMock);
+
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "This Phase was closed while you were writing. Your latest changes were not saved. Copy anything you need from below, then open the current Phase."
+        );
+        // The text is still on screen, read-only, so it can be copied.
+        expect(screen.getByText("Typed after the Phase closed")).toBeInTheDocument();
+        expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Submit Notes/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Edit Notes/ })).not.toBeInTheDocument();
+      });
+
+      it("does not try to save again", async () => {
+        const fetchMock = vi.fn().mockImplementation(async () => refusal());
+        await typeAndAutosave(fetchMock);
+        const saves = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH").length;
+        expect(saves()).toBe(1);
+
+        await act(async () => vi.advanceTimersByTimeAsync(5_000));
+
+        expect(saves()).toBe(1);
+      });
+
+      it("lets the Mentor leave without another save or a leave-page prompt", async () => {
+        const fetchMock = vi.fn().mockImplementation(async () => refusal());
+        await typeAndAutosave(fetchMock);
+        const saves = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH").length;
+
+        const leaving = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(leaving);
+
+        expect(leaving.defaultPrevented).toBe(false);
+        expect(saves()).toBe(1);
+      });
+
+      it("still guards an unsaved draft when the save failed for another reason", async () => {
+        const fetchMock = vi.fn().mockImplementation(async () =>
+          new Response(JSON.stringify({ error: "Could not save Notes" }), { status: 500 }));
+        await typeAndAutosave(fetchMock);
+
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        expect(screen.getByRole("textbox", { name: "What helped?" })).toHaveValue("Typed after the Phase closed");
+        expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+        const leaving = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(leaving);
+        expect(leaving.defaultPrevented).toBe(true);
+      });
     });
 
     it("does not show the closed notice on the Active Phase", () => {
@@ -1428,7 +1508,7 @@ describe("StudentPhaseWorkspace", () => {
       })} />);
 
       expect(screen.getByText("Closed Phase - Completed")).toBeInTheDocument();
-      expect(screen.getByText("These Notes are final. Notes in a Closed Phase can no longer be changed, by the Mentor or anyone else."))
+      expect(screen.getByText("Notes in a Closed Phase cannot be changed, by the Mentor or anyone else."))
         .toBeInTheDocument();
       expect(screen.queryByText("Read-only for Admins")).not.toBeInTheDocument();
     });

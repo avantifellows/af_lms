@@ -438,6 +438,8 @@ async function listAssignedMentees(
          SELECT phase.id, phase.position, phase.title,
                 ${holisticPhaseNumberSql("phase", "phase_grade.number")} AS number,
                 CASE WHEN phase.state = 'locked' THEN 'locked'
+                     -- A past year's Plan has no Active Phase (#536).
+                     WHEN $2 <> $11 THEN 'closed'
                      WHEN phase.position = (
                        SELECT MAX(active_phase.position)
                        FROM holistic_mentorship_phases active_phase

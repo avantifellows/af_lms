@@ -6,6 +6,7 @@ import { getTestPool } from "../helpers/db";
 // Grade 11 Active" (Phase 2) both Open, so Phase 1 is Closed, and it holds the
 // fixture Teacher's own submitted Notes. Nothing here changes fixture rows:
 // every write is one the server must refuse, and the Open Phase dialog is dismissed.
+// One test opens the Locked Grade 11 Phase by SQL for a moment and puts it back.
 
 const CLOSED_ERROR = "This Phase is closed. Notes can be added or changed only in the Active Phase.";
 
@@ -135,6 +136,88 @@ test.describe("Closed Holistic Phases", () => {
     expect(await followUp.json()).toMatchObject({ error: CLOSED_ERROR });
 
     expect(await closedPhaseNotes()).toEqual(before);
+  });
+
+  test("a Mentor whose form was open when the Phase closed is told so, keeps their text on screen, and can leave", async ({
+    holisticTeacherPage: page,
+  }) => {
+    const pool = getTestPool();
+    let lockedPhaseId = 0;
+    try {
+      // A Mentee of this Teacher with no submitted Notes in Grade 11's Active
+      // Phase (so the form is shown), and Grade 11's next, still Locked, Phase.
+      const result = await pool.query<{ student_id: string; active_id: string; locked_id: string; school_code: string }>(
+        `WITH grade11 AS (
+           SELECT phase.id, phase.state, phase.position
+           FROM holistic_mentorship_phases phase
+           JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+             AND plan.program_id = 1 AND plan.academic_year = '2026-2027'
+           JOIN grade ON grade.id = phase.grade_id AND grade.number = 11
+         )
+         SELECT mapping.student_id, school.code AS school_code,
+                (SELECT id FROM grade11 WHERE state = 'open' ORDER BY position DESC LIMIT 1) AS active_id,
+                (SELECT id FROM grade11 WHERE state = 'locked' ORDER BY position LIMIT 1) AS locked_id
+         FROM holistic_mentorship_mentor_mentee_mappings mapping
+         JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
+           AND LOWER(mentor.email) = 'e2e-holistic-teacher@test.local'
+         JOIN school ON school.id = mapping.school_id
+         JOIN holistic_mentorship_post_session_notes earlier ON earlier.student_id = mapping.student_id
+           AND earlier.phase_id = $1
+         WHERE mapping.program_id = 1 AND mapping.academic_year = '2026-2027' AND mapping.ended_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM holistic_mentorship_post_session_notes notes
+             WHERE notes.student_id = mapping.student_id AND notes.state = 'submitted'
+               AND notes.phase_id = (SELECT id FROM grade11 WHERE state = 'open' ORDER BY position DESC LIMIT 1))
+         ORDER BY mapping.student_id LIMIT 1`,
+        [fixture.closedPhaseId]
+      );
+      const row = result.rows[0];
+      expect(row, "the fixture needs a Grade 11 Mentee without submitted Notes in the Active Phase").toBeTruthy();
+      lockedPhaseId = Number(row.locked_id);
+      const activePath = `/holistic-mentorship/students/${row.student_id}/phases/${row.active_id}`;
+      const answersBefore = await pool.query(
+        `SELECT answer.answer FROM holistic_mentorship_post_session_answers answer
+         JOIN holistic_mentorship_post_session_notes notes ON notes.id = answer.notes_id
+         WHERE notes.student_id = $1 AND notes.phase_id = $2 ORDER BY answer.question_id`,
+        [row.student_id, row.active_id]);
+
+      await page.goto(`${activePath}?school_code=${row.school_code}&program_id=1&academic_year=2026-2027`);
+      const answer = page.getByRole("textbox").first();
+      await expect(answer).toBeVisible();
+      await page.waitForLoadState("networkidle");
+
+      // An Admin opens Grade 11's next Phase: this one stops being the Active Phase.
+      await pool.query(`UPDATE holistic_mentorship_phases SET state = 'open' WHERE id = $1`, [lockedPhaseId]);
+      const refused = page.waitForResponse((response) =>
+        response.request().method() === "PATCH" && response.url().includes(`/phases/${row.active_id}`));
+      await answer.click();
+      await answer.pressSequentially(" typed after the Phase closed", { delay: 10 });
+      expect((await refused).status()).toBe(422);
+
+      await expect(page.getByRole("alert").filter({ hasText: "This Phase was closed while you were writing." }))
+        .toContainText("Your latest changes were not saved. Copy anything you need from below, then open the current Phase.");
+      // What they typed is still readable, the form is gone, and nothing offers to save again.
+      await expect(page.getByText(/typed after the Phase closed/)).toBeVisible();
+      await expect(page.getByRole("textbox")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Submit Notes" })).toHaveCount(0);
+
+      // They can leave: the earlier Phase's tab opens.
+      await page.getByRole("tab", { name: /Synthetic Grade 11 Completed/ }).click();
+      await expect(page).toHaveURL(new RegExp(`/phases/${fixture.closedPhaseId}\\b`));
+
+      const answersAfter = await pool.query(
+        `SELECT answer.answer FROM holistic_mentorship_post_session_answers answer
+         JOIN holistic_mentorship_post_session_notes notes ON notes.id = answer.notes_id
+         WHERE notes.student_id = $1 AND notes.phase_id = $2 ORDER BY answer.question_id`,
+        [row.student_id, row.active_id]);
+      expect(answersAfter.rows).toEqual(answersBefore.rows);
+    } finally {
+      if (lockedPhaseId) {
+        await pool.query(`UPDATE holistic_mentorship_phases SET state = 'locked' WHERE id = $1`, [lockedPhaseId]);
+      }
+      await pool.end();
+    }
   });
 
   test("Phase Setup shows the earlier Phase as Closed and warns before opening the next one", async ({

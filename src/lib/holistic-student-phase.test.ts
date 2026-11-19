@@ -1040,8 +1040,8 @@ describe("Holistic Student Phase derivation", () => {
         .mockResolvedValue([]);
     }
 
-    const asMentor = (phaseId: number) => getHolisticStudentPhase({
-      programId: 1, studentId: 41, phaseId, schoolId: 4, academicYear: "2026-2027",
+    const asMentor = (phaseId: number, academicYear = "2026-2027") => getHolisticStudentPhase({
+      programId: 1, studentId: 41, phaseId, schoolId: 4, academicYear,
       actorUserId: 10, role: "teacher", canEdit: true,
     });
 
@@ -1100,10 +1100,21 @@ describe("Holistic Student Phase derivation", () => {
 
       expect(await asMentor(73)).toMatchObject({
         phases: [
-          { phaseId: 73, academicYear: "2025-2026", active: true, closed: true },
+          // A past year's Plan has no Active Phase: never both Active and Closed.
+          { phaseId: 73, academicYear: "2025-2026", active: false, closed: true },
           { phaseId: 80, academicYear: "2026-2027", active: true, closed: false },
         ],
-        selectedPhase: { phaseId: 73, closed: true, canEditNotes: false },
+        selectedPhase: { phaseId: 73, active: false, closed: true, canEditNotes: false },
+      });
+    });
+
+    it("keeps a past year's latest Open Phase Closed when that year is the one being viewed", async () => {
+      mockMentee({ grade: 11, phases: [phase(73, 1, { academic_year: "2025-2026" })], mappingYears: ["2025-2026"] });
+
+      // The request names 2025-2026; the rule follows the real current year.
+      expect(await asMentor(73, "2025-2026")).toMatchObject({
+        phases: [{ phaseId: 73, academicYear: "2025-2026", active: false, closed: true }],
+        selectedPhase: { phaseId: 73, active: false, closed: true, canEditNotes: false },
       });
     });
   });

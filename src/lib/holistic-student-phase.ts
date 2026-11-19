@@ -352,7 +352,6 @@ type OpenSelectedPhaseParams = {
   questionsByPhase: Map<number, Array<{ questionId: number; text: string; position: number }>>;
   progress: Map<number, HolisticPhaseProgress>;
   active: Map<string, number>;
-  academicYear: string;
   profileRows: ProfileRow[];
   historicalRows: HistoricalRow[];
   currentGrade: 11 | 12;
@@ -673,23 +672,24 @@ function studentSummary(student: StudentRow, grade: 11 | 12) {
   };
 }
 
+// Active = the latest ordered Open Phase of its Grade in the current Academic
+// Year's Plan. A past year's Plan has no Active Phase, whichever year is viewed.
 function isActivePhase(phase: NumberedPhase, active: Map<string, number>) {
-  return active.get(`${phase.academic_year}:${phase.grade}`) === phase.id;
+  return phase.academic_year === CURRENT_ACADEMIC_YEAR &&
+    active.get(`${phase.academic_year}:${phase.grade}`) === phase.id;
 }
 
-// The same rule as the Mentor write scope: only the Active Phase of the viewed
-// Academic Year's Plan takes writes. An earlier Open Phase, and a prior-year
-// Grade 11 Phase shown to a Grade 12 Mentee, are Closed.
-function isClosedPhase(phase: NumberedPhase, active: Map<string, number>, academicYear: string) {
-  return !(isActivePhase(phase, active) && phase.academic_year === academicYear);
+// The same rule as the Mentor write scope: only the Active Phase takes writes.
+// An earlier Open Phase, and every opened Phase of a past year's Plan, are Closed.
+function isClosedPhase(phase: NumberedPhase, active: Map<string, number>) {
+  return !isActivePhase(phase, active);
 }
 
 function summarizePhase(
   phase: NumberedPhase | { phaseId: null; number: number; title: string; placeholder: true },
   notesByPhase: Map<number, PhaseNotes>,
   progress: Map<number, HolisticPhaseProgress>,
-  active: Map<string, number>,
-  academicYear: string
+  active: Map<string, number>
 ): HolisticPhaseSummary {
   if (!("id" in phase)) return phase;
   if (phase.state === "locked") {
@@ -704,7 +704,7 @@ function summarizePhase(
     academicYear: phase.academic_year,
     locked: false,
     active: isActivePhase(phase, active),
-    closed: isClosedPhase(phase, active, academicYear),
+    closed: isClosedPhase(phase, active),
     progress: progress.get(phase.id) ?? "pending",
     draftSaved: notes?.state === "draft",
   };
@@ -794,7 +794,7 @@ function canEditSelectedNotes(
 ) {
   if (!teacher) return false;
   if (!params.canEdit) return false;
-  if (isClosedPhase(params.selected, params.active, params.academicYear)) return false;
+  if (isClosedPhase(params.selected, params.active)) return false;
   if (!notes) return true;
   if (notes.authorUserId === params.actorUserId) return true;
   return erasedDraft;
@@ -813,7 +813,7 @@ function openSelectedPhase(params: OpenSelectedPhaseParams) {
     academicYear: params.selected.academic_year,
     locked: false as const,
     active: isActivePhase(params.selected, params.active),
-    closed: isClosedPhase(params.selected, params.active, params.academicYear),
+    closed: isClosedPhase(params.selected, params.active),
     progress: params.progress.get(params.selected.id) ?? "pending",
     draftSaved: notes?.state === "draft" && !erasedDraft,
     revision: params.selected.revision,
@@ -882,8 +882,8 @@ export async function getHolisticStudentPhase(params: {
   });
   const active = activePhases(numbered);
   const phases = applicable.map((phase) =>
-    summarizePhase(phase, notesByPhase, progress, active, params.academicYear));
-  const selectedSummary = summarizePhase(selected, notesByPhase, progress, active, params.academicYear);
+    summarizePhase(phase, notesByPhase, progress, active));
+  const selectedSummary = summarizePhase(selected, notesByPhase, progress, active);
   const readOnly = params.role !== "teacher" || !params.canEdit;
   if (selected.state === "locked") {
     return {
@@ -904,7 +904,6 @@ export async function getHolisticStudentPhase(params: {
       questionsByPhase,
       progress,
       active,
-      academicYear: params.academicYear,
       profileRows,
       historicalRows,
       currentGrade,

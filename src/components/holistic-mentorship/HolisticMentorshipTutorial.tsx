@@ -226,7 +226,8 @@ const teacherSteps: GuideStep[] = [
     callout: (
       <GuideCallout>
         To correct submitted notes, choose <strong>Edit Notes</strong>, update the
-        answers, and select <strong>Save Changes</strong>.
+        answers, and select <strong>Save Changes</strong>. This works only while the
+        phase is still the current one; notes in a closed phase cannot be changed.
       </GuideCallout>
     ),
   },
