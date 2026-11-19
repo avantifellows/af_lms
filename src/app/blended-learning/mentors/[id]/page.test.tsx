@@ -41,17 +41,17 @@ import MentorPage from "./page";
 
 const MENTOR = {
   kind: "mentor", role: "blended_mentor", readOnly: false,
-  actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
+  actorEmail: "mentor-a@example.org", mentorUserId: 9001,
 };
 const BLENDED_ADMIN = {
   kind: "admin", role: "blended_admin", readOnly: false,
-  actorEmail: "juned@avantifellows.org",
+  actorEmail: "bl-admin@example.org",
 };
 const READ_ONLY_ADMIN = { ...BLENDED_ADMIN, readOnly: true, actorEmail: "viewer@avantifellows.org" };
 
 const CARDS = [
-  { mentorUserId: 9001, name: "Faizan", assigned: 30, grade12: 18, grade13: 12, talkedLast7: 9, notSpoken30Plus: 4 },
-  { mentorUserId: 9002, name: "Lokesh", assigned: 1, grade12: 1, grade13: 0, talkedLast7: 0, notSpoken30Plus: 1 },
+  { mentorUserId: 9001, name: "Asha", assigned: 30, grade12: 18, grade13: 12, talkedLast7: 9, notSpoken30Plus: 4 },
+  { mentorUserId: 9002, name: "Kiran", assigned: 1, grade12: 1, grade13: 0, talkedLast7: 0, notSpoken30Plus: 1 },
 ];
 
 const MENTEE = {
@@ -90,7 +90,7 @@ describe("MentorPage", () => {
 
   it("shows the not-found page for a non-numeric id", async () => {
     signedInAs(BLENDED_ADMIN);
-    await expect(renderPage("faizan")).rejects.toThrow("NOT_FOUND");
+    await expect(renderPage("asha")).rejects.toThrow("NOT_FOUND");
     expect(mockListMentorCards).not.toHaveBeenCalled();
   });
 
@@ -108,7 +108,7 @@ describe("MentorPage", () => {
     await renderPage();
 
     expect(mockListMentees).toHaveBeenCalledWith({ access: BLENDED_ADMIN, mentorUserId: 9001, today: "2026-10-22" });
-    expect(screen.getByRole("heading", { level: 1, name: "Faizan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Asha" })).toBeInTheDocument();
     expect(screen.getByText("30 students · 2026-2027")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Mentors/ })).toHaveAttribute("href", "/blended-learning");
     expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
@@ -125,7 +125,7 @@ describe("MentorPage", () => {
 
     await renderPage("9002");
 
-    expect(screen.getByRole("heading", { name: "Lokesh" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Kiran" })).toBeInTheDocument();
     expect(screen.getByText("1 student · 2026-2027")).toBeInTheDocument();
     expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
     expect(screen.getAllByText("Draft ready to review").length).toBeGreaterThan(0);
@@ -152,8 +152,8 @@ describe("MentorPage", () => {
 
       expect(mockListMentorCards).toHaveBeenCalledWith(TEAM_LEAD, "2026-10-22");
       expect(mockListMentees).toHaveBeenCalledWith({ access: TEAM_LEAD, mentorUserId: 9002, today: "2026-10-22" });
-      expect(screen.getByRole("heading", { level: 1, name: "Lokesh" })).toBeInTheDocument();
-      expect(screen.getByRole("note")).toHaveTextContent("View only. Lokesh mentors these students");
+      expect(screen.getByRole("heading", { level: 1, name: "Kiran" })).toBeInTheDocument();
+      expect(screen.getByRole("note")).toHaveTextContent("View only. Kiran mentors these students");
       expect(screen.getByRole("link", { name: /Team/ })).toHaveAttribute("href", "/blended-learning");
       expect(screen.getAllByRole("link", { name: "View Ira Attempt" }).length).toBeGreaterThan(0);
       expect(screen.queryByRole("link", { name: /^New log/ })).not.toBeInTheDocument();
@@ -191,7 +191,7 @@ describe("MentorPage", () => {
     expect(mockLoadDashboardChrome).toHaveBeenCalledWith(access);
     expect(screen.getByRole("banner")).toHaveTextContent("Admin access");
     expect(screen.getByRole("link", { name: "Blended Learning" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("heading", { level: 1, name: "Faizan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Asha" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Mentors" })).toHaveAttribute("href", "/blended-learning");
   });
 });
