@@ -2,9 +2,14 @@
 // tab and the route share (client-safe: no server imports).
 //
 // One exam is hard-coded for now: JEE Main 2027, stored against the existing
-// `exam` row named "JEE Mains" with exam_year 2027. There is deliberately no
-// application password anywhere in this module, the tab or its route: a
-// secure (encrypted, write-only for Mentors) password field comes later.
+// `exam` row named "JEE Mains" with exam_year 2027.
+//
+// A Filled form also takes the exam-portal password. It is write-only: the
+// tab only ever learns whether one is saved (`passwordSaved`), never the
+// password, which the server stores as KMS ciphertext and shows only through
+// the logged reveal (`/api/blended-learning/students/[id]/jee-form/password`).
+
+import { APPLICATION_PASSWORD_MAX_LENGTH } from "./competitive-exams";
 
 export const JEE_FORM_EXAM = { label: "JEE Main 2027", examName: "JEE Mains", examYear: 2027 } as const;
 
@@ -70,6 +75,9 @@ export type JeeFormView = {
   earlier: JeeFormUpdate[];
   // The Student's "JEE Form Filling (Reminder)" Action Items.
   reminderItems: JeeReminderItem[];
+  // The JEE Main 2027 record holds an exam-portal password (as ciphertext).
+  // Only ever this flag: the password itself never reaches page data.
+  passwordSaved: boolean;
 };
 
 // One Student's row in the JEE Form tab.
@@ -91,16 +99,20 @@ export function jeeRowStatus(form: JeeFormView): Exclude<JeeFormStatusFilter, "a
 }
 
 export type JeeFormInput =
-  | { status: "filled"; applicationNumber: string }
+  // `password` null keeps the saved password (allowed only when one is saved).
+  | { status: "filled"; applicationNumber: string; password: string | null }
   | { status: "not_filled"; reasons: JeeFormReason[]; details: string | null };
 
-export type JeeFormFieldErrors = Partial<Record<"status" | "applicationNumber" | "reasons" | "details" | "confirmation", string>>;
+export type JeeFormFieldErrors = Partial<
+  Record<"status" | "applicationNumber" | "password" | "reasons" | "details" | "confirmation", string>
+>;
 
 export type JeeFormValidation = { ok: true; input: JeeFormInput } | { ok: false; fieldErrors: JeeFormFieldErrors };
 
 export type RawJeeForm = {
   status?: unknown;
   applicationNumber?: unknown;
+  password?: unknown;
   reasons?: unknown;
   details?: unknown;
 };
@@ -109,13 +121,32 @@ function trimmed(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function validateFilled(raw: RawJeeForm): JeeFormValidation {
+export const JEE_PASSWORD_REQUIRED = "Enter the exam portal password.";
+
+function applicationNumberError(applicationNumber: string): string | null {
+  if (!applicationNumber) return "Enter the application number.";
+  if (applicationNumber.length > JEE_APPLICATION_NUMBER_MAX_LENGTH) return "This application number is too long.";
+  return null;
+}
+
+// Trimmed as the Exams tab trims it; blank means "keep the saved one".
+function passwordError(raw: unknown, password: string, requirePassword: boolean): string | null {
+  if (raw != null && typeof raw !== "string") return "The password must be text.";
+  if (!password) return requirePassword ? JEE_PASSWORD_REQUIRED : null;
+  if (password.length > APPLICATION_PASSWORD_MAX_LENGTH) return "This password is too long.";
+  return null;
+}
+
+function validateFilled(raw: RawJeeForm, requirePassword: boolean): JeeFormValidation {
   const applicationNumber = trimmed(raw.applicationNumber);
-  if (!applicationNumber) return { ok: false, fieldErrors: { applicationNumber: "Enter the application number." } };
-  if (applicationNumber.length > JEE_APPLICATION_NUMBER_MAX_LENGTH) {
-    return { ok: false, fieldErrors: { applicationNumber: "This application number is too long." } };
-  }
-  return { ok: true, input: { status: "filled", applicationNumber } };
+  const password = trimmed(raw.password);
+  const fieldErrors: JeeFormFieldErrors = {};
+  const numberError = applicationNumberError(applicationNumber);
+  if (numberError) fieldErrors.applicationNumber = numberError;
+  const secretError = passwordError(raw.password, password, requirePassword);
+  if (secretError) fieldErrors.password = secretError;
+  if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
+  return { ok: true, input: { status: "filled", applicationNumber, password: password || null } };
 }
 
 function validateNotFilled(raw: RawJeeForm): JeeFormValidation {
@@ -142,9 +173,12 @@ function validateNotFilled(raw: RawJeeForm): JeeFormValidation {
 
 // Reasons come back in the list's order, without repeats. The fields of the
 // other status are ignored, so the form can keep them while the Mentor
-// switches back and forth.
-export function validateJeeForm(raw: RawJeeForm): JeeFormValidation {
-  if (raw.status === "filled") return validateFilled(raw);
+// switches back and forth. `requirePassword` is set when no password is saved
+// yet: a Filled form can't be saved without one (the program team won't take
+// the details now and the password later). The server, which knows whether
+// one is saved only once the Student is in scope, checks that itself.
+export function validateJeeForm(raw: RawJeeForm, { requirePassword = false } = {}): JeeFormValidation {
+  if (raw.status === "filled") return validateFilled(raw, requirePassword);
   if (raw.status === "not_filled") return validateNotFilled(raw);
   return { ok: false, fieldErrors: { status: "Choose Filled or Not filled." } };
 }

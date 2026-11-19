@@ -115,6 +115,13 @@ export default defineConfig({
         HOLISTIC_DICTATION_OPENROUTER_API_KEY: " ",
         DB_SERVICE_URL: `http://localhost:${DB_SERVICE_STUB_PORT}/api`,
         DB_SERVICE_TOKEN: DB_SERVICE_STUB_TOKEN,
+        // Exam-portal passwords are encrypted against the stub's fake KMS,
+        // never a real key; the credentials are placeholders it ignores.
+        EXAM_PASSWORD_KMS_ENDPOINT: `http://localhost:${DB_SERVICE_STUB_PORT}/kms`,
+        EXAM_PASSWORD_KMS_KEY_ID: "e2e-fake-kms-key",
+        EXAM_PASSWORD_KMS_REGION: "ap-south-1",
+        EXAM_PASSWORD_KMS_ACCESS_KEY_ID: "e2e-fake-access-key",
+        EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: "e2e-fake-secret-key",
       },
     },
   ],

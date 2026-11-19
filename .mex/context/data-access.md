@@ -845,7 +845,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   (a done item is completed by a Conversation XOR a JEE form update). Mirrored for e2e by
   `e2e/fixtures/migrations/20261110120000_add_blended_learning_jee_form_updates.sql`, with
   `20260528120000_add_lms_student_documents.sql`, `20261015120000_…exam_details.sql` and
-  `20261019120000_…sessions_applied.sql` for the tables db-dump.sql predates (all pg_dump-identical).
+  `20261019120000_…sessions_applied.sql` for the tables db-dump.sql predates (all pg_dump-identical),
+  and `20261116090707_add_exam_password_ciphertext_and_reveals.sql` (db-service `20261116085521` +
+  `20261116090707`: `application_password_ciphertext` and `lms_exam_password_reveals`).
 - **Write:** `POST /api/blended-learning/students/[id]/jee-form` (multipart) → `recordJeeForm` in
   `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (the Mentor of the active
   Mapping or a Blended Learning Admin; never read-only) + `canAccessBlendedStudent`. Filled:
@@ -859,10 +861,30 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   details) or ticks the Student's open Action Items whose Common Action Item text is "JEE Form
   Filling (Reminder)" (case and spacing ignored; no id is hard-coded). Re-saving the same values is
   a 200 no-op. A failed DB Service/S3 call is a 502 and withdraws the stored PDF.
-- **Never the password:** no read here names `application_password` (no `SELECT *`);
-  `createExamRecordWithoutPassword` / `patchExamRecordWithoutPassword` in
-  `src/lib/db-service-exam-records.ts` send named fields only and never read the DB Service's
-  response body (it contains the password); failures log the status only.
+- **Exam-portal password (write-only):** Filled also takes `password`. It is required (422
+  `fieldErrors.password`, also checked in the browser through `validateJeeForm(…, { requirePassword })`)
+  while the record being written has no `application_password_ciphertext`; once one is saved, a
+  blank password keeps it and a new one replaces it. It is trimmed, ≤ 255, refused (403) for a JNV
+  NVS-only Student (`isPmuOnlyStudent`, a safety net), encrypted with Aman's `encryptExamPassword`
+  (KMS, bound to the Student) before anything is written, sent as `application_password_ciphertext`
+  with the plan's POST/PATCH (or a PATCH of its own when the number is unchanged), then read back
+  from Postgres (`confirmCiphertextStored`) because an old DB Service drops the unknown key with a
+  2xx. A KMS failure is a 502 before any write. Page data carries only `JeeFormView.passwordSaved`
+  (ciphertext IS NOT NULL on the 2027 record), never the password or the ciphertext.
+- **Reveal:** `POST /api/blended-learning/students/[id]/jee-form/password` (`reveal_exam_password`,
+  `Cache-Control: no-store`) → `revealJeeFormPassword` in `src/lib/blended-learning-jee-password.ts`:
+  `canAccessBlendedStudent` (403 otherwise: a Mentor, team leads included, only their own Mentees;
+  admins any mapped Student; read-only accounts too), not JNV NVS-only (403), the 2027 record's
+  ciphertext (404 without one), `decryptExamPassword`, then Aman's `recordExamPasswordReveal` (viewer
+  email + BL role) before the password is returned; a failed log is a 500 and no reveal. The Exams
+  tab's `exam-records-gate` can't be used here (it denies Blended roles). UI: `jee-form/JeePassword.tsx`.
+- **Never the plaintext:** no read or write here names the legacy `application_password` (no `SELECT *`;
+  a record holding only legacy plaintext counts as no password, so the form asks again);
+  `createExamRecordWithoutPlaintext` / `patchExamRecordWithoutPlaintext` in
+  `src/lib/db-service-exam-records.ts` send named fields only (number, year, ciphertext) and never
+  read the DB Service's response body (it contains the legacy password); failures log the status
+  only. Nothing logs a password or ciphertext (error names only). E2E encrypts against a fake KMS in
+  the DB Service stub (`EXAM_PASSWORD_KMS_ENDPOINT`, e2e only).
 - **Read/UI:** the JEE Form tab `/blended-learning/jee-form` (`view_list`) reads `listJeeFormRows`:
   the Students with an active current-year Mapping (a Mentor's own; every Mentor's for an admin),
   then every Student's updates in one query (`row_number()` per Student, newest 20) and their

@@ -21,12 +21,15 @@ import {
 } from "@/lib/blended-learning-jee-form-input";
 
 import { FieldError, GrowingTextarea, LABEL_CLASSES, Optional, SegmentedChoice } from "../students/[id]/log/formParts";
+import { JeePasswordField } from "./JeePassword";
 
 // The JEE form's Filled / Not filled form, opened in a JEE Form tab row.
-// Filled takes the application number and, optionally, the confirmation page
-// PDF, and ticks the "JEE Form Filling (Reminder)" Action Item; Not filled
-// takes one or more reasons (details required for Other) and flags the
-// program team. There is no password field: a write-only one is planned.
+// Filled takes the application number, the exam-portal password (required
+// until one is saved, then optional to replace) and, optionally, the
+// confirmation page PDF, and ticks the "JEE Form Filling (Reminder)" Action
+// Item; Not filled takes one or more reasons (details required for Other) and
+// flags the program team. The password is write-only: it is posted, never
+// prefilled, and dropped with the draft.
 
 const STATUS_OPTIONS = (Object.keys(JEE_FORM_STATUS_LABEL) as JeeFormStatus[]).map((value) => ({
   value,
@@ -36,6 +39,9 @@ const STATUS_OPTIONS = (Object.keys(JEE_FORM_STATUS_LABEL) as JeeFormStatus[]).m
 type Draft = {
   status: JeeFormStatus | null;
   applicationNumber: string;
+  password: string;
+  // A saved password is being replaced (its field is open).
+  replacePassword: boolean;
   confirmation: File | null;
   reasons: JeeFormReason[];
   details: string;
@@ -45,6 +51,8 @@ function draftFrom(current: JeeFormUpdate | null): Draft {
   return {
     status: current?.status ?? null,
     applicationNumber: current?.applicationNumber ?? "",
+    password: "",
+    replacePassword: false,
     confirmation: null,
     reasons: current?.reasons ?? [],
     details: current?.details ?? "",
@@ -81,7 +89,9 @@ function FilledFields({
   fieldErrors,
   reminderOpen,
   confirmationOf,
-}: FieldsProps & { reminderOpen: boolean; confirmationOf: number | null }) {
+  studentId,
+  passwordSaved,
+}: FieldsProps & { reminderOpen: boolean; confirmationOf: number | null; studentId: number; passwordSaved: boolean }) {
   const numberId = useId();
   const fileId = useId();
   return (
@@ -103,6 +113,15 @@ function FilledFields({
         />
         <FieldError message={fieldErrors.applicationNumber} />
       </div>
+      <JeePasswordField
+        studentId={studentId}
+        passwordSaved={passwordSaved}
+        value={draft.password}
+        replacing={draft.replacePassword}
+        error={fieldErrors.password}
+        onChange={(password) => change({ password })}
+        onReplace={(replacePassword) => change({ replacePassword, password: "" })}
+      />
       <div>
         <label htmlFor={fileId} className={LABEL_CLASSES}>
           Confirmation page <Optional />
@@ -191,8 +210,8 @@ function NotFilledFields({ draft, change, fieldErrors }: FieldsProps) {
   );
 }
 
-function clientErrors(draft: Draft): JeeFormFieldErrors | null {
-  const validated = validateJeeForm(draft);
+function clientErrors(draft: Draft, passwordSaved: boolean): JeeFormFieldErrors | null {
+  const validated = validateJeeForm(draft, { requirePassword: !passwordSaved });
   const errors: JeeFormFieldErrors = validated.ok ? {} : { ...validated.fieldErrors };
   if (draft.status === "filled" && draft.confirmation) {
     const error = confirmationError(draft.confirmation);
@@ -206,6 +225,8 @@ function formBody(draft: Draft): FormData {
   body.set("status", draft.status ?? "");
   if (draft.status === "filled") {
     body.set("applicationNumber", draft.applicationNumber);
+    // Blank keeps the saved password, so it isn't sent.
+    if (draft.password.trim()) body.set("password", draft.password);
     if (draft.confirmation) body.set("confirmation", draft.confirmation);
   } else {
     for (const reason of draft.reasons) body.append("reasons", reason);
@@ -255,12 +276,14 @@ function FormActions({ show, saving, onCancel }: { show: boolean; saving: boolea
 export function JeeFormEditor({
   studentId,
   current,
+  passwordSaved,
   reminderOpen,
   onCancel,
   onSaved,
 }: {
   studentId: number;
   current: JeeFormUpdate | null;
+  passwordSaved: boolean;
   reminderOpen: boolean;
   onCancel: () => void;
   onSaved: (form: JeeFormView) => void;
@@ -283,7 +306,7 @@ export function JeeFormEditor({
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    const errors = clientErrors(draft);
+    const errors = clientErrors(draft, passwordSaved);
     if (errors) {
       setFieldErrors(errors);
       return;
@@ -315,6 +338,8 @@ export function JeeFormEditor({
           fieldErrors={fieldErrors}
           reminderOpen={reminderOpen}
           confirmationOf={confirmationOf}
+          studentId={studentId}
+          passwordSaved={passwordSaved}
         />
       )}
       {draft.status === "not_filled" && <NotFilledFields draft={draft} change={change} fieldErrors={fieldErrors} />}

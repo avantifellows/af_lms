@@ -13,6 +13,7 @@ import {
 } from "@/lib/blended-learning-jee-form-input";
 
 import { ConfirmationLink, JeeFormEditor } from "./JeeFormEditor";
+import { JeePasswordReveal } from "./JeePassword";
 import { RecordedOn, updateSummary } from "./jeeFormDisplay";
 
 // An open row of the JEE Form tab. A recorder (the Mentor, or a Blended
@@ -54,13 +55,30 @@ function ReminderItems({ items }: { items: JeeReminderItem[] }) {
   );
 }
 
-function SavedFilled({ studentId, update }: { studentId: number; update: JeeFormUpdate }) {
+function SavedFilled({
+  studentId,
+  update,
+  passwordSaved,
+}: {
+  studentId: number;
+  update: JeeFormUpdate;
+  passwordSaved: boolean;
+}) {
   return (
     <>
       <Row label="Application number">
         <span className="font-mono">{update.applicationNumber}</span>
       </Row>
-      {/* A write-only application password row goes here once it is stored encrypted. */}
+      <Row label="Exam portal password">
+        {passwordSaved ? (
+          <span className="inline-flex flex-wrap items-center gap-x-3">
+            <span>Saved</span>
+            <JeePasswordReveal studentId={studentId} />
+          </span>
+        ) : (
+          <span className="text-text-secondary">Not saved</span>
+        )}
+      </Row>
       <Row label="Confirmation page">
         {update.hasConfirmation ? (
           <ConfirmationLink studentId={studentId} label="View PDF" />
@@ -100,7 +118,7 @@ function SavedStatus({ studentId, form }: { studentId: number; form: JeeFormView
     <div className="space-y-3">
       <dl className="space-y-3">
         {current.status === "filled" ? (
-          <SavedFilled studentId={studentId} update={current} />
+          <SavedFilled studentId={studentId} update={current} passwordSaved={form.passwordSaved} />
         ) : (
           <SavedNotFilled update={current} />
         )}
@@ -194,6 +212,7 @@ export function JeeFormPanel({
         <JeeFormEditor
           studentId={studentId}
           current={form.current}
+          passwordSaved={form.passwordSaved}
           reminderOpen={form.reminderItems.some((item) => item.status === "open")}
           onCancel={onClose}
           onSaved={handleSaved}

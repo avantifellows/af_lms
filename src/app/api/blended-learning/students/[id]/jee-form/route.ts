@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { failureResponse, withBlendedLearning } from "@/lib/blended-learning-guard";
 import { recordJeeForm, type ConfirmationFile } from "@/lib/blended-learning-jee-form";
 
-// Record a Mentee's JEE Main 2027 form status from the card on their page:
-// multipart `status` (filled | not_filled), `applicationNumber` and an
-// optional `confirmation` PDF when filled, or one `reasons` entry per reason
-// and optional `details` when not. The Mentor of an active Mapping or a
-// Blended Learning Admin records it; read-only accounts get 403. There is no
-// password field, and the response never carries one.
+// Record a Mentee's JEE Main 2027 form status from the JEE Form tab:
+// multipart `status` (filled | not_filled), `applicationNumber`, the
+// exam-portal `password` (required while none is saved; blank keeps the saved
+// one) and an optional `confirmation` PDF when filled, or one `reasons` entry
+// per reason and optional `details` when not. The Mentor of an active Mapping
+// or a Blended Learning Admin records it; read-only accounts get 403. The
+// password is stored only as KMS ciphertext, and the response carries only
+// whether one is saved (`passwordSaved`), never the password.
 export const POST = withBlendedLearning("record_jee_form", async (request, { access, id }) => {
   let form: FormData;
   try {
@@ -30,6 +32,7 @@ export const POST = withBlendedLearning("record_jee_form", async (request, { acc
     {
       status: form.get("status"),
       applicationNumber: form.get("applicationNumber"),
+      password: form.get("password"),
       reasons: form.getAll("reasons"),
       details: form.get("details"),
     },

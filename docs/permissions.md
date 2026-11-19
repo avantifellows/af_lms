@@ -204,6 +204,12 @@ school-scoped, never a JNV NVS Student), so a teacher sees their schools' Studen
 their assigned schools'. Every reveal is logged to `lms_exam_password_reveals`. Every other
 role is `none`.
 
+Blended Learning roles don't use `exam_passwords`. On the Blended Learning JEE form, the
+Mentor (not read-only) or a Blended Learning Admin who records the form sets the password, and
+anyone with Blended Learning access may reveal it for a Student in their scope: a Mentor
+(team leads included) only for their own active Mentees, a `blended_admin` or LMS `admin` for
+any Student with an active Mapping. Those reveals are logged to `lms_exam_password_reveals` too.
+
 ### NVS-Only Users
 
 | Feature | Teacher | Program Manager | Program Admin | Admin |

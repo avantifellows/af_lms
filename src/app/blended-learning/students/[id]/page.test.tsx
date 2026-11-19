@@ -89,7 +89,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   };
 }
 
-const JEE_FORM = { current: null, earlier: [], reminderItems: [] };
+const JEE_FORM = { current: null, earlier: [], reminderItems: [], passwordSaved: false };
 
 function signedInAs(access: { actorEmail: string }) {
   mockGetServerSession.mockResolvedValue({ user: { email: access.actorEmail } });
@@ -666,7 +666,7 @@ describe("MenteeDetailPage", () => {
 
     it("shows Filled with the application number, and Update for a recorder", async () => {
       signedInAs(MENTOR);
-      mockGetJeeForm.mockResolvedValue({ current: FILLED, earlier: [], reminderItems: [] });
+      mockGetJeeForm.mockResolvedValue({ current: FILLED, earlier: [], reminderItems: [], passwordSaved: false });
 
       await renderPage();
 
@@ -678,7 +678,7 @@ describe("MenteeDetailPage", () => {
 
     it("shows Not filled with its reasons", async () => {
       signedInAs(MENTOR);
-      mockGetJeeForm.mockResolvedValue({ current: NOT_FILLED, earlier: [], reminderItems: [] });
+      mockGetJeeForm.mockResolvedValue({ current: NOT_FILLED, earlier: [], reminderItems: [], passwordSaved: false });
 
       await renderPage();
 

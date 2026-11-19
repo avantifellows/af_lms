@@ -8,6 +8,12 @@
 //   POST   /api/lms-student-document      insert
 //   DELETE /api/lms-student-document/:id  soft delete
 //
+// It also stands in for AWS KMS at /kms (EXAM_PASSWORD_KMS_ENDPOINT), so the
+// exam-portal password can be set and revealed without real credentials:
+// Encrypt and Decrypt only, with a fake "ciphertext" that is the plaintext
+// and its key and encryption context in base64 JSON. Decrypt refuses one made
+// under another key or context, as KMS does. Test data only: never real KMS.
+//
 // Like the real service it answers with the whole record, application
 // password included, so specs can prove the app never passes it on. Every
 // request is kept for specs to read at GET /__requests. Anything else is 404.
@@ -38,11 +44,12 @@ const EXAM_RECORD_FIELDS = [
   "exam_id",
   "application_number",
   "application_password",
+  "application_password_ciphertext",
   "exam_year",
   "sessions_applied",
 ];
 const EXAM_RECORD_COLUMNS =
-  "id, student_id, exam_id, application_number, application_password, exam_year, sessions_applied";
+  "id, student_id, exam_id, application_number, application_password, application_password_ciphertext, exam_year, sessions_applied";
 const requests = [];
 
 function send(res, status, body) {
@@ -122,6 +129,45 @@ const ROUTES = [
   }],
 ];
 
+// --- Fake KMS (JSON 1.1 protocol: the operation is in X-Amz-Target) --------
+
+function sendKms(res, status, body) {
+  res.writeHead(status, { "content-type": "application/x-amz-json-1.1" });
+  res.end(JSON.stringify(body));
+}
+
+function sameContext(a = {}, b = {}) {
+  return JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+}
+
+function fakeKms(target, body) {
+  if (target === "TrentService.Encrypt") {
+    const sealed = { k: body.KeyId, c: body.EncryptionContext ?? {}, p: body.Plaintext };
+    return [200, { KeyId: body.KeyId, CiphertextBlob: Buffer.from(JSON.stringify(sealed)).toString("base64") }];
+  }
+  if (target === "TrentService.Decrypt") {
+    let sealed = null;
+    try {
+      sealed = JSON.parse(Buffer.from(body.CiphertextBlob, "base64").toString("utf8"));
+    } catch {
+      sealed = null;
+    }
+    if (!sealed || sealed.k !== body.KeyId || !sameContext(sealed.c, body.EncryptionContext)) {
+      return [400, { __type: "InvalidCiphertextException", message: "fake KMS: wrong key or context" }];
+    }
+    return [200, { KeyId: sealed.k, Plaintext: sealed.p }];
+  }
+  return [400, { __type: "UnsupportedOperationException", message: `fake KMS: ${target}` }];
+}
+
+async function routeKms(req, res) {
+  const body = await readBody(req);
+  const target = String(req.headers["x-amz-target"] ?? "");
+  // Only the operation is kept: never the plaintext or the ciphertext.
+  requests.push({ method: req.method, path: "/kms", body: { target } });
+  return sendKms(res, ...fakeKms(target, body));
+}
+
 function inspect(req, res, pathname) {
   if (pathname === "/__health") return send(res, 200, { ok: true });
   if (req.method === "DELETE") requests.length = 0;
@@ -133,6 +179,7 @@ function inspect(req, res, pathname) {
 async function route(req, res) {
   const { pathname } = new URL(req.url, `http://localhost:${PORT}`);
   if (pathname === "/__health" || pathname === "/__requests") return inspect(req, res, pathname);
+  if (pathname === "/kms" || pathname.startsWith("/kms/")) return routeKms(req, res);
   if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(res, 401, { error: "Unauthorized" });
 
   const body = req.method === "POST" || req.method === "PATCH" ? await readBody(req) : null;

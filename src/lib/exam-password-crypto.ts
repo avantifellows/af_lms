@@ -18,6 +18,9 @@ function client(): KMSClient {
   if (!_client) {
     _client = new KMSClient({
       region: process.env.EXAM_PASSWORD_KMS_REGION || "ap-south-1",
+      // e2e only: the fake KMS in e2e/helpers/db-service-stub.mjs. Unset
+      // everywhere else, so the SDK uses the real regional endpoint.
+      endpoint: process.env.EXAM_PASSWORD_KMS_ENDPOINT || undefined,
       credentials: {
         accessKeyId: process.env.EXAM_PASSWORD_KMS_ACCESS_KEY_ID || "",
         secretAccessKey: process.env.EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY || "",

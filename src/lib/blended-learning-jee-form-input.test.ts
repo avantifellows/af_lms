@@ -34,7 +34,7 @@ describe("validateJeeForm", () => {
   it("takes a trimmed application number for Filled and ignores the Not filled fields", () => {
     expect(validateJeeForm({ status: "filled", applicationNumber: " 2703 ", reasons: ["other"], details: "x" })).toEqual({
       ok: true,
-      input: { status: "filled", applicationNumber: "2703" },
+      input: { status: "filled", applicationNumber: "2703", password: null },
     });
     expect(validateJeeForm({ status: "filled", applicationNumber: " " })).toEqual({
       ok: false,
@@ -42,6 +42,40 @@ describe("validateJeeForm", () => {
     });
     expect(validateJeeForm({ status: "filled", applicationNumber: "1".repeat(256) }).ok).toBe(false);
     expect(validateJeeForm({ status: "filled", applicationNumber: "1".repeat(255) }).ok).toBe(true);
+  });
+
+  it("needs the exam portal password for Filled while none is saved, and keeps a saved one when left blank", () => {
+    const filled = { status: "filled", applicationNumber: "2703" };
+    expect(validateJeeForm({ ...filled, password: "  " }, { requirePassword: true })).toEqual({
+      ok: false,
+      fieldErrors: { password: "Enter the exam portal password." },
+    });
+    // Both missing fields are named at once.
+    expect(validateJeeForm({ status: "filled", applicationNumber: "" }, { requirePassword: true })).toEqual({
+      ok: false,
+      fieldErrors: { applicationNumber: "Enter the application number.", password: "Enter the exam portal password." },
+    });
+    expect(validateJeeForm({ ...filled, password: " fake-secret-1 " }, { requirePassword: true })).toEqual({
+      ok: true,
+      input: { status: "filled", applicationNumber: "2703", password: "fake-secret-1" },
+    });
+    expect(validateJeeForm({ ...filled, password: "" })).toEqual({
+      ok: true,
+      input: { status: "filled", applicationNumber: "2703", password: null },
+    });
+  });
+
+  it("refuses a password that isn't text or is over 255 characters, and ignores it for Not filled", () => {
+    const filled = { status: "filled", applicationNumber: "2703" };
+    expect(validateJeeForm({ ...filled, password: 42 })).toEqual({
+      ok: false,
+      fieldErrors: { password: "The password must be text." },
+    });
+    expect(validateJeeForm({ ...filled, password: "p".repeat(256) }).ok).toBe(false);
+    expect(validateJeeForm({ ...filled, password: "p".repeat(255) }).ok).toBe(true);
+    expect(
+      validateJeeForm({ status: "not_filled", reasons: ["not_aware"], password: "" }, { requirePassword: true })
+    ).toEqual({ ok: true, input: { status: "not_filled", reasons: ["not_aware"], details: null } });
   });
 
   it("takes Not filled reasons in the list's order without repeats, with optional details", () => {

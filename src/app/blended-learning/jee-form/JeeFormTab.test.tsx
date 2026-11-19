@@ -53,7 +53,7 @@ function row(studentId: number, name: string, current: JeeFormUpdate | null, men
     name,
     mentorUserId: mentor,
     mentorName: mentor === 9001 ? "Mentor Alpha" : "Mentor Beta",
-    form: { current, earlier: [], reminderItems: [REMINDER] },
+    form: { current, earlier: [], reminderItems: [REMINDER], passwordSaved: false },
   };
 }
 
@@ -173,7 +173,12 @@ describe("JeeFormTab rows", () => {
   });
 
   it("saves in place: the row and the counts update, and it stays listed under the filter", async () => {
-    const saved: JeeFormView = { current: { ...FILLED, id: 9, applicationNumber: "2703" }, earlier: [], reminderItems: [] };
+    const saved: JeeFormView = {
+      current: { ...FILLED, id: 9, applicationNumber: "2703" },
+      earlier: [],
+      reminderItems: [],
+      passwordSaved: true,
+    };
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ form: saved }), { status: 201 }));
     goTo("?status=not_recorded&student=501");
     render(<JeeFormTab rows={ROWS} canRecord showMentor={false} />);
@@ -181,6 +186,7 @@ describe("JeeFormTab rows", () => {
     const asha = rowOf("Asha Testcase");
     await userEvent.click(within(asha).getByRole("radio", { name: "Filled" }));
     await userEvent.type(within(asha).getByLabelText("Application number"), "2703");
+    await userEvent.type(within(asha).getByLabelText("Exam portal password"), "fake-portal-pass-1");
     await userEvent.click(within(asha).getByRole("button", { name: "Save" }));
 
     expect(await within(asha).findByRole("status")).toHaveTextContent("Saved");

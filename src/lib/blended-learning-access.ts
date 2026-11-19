@@ -20,7 +20,8 @@ export type BlendedLearningAction =
   | "view_flags"
   | "view_mentors"
   | "manage"
-  | "record_jee_form";
+  | "record_jee_form"
+  | "reveal_exam_password";
 
 export type BlendedLearningAccess = {
   // A Blended Learning Mentor sees and logs for their own Mentees; a Blended
@@ -121,7 +122,11 @@ export async function getBlendedLearningAccess(
 // listMentorCards). Everyone sees flags: an
 // admin every flag, a Mentor only those on their own Students
 // (blended-learning-flags). The JEE form is recorded by the Mentor or a
-// Blended Learning Admin, never by a read-only account.
+// Blended Learning Admin, never by a read-only account (with it, the Mentee's
+// exam-portal password). Anyone with access may reveal that password, read-only
+// included, but only for a Student in their scope (canAccessBlendedStudent:
+// a Mentor's own Mentees, any mapped Student for an admin); each reveal is
+// logged (blended-learning-jee-password).
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction

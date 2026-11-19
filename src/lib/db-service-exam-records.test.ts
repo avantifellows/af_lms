@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DbServiceExamRecordStatusError,
   createExamRecord,
-  createExamRecordWithoutPassword,
+  createExamRecordWithoutPlaintext,
   deleteExamRecord,
-  patchExamRecordWithoutPassword,
+  patchExamRecordWithoutPlaintext,
   updateExamRecord,
   type ExamRecordWrite,
 } from "./db-service-exam-records";
@@ -15,8 +15,8 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
 }
 
-// The DB Service answers a write with the whole record, password included:
-// the password-free writes must send none and never read the answer.
+// The DB Service answers a write with the whole record, legacy password
+// included: the plaintext-free writes must send none and never read the answer.
 const ANSWER = JSON.stringify({ id: 77, application_password: "do-not-read" });
 
 function answer(status: number) {
@@ -104,13 +104,13 @@ describe("db-service exam record writes", () => {
   });
 });
 
-describe("password-free exam record writes", () => {
+describe("plaintext-free exam record writes", () => {
   it("creates with exactly the four named fields, even if the caller passes more, and never reads the answer", async () => {
     const reply = answer(201);
     mockFetch.mockResolvedValue(reply.response);
 
     const input = { student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", application_password: "x" };
-    await createExamRecordWithoutPassword(input);
+    await createExamRecordWithoutPlaintext(input);
 
     expect(mockFetch).toHaveBeenCalledWith("http://db/student-exam-record", {
       method: "POST",
@@ -124,8 +124,8 @@ describe("password-free exam record writes", () => {
   it("patches only the number (and the year when given), so the stored password is left as it is", async () => {
     mockFetch.mockImplementation(async () => answer(200).response);
 
-    await patchExamRecordWithoutPassword(77, { application_number: "2703" });
-    await patchExamRecordWithoutPassword(55, { application_number: "2703", exam_year: 2027 });
+    await patchExamRecordWithoutPlaintext(77, { application_number: "2703" });
+    await patchExamRecordWithoutPlaintext(55, { application_number: "2703", exam_year: 2027 });
 
     expect(mockFetch.mock.calls.map(([url, init]) => [url, init.method, init.body])).toEqual([
       ["http://db/student-exam-record/77", "PATCH", JSON.stringify({ application_number: "2703" })],
@@ -137,13 +137,32 @@ describe("password-free exam record writes", () => {
     ]);
   });
 
+  it("sends a ciphertext under its own key, never as the plaintext column", async () => {
+    mockFetch.mockImplementation(async () => answer(200).response);
+
+    await createExamRecordWithoutPlaintext({
+      student_id: 501,
+      exam_id: 1,
+      exam_year: 2027,
+      application_number: "2703",
+      application_password_ciphertext: "Q0lQSEVS",
+    });
+    await patchExamRecordWithoutPlaintext(77, { application_password_ciphertext: "Q0lQSEVS" });
+
+    expect(mockFetch.mock.calls.map(([, init]) => JSON.parse(init.body))).toEqual([
+      { student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", application_password_ciphertext: "Q0lQSEVS" },
+      { application_password_ciphertext: "Q0lQSEVS" },
+    ]);
+    for (const [, init] of mockFetch.mock.calls) expect(init.body).not.toMatch(/"application_password"/);
+  });
+
   it("throws only the status on a refusal, without reading the body", async () => {
     const reply = answer(422);
     mockFetch.mockResolvedValue(reply.response);
 
-    const error = await patchExamRecordWithoutPassword(77, { application_number: "2703" }).catch((e: unknown) => e);
+    const error = await patchExamRecordWithoutPlaintext(77, { application_number: "2703" }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DbServiceExamRecordStatusError);
-    expect(error).toMatchObject({ status: 422, message: "patchExamRecordWithoutPassword failed (422)" });
+    expect(error).toMatchObject({ status: 422, message: "patchExamRecordWithoutPlaintext failed (422)" });
     expect(reply.text).not.toHaveBeenCalled();
     expect(reply.json).not.toHaveBeenCalled();
   });

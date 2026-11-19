@@ -17,7 +17,9 @@ import {
 // student_exam_record the way the DB Service does. Mentor C's JEE form
 // Mentees exist only for this spec; the tests build on each other, so they
 // run in order. E2E has no S3, so the confirmation PDF upload is covered by
-// the route tests; here only its control is checked.
+// the route tests; here only its control is checked. The exam-portal password
+// is encrypted and revealed against the stub's fake KMS; the passwords below
+// are synthetic.
 const BLENDED_ADMIN = { name: "Synthetic Blended Admin", email: "e2e-blended-admin@test.local" };
 const BLENDED_ADMIN_READ_ONLY = {
   name: "Synthetic Blended Admin Read Only",
@@ -28,6 +30,9 @@ const TAB = "/blended-learning/jee-form";
 const STATUS_LINE = "JEE Main 2027 form";
 const STATUS_QUESTION = "Has the student filled the form?";
 const REASONS = "Why hasn't it been filled?";
+const PASSWORD_LABEL = "Exam portal password";
+const MENTOR_PASSWORD = "e2e-portal-pass-1";
+const PHONE_PASSWORD = "e2e-portal-pass-2";
 
 const studentIds: Record<string, number> = {};
 
@@ -52,8 +57,37 @@ test.beforeAll(async () => {
   await fetch(`${STUB}/__requests`, { method: "DELETE" });
 });
 
-async function stubRequests(): Promise<StubRequest[]> {
+async function allStubRequests(): Promise<StubRequest[]> {
   return (await fetch(`${STUB}/__requests`)).json();
+}
+
+// What the app sent the DB Service (the fake KMS calls aside).
+async function stubRequests(): Promise<StubRequest[]> {
+  return (await allStubRequests()).filter((request) => request.path !== "/kms");
+}
+
+// The fake KMS operations the app called, in order.
+async function kmsCalls(): Promise<string[]> {
+  return (await allStubRequests()).filter((request) => request.path === "/kms").map((request) => String(request.body?.target));
+}
+
+function passwordUrl(mentee: { key: string }) {
+  return `/api/blended-learning/students/${studentIds[mentee.key]}/jee-form/password`;
+}
+
+// The reveal log's rows for a Student.
+async function reveals(studentId: number) {
+  return withPool(async (pool) => {
+    const result = await pool.query<{ viewer_email: string; viewer_role: string; on_jee_record: boolean }>(
+      `SELECT r.viewer_email, r.viewer_role,
+              EXISTS (SELECT 1 FROM student_exam_record ser
+                      WHERE ser.id = r.student_exam_record_id AND ser.student_id = r.student_id
+                        AND ser.exam_id = r.exam_id AND ser.exam_year = 2027) AS on_jee_record
+       FROM lms_exam_password_reveals r WHERE r.student_id = $1 ORDER BY r.id`,
+      [studentId]
+    );
+    return result.rows;
+  });
 }
 
 function detailPath(mentee: { key: string }) {
@@ -148,12 +182,20 @@ async function updates(studentId: number) {
   });
 }
 
-// The Student's JEE Mains records. The password is compared in SQL, never read.
+// The Student's JEE Mains records. The legacy plaintext password is compared
+// in SQL, never read; of the ciphertext only whether there is one.
 async function jeeRecords(studentId: number, password: string | null = null) {
   return withPool(async (pool) => {
-    const result = await pool.query<{ id: string; exam_year: number | null; application_number: string; password_kept: boolean }>(
+    const result = await pool.query<{
+      id: string;
+      exam_year: number | null;
+      application_number: string;
+      password_kept: boolean;
+      ciphertext_saved: boolean;
+    }>(
       `SELECT ser.id, ser.exam_year, ser.application_number,
-              ser.application_password IS NOT DISTINCT FROM $2::varchar AS password_kept
+              ser.application_password IS NOT DISTINCT FROM $2::varchar AS password_kept,
+              ser.application_password_ciphertext IS NOT NULL AS ciphertext_saved
        FROM student_exam_record ser JOIN exam ON exam.id = ser.exam_id
        WHERE ser.student_id = $1 AND exam.name = 'JEE Mains'
        ORDER BY ser.id`,
@@ -299,16 +341,31 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(row(page, mentee)).toBeInViewport();
   });
 
-  test("Filled needs the number, records it through the DB Service and ticks the reminder", async ({ page }) => {
+  test("Filled needs the number and the password, records them through the DB Service (the password as ciphertext) and ticks the reminder", async ({ page }) => {
+    await fetch(`${STUB}/__requests`, { method: "DELETE" });
     await signInAs(page, BLENDED_MENTOR_C);
     await page.goto(tabFor(mentee));
     const open = row(page, mentee);
     await open.getByRole("radio", { name: "Filled", exact: true }).check();
     await expect(open.getByText(/Saving ticks the student's “JEE Form Filling \(Reminder\)” action item/)).toBeVisible();
     await expect(open.getByLabel(/Confirmation page/)).toHaveAttribute("type", "file");
+    await expect(open.getByLabel(PASSWORD_LABEL)).toHaveAttribute("type", "password");
     await open.getByRole("button", { name: "Save" }).click();
     await expect(open.getByText("Enter the application number.")).toBeVisible();
+    await expect(open.getByText("Enter the exam portal password.")).toBeVisible();
     await open.getByLabel("Application number").fill("E2E-JEE-0001");
+    await open.getByRole("button", { name: "Save" }).click();
+    // No number now and password later: the form isn't sent without it.
+    await expect(open.getByText("Enter the exam portal password.")).toBeVisible();
+    expect(await stubRequests()).toEqual([]);
+    // Nor does the server take one.
+    const partial = await page.request.post(jeeFormUrl(mentee), {
+      multipart: { status: "filled", applicationNumber: "E2E-JEE-0001" },
+    });
+    expect(partial.status()).toBe(422);
+    expect((await partial.json()).fieldErrors).toEqual({ password: "Enter the exam portal password." });
+
+    await open.getByLabel(PASSWORD_LABEL).fill(MENTOR_PASSWORD);
     await open.getByRole("button", { name: "Save" }).click();
 
     await expect(open.getByRole("status")).toHaveText("Saved");
@@ -322,16 +379,27 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expectCounts(page, BLENDED_MENTOR_C.email);
 
     const studentId = studentIds[mentee.key];
-    expect(await stubRequests()).toEqual([
-      {
-        method: "POST",
-        path: "/api/student-exam-record",
-        body: { student_id: studentId, exam_id: expect.any(Number), exam_year: 2027, application_number: "E2E-JEE-0001" },
+    const [created] = await stubRequests();
+    expect(created).toEqual({
+      method: "POST",
+      path: "/api/student-exam-record",
+      body: {
+        student_id: studentId,
+        exam_id: expect.any(Number),
+        exam_year: 2027,
+        application_number: "E2E-JEE-0001",
+        application_password_ciphertext: expect.any(String),
       },
-    ]);
+    });
+    expect(created.body?.application_password_ciphertext).not.toContain(MENTOR_PASSWORD);
+    expect(await kmsCalls()).toEqual(["TrentService.Encrypt"]);
+    // The legacy plaintext column stays empty; only the ciphertext is stored.
     expect(await jeeRecords(studentId)).toEqual([
-      { id: expect.any(String), exam_year: 2027, application_number: "E2E-JEE-0001", password_kept: true },
+      { id: expect.any(String), exam_year: 2027, application_number: "E2E-JEE-0001", password_kept: true, ciphertext_saved: true },
     ]);
+    // Page data says only that one is saved.
+    await expect(open.getByText("Exam portal password")).toBeVisible();
+    expect(await page.content()).not.toContain(MENTOR_PASSWORD);
     expect(await reminder(studentId)).toEqual([
       expect.objectContaining({ status: "done", ticked_by_jee_form: true, completed_by_email: BLENDED_MENTOR_C.email }),
     ]);
@@ -344,6 +412,34 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(page.getByRole("region", { name: "Open Action Items" }).getByText(JEE_REMINDER_TEXT)).toHaveCount(0);
   });
 
+  test("the Mentor reveals their own Mentee's password with Show password, and each reveal is logged", async ({ page }) => {
+    await signInAs(page, BLENDED_MENTOR_C);
+    await page.goto(tabFor(mentee));
+    const open = row(page, mentee);
+    await expect(open.getByText("Password saved")).toBeVisible();
+    await expect(open.getByLabel(PASSWORD_LABEL)).toHaveCount(0);
+    // The row is server-rendered open: wait for hydration, or the click lands
+    // on a button with no handler yet.
+    await page.waitForLoadState("networkidle");
+    const response = page.waitForResponse((res) => res.url().endsWith(passwordUrl(mentee)));
+    await open.getByRole("button", { name: "Show password" }).click();
+    const revealed = await response;
+    expect(revealed.request().method()).toBe("POST");
+    expect(revealed.headers()["cache-control"]).toBe("no-store");
+    await expect(open.getByText(MENTOR_PASSWORD)).toBeVisible();
+    await open.getByRole("button", { name: "Hide password" }).click();
+    await expect(open.getByText(MENTOR_PASSWORD)).toHaveCount(0);
+
+    expect(await reveals(studentIds[mentee.key])).toEqual([
+      { viewer_email: BLENDED_MENTOR_C.email, viewer_role: "blended_mentor", on_jee_record: true },
+    ]);
+
+    // Saving again without a new password keeps it.
+    await open.getByRole("button", { name: "Save" }).click();
+    await expect(open.getByRole("status")).toHaveText("Saved");
+    expect(await jeeRecords(studentIds[mentee.key])).toEqual([expect.objectContaining({ ciphertext_saved: true })]);
+  });
+
   test("a read-only admin sees the tab and opens a row, but can't record", async ({ page }) => {
     await signInAs(page, BLENDED_ADMIN_READ_ONLY);
     await page.goto(tabFor(mentee));
@@ -354,6 +450,14 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(open.getByRole("button", { name: "Change status" })).toHaveCount(0);
     const res = await page.request.post(jeeFormUrl(mentee), { multipart: { status: "not_filled", reasons: "not_aware" } });
     expect(res.status()).toBe(403);
+    // Showing the password is a view: a read-only admin may, and it is logged.
+    await open.getByRole("button", { name: "Show password" }).click();
+    await expect(open.getByText(MENTOR_PASSWORD)).toBeVisible();
+    expect((await reveals(studentIds[mentee.key])).at(-1)).toEqual({
+      viewer_email: BLENDED_ADMIN_READ_ONLY.email,
+      viewer_role: "blended_admin",
+      on_jee_record: true,
+    });
 
     await page.goto(detailPath(mentee));
     await expect(statusLine(page).getByRole("link", { name: "View in JEE tab" })).toHaveAttribute("href", tabFor(mentee));
@@ -367,6 +471,12 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     const res = await page.request.post(jeeFormUrl(mentee), { multipart: { status: "not_filled", reasons: "not_aware" } });
     expect(res.status()).toBe(404);
     expect((await updates(studentIds[mentee.key])).length).toBe(2);
+    // Nor reveal their password: refused, and nothing logged.
+    const logged = (await reveals(studentIds[mentee.key])).length;
+    const reveal = await page.request.post(passwordUrl(mentee));
+    expect(reveal.status()).toBe(403);
+    expect(await reveal.text()).not.toContain(MENTOR_PASSWORD);
+    expect((await reveals(studentIds[mentee.key])).length).toBe(logged);
   });
 });
 
@@ -374,7 +484,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
   test.use({ viewport: { width: 390, height: 844 } });
   const mentee = JEE_FORM_MENTEES.mobile;
 
-  test("fits the phone and updates the yearless JEE Mains record holding the number, never reading or showing its password", async ({ page }) => {
+  test("fits the phone and updates the yearless JEE Mains record holding the number, never reading or showing its legacy password", async ({ page }) => {
     await fetch(`${STUB}/__requests`, { method: "DELETE" });
     const studentId = studentIds[mentee.key];
     const [existing] = await jeeRecords(studentId, JEE_EXISTING_RECORD.password);
@@ -392,25 +502,42 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
     const open = row(page, mentee);
     await open.getByRole("radio", { name: "Filled", exact: true }).check();
     await open.getByLabel("Application number").fill(JEE_EXISTING_RECORD.applicationNumber);
+    // A legacy plaintext password doesn't count as saved: the form asks again.
+    await open.getByLabel(PASSWORD_LABEL).fill(PHONE_PASSWORD);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     const response = page.waitForResponse((res) => res.url().endsWith(jeeFormUrl(mentee)));
     await open.getByRole("button", { name: "Save" }).click();
     const saved = await response;
 
     expect(saved.status()).toBe(201);
-    expect(await saved.text()).not.toMatch(/password/i);
+    const savedText = await saved.text();
+    for (const secret of [JEE_EXISTING_RECORD.password, PHONE_PASSWORD]) expect(savedText).not.toContain(secret);
+    expect(savedText).not.toMatch(/application_password|ciphertext/i);
+    expect((await saved.json()).form.passwordSaved).toBe(true);
     await expect(rowToggle(page, mentee)).toContainText(JEE_EXISTING_RECORD.applicationNumber);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     expect(await stubRequests()).toEqual([
       {
         method: "PATCH",
         path: `/api/student-exam-record/${existing.id}`,
-        body: { application_number: JEE_EXISTING_RECORD.applicationNumber, exam_year: 2027 },
+        body: {
+          application_number: JEE_EXISTING_RECORD.applicationNumber,
+          exam_year: 2027,
+          application_password_ciphertext: expect.any(String),
+        },
       },
     ]);
-    // Still one record, now for 2027, its password untouched.
+    // Still one record, now for 2027, with the ciphertext; the legacy column
+    // is neither read nor written (the backfill re-encrypts only rows without
+    // a ciphertext, so it won't overwrite this one).
     expect(await jeeRecords(studentId, JEE_EXISTING_RECORD.password)).toEqual([
-      { id: existing.id, exam_year: 2027, application_number: JEE_EXISTING_RECORD.applicationNumber, password_kept: true },
+      {
+        id: existing.id,
+        exam_year: 2027,
+        application_number: JEE_EXISTING_RECORD.applicationNumber,
+        password_kept: true,
+        ciphertext_saved: true,
+      },
     ]);
     expect(await page.content()).not.toContain(JEE_EXISTING_RECORD.password);
   });
@@ -483,6 +610,10 @@ test.describe("Blended Learning JEE Form tab — Blended Learning Admin", () => 
   });
 });
 
-test("no request the tab made to the DB Service carried a password", async () => {
-  for (const request of await stubRequests()) expect(JSON.stringify(request.body ?? {})).not.toMatch(/password/i);
+test("no request the tab made to the DB Service carried the plaintext column or a typed password", async () => {
+  for (const request of await allStubRequests()) {
+    const body = JSON.stringify(request.body ?? {});
+    expect(body).not.toMatch(/"application_password"/);
+    for (const secret of [MENTOR_PASSWORD, PHONE_PASSWORD]) expect(body).not.toContain(secret);
+  }
 });

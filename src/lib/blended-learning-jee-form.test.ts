@@ -93,6 +93,7 @@ describe("listJeeFormRows", () => {
       if (text.includes("FROM blended_learning_action_items item")) {
         return [{ student_id: 502, id: 81, text: "JEE Form Filling (Reminder)", status: "open" }];
       }
+      if (text.includes("FROM student_exam_record ser")) return [{ student_id: 501 }];
       throw new Error(`Unexpected query: ${text}`);
     }) as typeof query);
   });
@@ -107,10 +108,12 @@ describe("listJeeFormRows", () => {
     expect(rows?.[0].form.current).toMatchObject({ id: 12, status: "filled", applicationNumber: "2712" });
     expect(rows?.[0].form.earlier.map((item) => item.id)).toEqual([10]);
     expect(rows?.[0].form.reminderItems).toEqual([]);
+    expect(rows?.[0].form.passwordSaved).toBe(true);
     expect(rows?.[1].form).toEqual({
       current: null,
       earlier: [],
       reminderItems: [{ id: 81, text: "JEE Form Filling (Reminder)", status: "open" }],
+      passwordSaved: false,
     });
 
     const mappings = sql.find(({ text }) => text.includes("FROM blended_learning_mentor_mentee_mappings"));
@@ -120,6 +123,10 @@ describe("listJeeFormRows", () => {
     const updates = sql.filter(({ text }) => text.includes("FROM blended_learning_jee_form_updates u"));
     expect(updates.map(({ params }) => params)).toEqual([[[501, 502], 1, 2027]]);
     expect(updates[0].text).toMatch(/row_number\(\) OVER \(PARTITION BY u\.student_id ORDER BY u\.id DESC\)/);
+    // One read of which Students' JEE Mains 2027 record holds a ciphertext.
+    const saved = sql.filter(({ text }) => text.includes("FROM student_exam_record ser"));
+    expect(saved.map(({ params }) => params)).toEqual([[[501, 502], 1, 2027]]);
+    expect(saved[0].text).toMatch(/application_password_ciphertext IS NOT NULL/);
   });
 
   it("reads every Mentor's Students for an admin", async () => {
@@ -137,10 +144,11 @@ describe("listJeeFormRows", () => {
     expect(await listJeeFormRows(ADMIN)).toBeNull();
   });
 
-  it("never selects everything or names the application password", async () => {
+  it("never selects everything, the ciphertext or the legacy plaintext password", async () => {
     await listJeeFormRows(ADMIN);
     for (const { text } of sql) {
-      expect(text).not.toMatch(/password/i);
+      // Only `application_password_ciphertext IS NOT NULL`, never the column's value.
+      expect(text.replace(/application_password_ciphertext IS NOT NULL/g, "")).not.toMatch(/password/i);
       expect(text).not.toMatch(/SELECT\s+\*/i);
     }
   });

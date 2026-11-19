@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { EncryptCommand, KMSClient } from "@aws-sdk/client-kms";
 import { routeParams } from "@/app/api/__test-utils__/api-test-helpers";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
@@ -10,12 +11,14 @@ vi.mock("@/lib/db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 import { getServerSession } from "next-auth";
 import { query, withTransaction } from "@/lib/db";
 import { POST } from "./route";
+import { __resetKmsClientForTesting } from "@/lib/exam-password-crypto";
 
 const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
-// S3 and the DB Service are the write's process boundaries.
+// S3, KMS and the DB Service are the write's process boundaries.
 const s3 = mockClient(S3Client);
+const kms = mockClient(KMSClient);
 
 const MENTOR_A = "bl-mentor@example.org";
 const ADMIN = "bl-admin@example.org";
@@ -33,12 +36,24 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
 // Active current-year Mappings: student → Mentor user id. Student 503 is unmapped.
 const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002 };
 const JEE_EXAM_ID = 1;
-// What the DB Service answers with: the whole record, password included. The
-// route must never read or pass it on.
+// What the DB Service answers with: the whole record, legacy password
+// included. The route must never read or pass it on.
 const STORED_PASSWORD = "do-not-leak-7731";
+// The exam-portal password a Mentor types, and the fake KMS ciphertext of it.
+const TYPED_PASSWORD = "fake-portal-pass-1";
+const CIPHERTEXT = Buffer.from("kms-ciphertext-for-501").toString("base64");
+// Students whose only current batch is JNV NVS.
+const NVS_ONLY = new Set([502]);
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
-type ExamRecord = { id: number; exam_id: number; exam_name: string; exam_year: number | null; application_number: string };
+type ExamRecord = {
+  id: number;
+  exam_id: number;
+  exam_name: string;
+  exam_year: number | null;
+  application_number: string;
+  has_password?: boolean;
+};
 type Update = {
   id: number;
   status: string;
@@ -54,6 +69,10 @@ let sql: string[];
 let txWrites: { sql: string; params: unknown[] }[];
 let fetchCalls: { url: string; method: string; body: string | undefined }[];
 let fetchStatus: Record<string, number>;
+// The ciphertext the (fake) DB Service holds on the Student's JEE record, and
+// whether it stores one it is sent (an old DB Service drops the key).
+let storedCiphertext: string | null;
+let dbServiceStoresCiphertext: boolean;
 
 function matchesPermission(sqlText: string, params?: unknown[]) {
   const email = String(params?.[0]).toLowerCase();
@@ -70,6 +89,12 @@ async function fakeQuery(text: string, params?: unknown[]) {
     return mentor ? [{ mentor_user_id: mentor }] : [];
   }
   if (text.includes("FROM exam WHERE name")) return params?.[0] === "JEE Mains" ? [{ id: JEE_EXAM_ID }] : [];
+  if (text.includes("FROM student s")) return [{ nvs: NVS_ONLY.has(Number(params?.[0])), other: false }];
+  if (text.includes("SELECT DISTINCT ser.student_id")) {
+    const [studentId] = params?.[0] as number[];
+    return storedCiphertext ? [{ student_id: studentId }] : [];
+  }
+  if (text.includes("application_password_ciphertext = $4")) return storedCiphertext === params?.[3] ? [{ id: 77 }] : [];
   if (text.includes("FROM student_exam_record")) return examRecords;
   if (text.includes("FROM blended_learning_jee_form_updates u")) {
     const [studentId] = params?.[0] as number[];
@@ -160,10 +185,12 @@ async function record(studentId: string, fields: [string, string][], file?: { na
   return { status: res.status, text, body: JSON.parse(text) };
 }
 
-const FILLED: [string, string][] = [
+// Filled without a password: what a form sends when it keeps a saved one.
+const FILLED_KEEP: [string, string][] = [
   ["status", "filled"],
   ["applicationNumber", " 270310000001 "],
 ];
+const FILLED: [string, string][] = [...FILLED_KEEP, ["password", ` ${TYPED_PASSWORD} `]];
 const NOT_FILLED: [string, string][] = [
   ["status", "not_filled"],
   ["reasons", "not_aware"],
@@ -184,10 +211,16 @@ beforeEach(() => {
   txWrites = [];
   fetchCalls = [];
   fetchStatus = {};
+  storedCiphertext = null;
+  dbServiceStoresCiphertext = true;
   mockQuery.mockImplementation(fakeQuery as typeof query);
   mockWithTransaction.mockImplementation(async (fn) => fn(fakeClient() as never));
   s3.reset();
   s3.on(PutObjectCommand).resolves({});
+  kms.reset();
+  __resetKmsClientForTesting();
+  kms.on(EncryptCommand).resolves({ CiphertextBlob: Buffer.from(CIPHERTEXT, "base64") });
+  vi.stubEnv("EXAM_PASSWORD_KMS_KEY_ID", "arn:aws:kms:ap-south-1:111122223333:key/test");
   vi.stubEnv("S3_DOCS_BUCKET", "test-bucket");
   vi.stubEnv("S3_DOCS_PREFIX", "lms-documents");
   vi.stubEnv("DB_SERVICE_URL", "http://db-service.test/api");
@@ -198,6 +231,10 @@ beforeEach(() => {
       const method = init.method ?? "GET";
       fetchCalls.push({ url, method, body: init.body as string | undefined });
       const status = fetchStatus[`${method} ${new URL(url).pathname}`] ?? (method === "POST" ? 201 : 200);
+      const sent = init.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : {};
+      if (status < 300 && dbServiceStoresCiphertext && typeof sent.application_password_ciphertext === "string") {
+        storedCiphertext = sent.application_password_ciphertext;
+      }
       const record = {
         id: 77,
         student_id: 501,
@@ -247,7 +284,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: who may record", ()
 });
 
 describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
-  it("creates the JEE Mains 2027 record with the application number only, records the update and ticks the reminder", async () => {
+  it("creates the JEE Mains 2027 record with the number and the password's ciphertext, records the update and ticks the reminder", async () => {
     signedInAs(MENTOR_A);
     const res = await record("501", FILLED);
 
@@ -256,9 +293,19 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       {
         url: "http://db-service.test/api/student-exam-record",
         method: "POST",
-        body: JSON.stringify({ student_id: 501, exam_id: JEE_EXAM_ID, exam_year: 2027, application_number: "270310000001" }),
+        body: JSON.stringify({
+          student_id: 501,
+          exam_id: JEE_EXAM_ID,
+          exam_year: 2027,
+          application_number: "270310000001",
+          application_password_ciphertext: CIPHERTEXT,
+        }),
       },
     ]);
+    // Encrypted with KMS, bound to the Student, trimmed as the Exams tab trims it.
+    const [encrypt] = kms.commandCalls(EncryptCommand).map((call) => call.args[0].input);
+    expect(new TextDecoder().decode(encrypt.Plaintext)).toBe(TYPED_PASSWORD);
+    expect(encrypt.EncryptionContext).toEqual({ purpose: "student_exam_record.application_password", student_id: "501" });
     const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
     expect(insert.params.slice(0, 8)).toEqual([501, JEE_EXAM_ID, 2027, "filled", "270310000001", null, null, null]);
     const [tick] = writesTo("UPDATE blended_learning_action_items");
@@ -267,6 +314,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     expect(tick.params).toEqual([501, "JEE Form Filling (Reminder)", 900, MENTOR_A]);
     expect(writesTo("blended_learning_mentor_flags")).toEqual([]);
     expect(res.body.form.current).toMatchObject({ status: "filled", applicationNumber: "270310000001", hasConfirmation: false });
+    expect(res.body.form.passwordSaved).toBe(true);
     expect(res.body.form.reminderItems).toEqual([{ id: 81, text: "JEE Form Filling (Reminder)", status: "done" }]);
   });
 
@@ -279,7 +327,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       {
         url: "http://db-service.test/api/student-exam-record/77",
         method: "PATCH",
-        body: JSON.stringify({ application_number: "270310000001" }),
+        body: JSON.stringify({ application_number: "270310000001", application_password_ciphertext: CIPHERTEXT }),
       },
     ]);
   });
@@ -293,17 +341,23 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       [
         "PATCH",
         "http://db-service.test/api/student-exam-record/55",
-        JSON.stringify({ application_number: "270310000001", exam_year: 2027 }),
+        JSON.stringify({ application_number: "270310000001", exam_year: 2027, application_password_ciphertext: CIPHERTEXT }),
       ],
     ]);
   });
 
-  it("sends nothing to the DB Service when the stored 2027 record already has the number", async () => {
-    examRecords = [{ id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001" }];
+  it("sends nothing to the DB Service when the stored 2027 record already has the number and a password", async () => {
+    examRecords = [
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+    ];
+    storedCiphertext = "c2F2ZWQ=";
     signedInAs(MENTOR_A);
 
-    expect((await record("501", FILLED)).status).toBe(201);
+    const res = await record("501", FILLED_KEEP);
+    expect(res.status).toBe(201);
     expect(fetchCalls).toEqual([]);
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+    expect(res.body.form.passwordSaved).toBe(true);
   });
 
   it("refuses (409) a number the Student holds on another exam, writing nothing", async () => {
@@ -369,6 +423,85 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     error.mockRestore();
   });
 
+  it("needs a password while the record has none, writing nothing", async () => {
+    examRecords = [{ id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "111" }];
+    signedInAs(MENTOR_A);
+    for (const fields of [FILLED_KEEP, [...FILLED_KEEP, ["password", "   "]] as [string, string][]]) {
+      const res = await record("501", fields);
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ password: "Enter the exam portal password." });
+    }
+    expect(fetchCalls).toEqual([]);
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("replaces a saved password on its own when the number is unchanged", async () => {
+    examRecords = [
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+    ];
+    storedCiphertext = "b2xk";
+    signedInAs(MENTOR_A);
+
+    expect((await record("501", FILLED)).status).toBe(201);
+    expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
+      ["PATCH", "http://db-service.test/api/student-exam-record/77", JSON.stringify({ application_password_ciphertext: CIPHERTEXT })],
+    ]);
+  });
+
+  it("lets a Blended Learning Admin set the password for any mapped Student", async () => {
+    signedInAs(ADMIN);
+    expect((await record("601", FILLED)).status).toBe(201);
+    expect(JSON.parse(fetchCalls[0].body!)).toMatchObject({ student_id: 601, application_password_ciphertext: CIPHERTEXT });
+  });
+
+  it("never encrypts for a read-only Mentor, another Mentor's Student or a JNV NVS-only Student", async () => {
+    signedInAs(MENTOR_READ_ONLY);
+    expect((await record("501", FILLED)).status).toBe(403);
+    signedInAs(MENTOR_A);
+    expect((await record("601", FILLED)).status).toBe(404);
+
+    MAPPINGS[502] = 9001;
+    try {
+      const nvs = await record("502", FILLED);
+      expect(nvs.status).toBe(403);
+      expect(nvs.body.error).toBe("Exam registrations are not collected for JNV NVS Students");
+    } finally {
+      delete MAPPINGS[502];
+    }
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+    expect(fetchCalls).toEqual([]);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("records nothing (502) when KMS fails, logging only the error's name", async () => {
+    kms.on(EncryptCommand).rejects(Object.assign(new Error("arn:aws:kms:fake-key-arn denied for fake-iam-user"), { name: "AccessDeniedException" }));
+    signedInAs(MENTOR_A);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await record("501", FILLED, PDF);
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe("Couldn't save the password. Try again.");
+    expect(fetchCalls).toEqual([]);
+    expect(s3.commandCalls(PutObjectCommand)).toEqual([]);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(error.mock.calls).toEqual([["JEE form password encryption failed:", "AccessDeniedException"]]);
+    error.mockRestore();
+  });
+
+  it("records nothing (502) when the DB Service drops the ciphertext, and withdraws the confirmation", async () => {
+    dbServiceStoresCiphertext = false;
+    signedInAs(MENTOR_A);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await record("501", FILLED, PDF);
+
+    expect(res.status).toBe(502);
+    expect(fetchCalls.at(-1)).toMatchObject({ method: "DELETE", url: "http://db-service.test/api/lms-student-document/4401" });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(error.mock.calls).toEqual([["JEE form external write failed:", "CiphertextNotStored"]]);
+    error.mockRestore();
+  });
+
   it("needs an application number", async () => {
     signedInAs(MENTOR_A);
     const res = await record("501", [["status", "filled"], ["applicationNumber", "  "]]);
@@ -384,7 +517,9 @@ describe("POST /api/blended-learning/students/[id]/jee-form: not filled", () => 
 
     expect(res.status).toBe(201);
     expect(fetchCalls).toEqual([]);
-    expect(sql.some((text) => text.includes("student_exam_record"))).toBe(false);
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+    // Only the read of whether a password is saved, for the form it returns.
+    expect(sql.filter((text) => text.includes("student_exam_record")).every((text) => text.includes("SELECT DISTINCT ser.student_id"))).toBe(true);
     const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
     // Reasons in the list's order, whatever order they were ticked in.
     expect(insert.params.slice(3, 8)).toEqual([
@@ -465,27 +600,34 @@ describe("POST /api/blended-learning/students/[id]/jee-form: a save that loses a
   });
 });
 
-describe("the application password is never touched", () => {
-  it("never selects, writes, sends or returns application_password", async () => {
+describe("the password is write-only and never plaintext", () => {
+  it("never reads or writes the legacy column, and never returns, logs or sends the password", async () => {
     examRecords = [{ id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "111" }];
     signedInAs(MENTOR_A);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const responses = [await record("501", FILLED, PDF), await record("501", NOT_FILLED)];
     examRecords = [];
-    responses.push(await record("501", [["status", "filled"], ["applicationNumber", "999"]]));
+    responses.push(await record("501", [["status", "filled"], ["applicationNumber", "999"], ["password", TYPED_PASSWORD]]));
 
     for (const text of sql) {
-      expect(text).not.toMatch(/password/i);
+      // Only the ciphertext column is named; never the legacy plaintext one.
+      expect(text).not.toMatch(/application_password(?!_ciphertext)/);
       expect(text).not.toMatch(/SELECT\s+\*/i);
     }
     expect(fetchCalls.length).toBeGreaterThan(0);
-    for (const call of fetchCalls) expect(call.body ?? "").not.toMatch(/password/i);
+    for (const call of fetchCalls) {
+      expect(call.body ?? "").not.toMatch(/"application_password"/);
+      expect(call.body ?? "").not.toContain(TYPED_PASSWORD);
+    }
     for (const res of responses) {
       expect(res.status).toBe(201);
-      expect(res.text).not.toMatch(/password/i);
+      expect(res.text).not.toContain(TYPED_PASSWORD);
       expect(res.text).not.toContain(STORED_PASSWORD);
+      expect(res.text).not.toContain(CIPHERTEXT);
+      expect(Object.keys(res.body.form).sort()).toEqual(["current", "earlier", "passwordSaved", "reminderItems"]);
     }
-    expect(JSON.stringify(error.mock.calls)).not.toContain(STORED_PASSWORD);
+    const logged = JSON.stringify(error.mock.calls);
+    for (const secret of [STORED_PASSWORD, TYPED_PASSWORD, CIPHERTEXT]) expect(logged).not.toContain(secret);
     error.mockRestore();
   });
 });

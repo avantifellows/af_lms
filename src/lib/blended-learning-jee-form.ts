@@ -14,6 +14,7 @@ import {
 import {
   JEE_FORM_EXAM,
   JEE_FORM_REMINDER_TEXT,
+  JEE_PASSWORD_REQUIRED,
   confirmationError,
   jeeFormFlagComment,
   validateJeeForm,
@@ -30,9 +31,11 @@ import {
 import { jeeReminderMatchSql } from "./blended-learning-jee-reminder";
 import { createDocument, softDeleteDocument } from "./db-service-documents";
 import {
-  createExamRecordWithoutPassword,
-  patchExamRecordWithoutPassword,
+  createExamRecordWithoutPlaintext,
+  patchExamRecordWithoutPlaintext,
 } from "./db-service-exam-records";
+import { encryptExamPassword } from "./exam-password-crypto";
+import { isPmuOnlyStudent } from "./permissions";
 import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type UploadedPage } from "./s3";
 
 // The JEE form (server-only): whether a Mentee has filled the JEE Main 2027
@@ -42,16 +45,21 @@ import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type U
 //
 // - Filled: the application number is upserted into `student_exam_record`
 //   through the DB Service (one record per Student + "JEE Mains" + 2027; an
-//   existing row is updated, never duplicated), the optional confirmation PDF
+//   existing row is updated, never duplicated) with the exam-portal password
+//   as KMS ciphertext (required while the record has none; optional to
+//   replace after), the optional confirmation PDF
 //   goes to S3 and `lms_student_documents` through the existing document
 //   upload, and the Student's open "JEE Form Filling (Reminder)" Common
 //   Action Item is ticked done.
 // - Not filled: the reasons and details are stored and a Mentor Flag with
 //   recipient `jee_form` is raised for the program team's Flags feed.
 //
-// `student_exam_record.application_password` is never selected, written or
-// returned here: every read names its columns, and the DB Service writes
-// send no password and never read the response body.
+// The legacy plaintext `student_exam_record.application_password` is never
+// selected, written or returned here: every read names its columns, the DB
+// Service writes send only `application_password_ciphertext` and never read
+// the response body, and page data carries only `passwordSaved`. The
+// password is decrypted only by the logged reveal
+// (blended-learning-jee-password).
 
 const JEE_CONFIRMATION_DOCUMENT_TYPE = "jee_main_confirmation";
 const CONFIRMATION_URL_TTL_SECONDS = 300; // 5 minutes
@@ -85,7 +93,7 @@ function toUpdate(row: UpdateRow): JeeFormUpdate {
 }
 
 // The "JEE Mains" exam row's id, or null when the database has none.
-async function jeeExamId(): Promise<number | null> {
+export async function jeeExamId(): Promise<number | null> {
   const rows = await query<{ id: number | string }>(`SELECT id FROM exam WHERE name = $1 ORDER BY id LIMIT 1`, [
     JEE_FORM_EXAM.examName,
   ]);
@@ -139,10 +147,27 @@ function byStudent<T extends { student_id: number | string }>(rows: T[]): Map<nu
   return groups;
 }
 
+// The Students whose JEE Mains 2027 record holds a password ciphertext. Only
+// the flag is selected, never the ciphertext (and never the legacy column).
+async function listPasswordSaved(studentIds: number[], examId: number): Promise<Set<number>> {
+  const rows = await query<{ student_id: number | string }>(
+    `SELECT DISTINCT ser.student_id
+     FROM student_exam_record ser
+     WHERE ser.student_id = ANY($1::bigint[]) AND ser.exam_id = $2 AND ser.exam_year = $3
+       AND ser.application_password_ciphertext IS NOT NULL`,
+    [studentIds, examId, JEE_FORM_EXAM.examYear]
+  );
+  return new Set(rows.map((row) => Number(row.student_id)));
+}
+
 // Each Student's form: the current update, the earlier ones and the reminder.
 async function jeeFormViews(studentIds: number[], examId: number): Promise<Map<number, JeeFormView>> {
   if (studentIds.length === 0) return new Map();
-  const [updates, reminders] = await Promise.all([listUpdates(studentIds, examId), listReminderItems(studentIds)]);
+  const [updates, reminders, passwordSaved] = await Promise.all([
+    listUpdates(studentIds, examId),
+    listReminderItems(studentIds),
+    listPasswordSaved(studentIds, examId),
+  ]);
   const updatesByStudent = byStudent(updates);
   const remindersByStudent = byStudent(reminders);
   return new Map(
@@ -153,7 +178,10 @@ async function jeeFormViews(studentIds: number[], examId: number): Promise<Map<n
         text: row.text,
         status: row.status,
       }));
-      return [studentId, { current: current ?? null, earlier, reminderItems }];
+      return [
+        studentId,
+        { current: current ?? null, earlier, reminderItems, passwordSaved: passwordSaved.has(studentId) },
+      ];
     })
   );
 }
@@ -208,7 +236,7 @@ export async function listJeeFormRows(access: BlendedLearningAccess): Promise<Je
       name: [row.first_name, row.last_name].filter(Boolean).join(" "),
       mentorUserId: Number(row.mentor_user_id),
       mentorName: row.mentor_name,
-      form: views.get(studentId) ?? { current: null, earlier: [], reminderItems: [] },
+      form: views.get(studentId) ?? { current: null, earlier: [], reminderItems: [], passwordSaved: false },
     };
   });
 }
@@ -239,6 +267,8 @@ type ExamRecordRow = {
   exam_name: string | null;
   exam_year: number | null;
   application_number: string | null;
+  // The record holds a password ciphertext (the ciphertext isn't selected).
+  has_password?: boolean;
 };
 
 // What to send the DB Service so the Student has exactly one "JEE Mains"
@@ -280,10 +310,25 @@ export function planExamRecordWrite(
   return { kind: "create" };
 }
 
-async function examRecordPlan(studentId: number, examId: number, applicationNumber: string): Promise<ExamRecordPlan> {
-  // Named columns only: never the password.
+// The plan, the record it writes (null for a create) and whether that record
+// already holds a password ciphertext.
+type ExamRecordTarget = { plan: ExamRecordPlan; recordId: number | null; passwordSaved: boolean };
+
+function planTarget(rows: ExamRecordRow[], examId: number, plan: ExamRecordPlan): ExamRecordTarget {
+  let row: ExamRecordRow | undefined;
+  if (plan.kind === "patch") row = rows.find((candidate) => Number(candidate.id) === plan.id);
+  else if (plan.kind === "none") {
+    row = rows.find((candidate) => Number(candidate.exam_id) === examId && Number(candidate.exam_year) === JEE_FORM_EXAM.examYear);
+  }
+  return { plan, recordId: row ? Number(row.id) : null, passwordSaved: Boolean(row?.has_password) };
+}
+
+async function examRecordPlan(studentId: number, examId: number, applicationNumber: string): Promise<ExamRecordTarget> {
+  // Named columns only: never the legacy password, and only whether a
+  // ciphertext is there, not the ciphertext.
   const rows = await query<ExamRecordRow>(
-    `SELECT ser.id, ser.exam_id, e.name AS exam_name, ser.exam_year, ser.application_number
+    `SELECT ser.id, ser.exam_id, e.name AS exam_name, ser.exam_year, ser.application_number,
+            (ser.application_password_ciphertext IS NOT NULL) AS has_password
      FROM student_exam_record ser
      LEFT JOIN exam e ON e.id = ser.exam_id
      WHERE ser.student_id = $1
@@ -291,28 +336,58 @@ async function examRecordPlan(studentId: number, examId: number, applicationNumb
      ORDER BY ser.id`,
     [studentId, examId, applicationNumber]
   );
-  return planExamRecordWrite(rows, examId, applicationNumber);
+  return planTarget(rows, examId, planExamRecordWrite(rows, examId, applicationNumber));
 }
 
+// `ciphertext` (a new password) rides along with the plan's write; with
+// nothing else to change, it is patched onto the record on its own.
 async function applyExamRecordPlan(
-  plan: ExamRecordPlan,
+  target: ExamRecordTarget,
   studentId: number,
   examId: number,
-  applicationNumber: string
+  applicationNumber: string,
+  ciphertext: string | null
 ): Promise<void> {
+  const { plan } = target;
+  const password = ciphertext === null ? {} : { application_password_ciphertext: ciphertext };
   if (plan.kind === "create") {
-    await createExamRecordWithoutPassword({
+    await createExamRecordWithoutPlaintext({
       student_id: studentId,
       exam_id: examId,
       exam_year: JEE_FORM_EXAM.examYear,
       application_number: applicationNumber,
+      ...password,
     });
   } else if (plan.kind === "patch") {
-    await patchExamRecordWithoutPassword(plan.id, {
+    await patchExamRecordWithoutPlaintext(plan.id, {
       application_number: applicationNumber,
       ...(plan.examYear === undefined ? {} : { exam_year: plan.examYear }),
+      ...password,
     });
+  } else if (plan.kind === "none" && ciphertext !== null && target.recordId !== null) {
+    await patchExamRecordWithoutPlaintext(target.recordId, password);
   }
+  if (ciphertext !== null) await confirmCiphertextStored(studentId, examId, ciphertext);
+}
+
+class CiphertextNotStored extends Error {
+  name = "CiphertextNotStored";
+}
+
+// A DB Service that predates `application_password_ciphertext` answers 2xx
+// and drops the key, so the write is read back from Postgres instead of
+// being taken on trust (the response body, which holds the legacy password,
+// is never read).
+async function confirmCiphertextStored(studentId: number, examId: number, ciphertext: string): Promise<void> {
+  const rows = await query<{ id: number | string }>(
+    `SELECT ser.id
+     FROM student_exam_record ser
+     WHERE ser.student_id = $1 AND ser.exam_id = $2 AND ser.exam_year = $3
+       AND ser.application_password_ciphertext = $4
+     LIMIT 1`,
+    [studentId, examId, JEE_FORM_EXAM.examYear, ciphertext]
+  );
+  if (rows.length === 0) throw new CiphertextNotStored();
 }
 
 type StoredConfirmation = { documentId: number; pages: UploadedPage[] };
@@ -506,22 +581,56 @@ function validateFile(input: JeeFormInput, file: ConfirmationFile | null): JeeFo
   return error ? { confirmation: error } : null;
 }
 
+type ExternalWrite = { ok: true; stored: StoredConfirmation | null } | { ok: false; result: RecordJeeFormResult };
+
+const NVS_REFUSED: RecordJeeFormResult = {
+  ok: false,
+  status: 403,
+  error: "Exam registrations are not collected for JNV NVS Students",
+};
+
+// The new password as KMS ciphertext, or null to keep the saved one. A form
+// without a password is refused while the record has none. KMS errors name
+// the key and the IAM user, so only the error's name is logged.
+async function passwordCiphertext(
+  studentId: number,
+  password: string | null,
+  passwordSaved: boolean
+): Promise<{ ok: true; ciphertext: string | null } | { ok: false; result: RecordJeeFormResult }> {
+  if (password === null) {
+    return passwordSaved ? { ok: true, ciphertext: null } : { ok: false, result: invalid({ password: JEE_PASSWORD_REQUIRED }) };
+  }
+  // A safety net: exam registrations are a physical-centre feature, never
+  // collected for a JNV NVS-only Student (as on the Exams tab).
+  if (await isPmuOnlyStudent(studentId)) return { ok: false, result: NVS_REFUSED };
+  try {
+    return { ok: true, ciphertext: await encryptExamPassword(password, studentId) };
+  } catch (error) {
+    console.error("JEE form password encryption failed:", error instanceof Error ? error.name : "unknown");
+    return { ok: false, result: { ok: false, status: 502, error: "Couldn't save the password. Try again." } };
+  }
+}
+
 // A filled form's writes outside the database transaction: the confirmation
-// PDF (S3 + lms_student_documents) and the student_exam_record upsert, both
-// through the DB Service. On failure the stored PDF is withdrawn.
+// PDF (S3 + lms_student_documents) and the student_exam_record upsert with
+// any new password ciphertext, both through the DB Service. The password is
+// encrypted before anything is written; on failure the stored PDF is
+// withdrawn.
 async function writeApplication(
   access: BlendedLearningAccess,
   studentId: number,
   examId: number,
   input: Extract<JeeFormInput, { status: "filled" }>,
   file: ConfirmationFile | null
-): Promise<{ ok: true; stored: StoredConfirmation | null } | { ok: false; result: RecordJeeFormResult }> {
-  const plan = await examRecordPlan(studentId, examId, input.applicationNumber);
-  if (plan.kind === "conflict") return { ok: false, result: conflict({ applicationNumber: plan.message }) };
+): Promise<ExternalWrite> {
+  const target = await examRecordPlan(studentId, examId, input.applicationNumber);
+  if (target.plan.kind === "conflict") return { ok: false, result: conflict({ applicationNumber: target.plan.message }) };
+  const secret = await passwordCiphertext(studentId, input.password, target.passwordSaved);
+  if (!secret.ok) return secret;
   let stored: StoredConfirmation | null = null;
   try {
     if (file) stored = await storeConfirmation(studentId, file, access.actorEmail);
-    await applyExamRecordPlan(plan, studentId, examId, input.applicationNumber);
+    await applyExamRecordPlan(target, studentId, examId, input.applicationNumber, secret.ciphertext);
     return { ok: true, stored };
   } catch (error) {
     // Never log keys, bodies or the number: the error's name is enough.
@@ -531,10 +640,12 @@ async function writeApplication(
   }
 }
 
-// Record the Mentee's JEE form status. 403 for read-only and other roles,
-// 404 out of scope, 422 invalid, 409 an application number held by another
-// record, 502 when S3 or the DB Service fails (nothing is recorded then),
-// 503 without a "JEE Mains" exam row.
+// Record the Mentee's JEE form status. 403 for read-only and other roles (and
+// for a JNV NVS-only Student's password), 404 out of scope, 422 invalid
+// (including a Filled form without a password while none is saved), 409 an
+// application number held by another record, 502 when KMS, S3 or the DB
+// Service fails (nothing is recorded then), 503 without a "JEE Mains" exam
+// row.
 export async function recordJeeForm(
   access: BlendedLearningAccess,
   studentId: number,

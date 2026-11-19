@@ -314,6 +314,9 @@ describe("canBlendedLearning", () => {
     ["manage", false, true, false],
     // The JEE form: the Mentor or an admin, never read-only.
     ["record_jee_form", true, true, false],
+    // Showing the exam-portal password is a view: everyone, read-only too
+    // (scope is canAccessBlendedStudent's: a Mentor's own Mentees only).
+    ["reveal_exam_password", true, true, true],
   ];
 
   it.each(table)("%s: Mentor %s, Admin %s, read-only Admin %s", (action, forMentor, forAdmin, forReadOnly) => {
@@ -326,6 +329,7 @@ describe("canBlendedLearning", () => {
   it.each(["log", "upload", "manage_draft", "manage", "record_jee_form"] as const)("refuses a read-only Mentor %s", (action) => {
     expect(canBlendedLearning(readOnlyMentor, action)).toBe(false);
     expect(canBlendedLearning(readOnlyMentor, "view_student")).toBe(true);
+    expect(canBlendedLearning(readOnlyMentor, "reveal_exam_password")).toBe(true);
   });
 
   it("refuses every action without access", () => {

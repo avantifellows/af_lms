@@ -124,25 +124,30 @@ export async function updateExamRecord(
   await requirePasswordStored(res, input, "updateExamRecord");
 }
 
-// --- Password-free writes (Blended Learning JEE form) -----------------------
+// --- Plaintext-free writes (Blended Learning JEE form) ----------------------
 //
-// The JEE form never touches `application_password`: these types have
-// no such field, each body is built from named fields only (never a spread),
-// and a PATCH without the key leaves the stored password as it is (the DB
-// Service casts only the keys sent). The DB Service answers with the whole
-// record, password included, so the response body is never read: only the
-// status is looked at, and on failure only the status is logged.
+// The JEE form never touches the legacy plaintext `application_password`:
+// these types have no such field, each body is built from named fields only
+// (never a spread), and a PATCH without a key leaves that column as it is
+// (the DB Service casts only the keys sent). A password travels only as the
+// KMS ciphertext the caller made (`application_password_ciphertext`). The DB
+// Service answers with the whole record, legacy password included, so the
+// response body is never read: only the status is looked at, and on failure
+// only the status is logged. The caller confirms a ciphertext was stored by
+// reading it back from Postgres.
 
-export interface ExamRecordCreateWithoutPassword {
+export interface ExamRecordCreateWithoutPlaintext {
   student_id: number;
   exam_id: number;
   exam_year: number;
   application_number: string;
+  application_password_ciphertext?: string;
 }
 
-export interface ExamRecordPatchWithoutPassword {
-  application_number: string;
+export interface ExamRecordPatchWithoutPlaintext {
+  application_number?: string;
   exam_year?: number;
+  application_password_ciphertext?: string;
 }
 
 /** Thrown on a non-2xx; carries the status only, never the response body. */
@@ -160,37 +165,39 @@ async function requireOkWithoutReading(res: Response, what: string): Promise<voi
   if (!res.ok) throw new DbServiceExamRecordStatusError(what, res.status);
 }
 
-export async function createExamRecordWithoutPassword(
-  input: ExamRecordCreateWithoutPassword,
+const CREATE_KEYS = ["student_id", "exam_id", "exam_year", "application_number", "application_password_ciphertext"] as const;
+const PATCH_KEYS = ["application_number", "exam_year", "application_password_ciphertext"] as const;
+
+// The named keys that are set, in a fixed order; nothing else ever goes out.
+function plaintextFreeBody<T extends object>(input: T, keys: readonly (keyof T)[]): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (input[key] !== undefined) body[key as string] = input[key];
+  }
+  return body;
+}
+
+export async function createExamRecordWithoutPlaintext(
+  input: ExamRecordCreateWithoutPlaintext,
 ): Promise<void> {
-  const body = {
-    student_id: input.student_id,
-    exam_id: input.exam_id,
-    exam_year: input.exam_year,
-    application_number: input.application_number,
-  };
   const res = await fetch(`${dbServiceUrl()}/student-exam-record`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify(body),
+    body: JSON.stringify(plaintextFreeBody(input, CREATE_KEYS)),
   });
-  await requireOkWithoutReading(res, "createExamRecordWithoutPassword");
+  await requireOkWithoutReading(res, "createExamRecordWithoutPlaintext");
 }
 
-export async function patchExamRecordWithoutPassword(
+export async function patchExamRecordWithoutPlaintext(
   id: number,
-  input: ExamRecordPatchWithoutPassword,
+  input: ExamRecordPatchWithoutPlaintext,
 ): Promise<void> {
-  const body =
-    input.exam_year === undefined
-      ? { application_number: input.application_number }
-      : { application_number: input.application_number, exam_year: input.exam_year };
   const res = await fetch(`${dbServiceUrl()}/student-exam-record/${id}`, {
     method: "PATCH",
     headers: authHeaders(),
-    body: JSON.stringify(body),
+    body: JSON.stringify(plaintextFreeBody(input, PATCH_KEYS)),
   });
-  await requireOkWithoutReading(res, "patchExamRecordWithoutPassword");
+  await requireOkWithoutReading(res, "patchExamRecordWithoutPlaintext");
 }
 
 export async function deleteExamRecord(id: number): Promise<void> {
