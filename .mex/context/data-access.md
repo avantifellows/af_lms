@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-10
+last_updated: 2026-11-15
 ---
 
 # Data Access
@@ -287,9 +287,19 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `20260921120000` + its ensure migration; the other eight: PR #804,
   `20261022120000`–`20261022120700`). af_lms reads and writes them directly over SQL (ADR 0005)
   through `query()`/`withTransaction`, never through DB Service HTTP.
-- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`,
-  written once as `activeBlendedMappingSql(alias, yearParam)` in
-  `src/lib/blended-learning-access.ts`. `canAccessBlendedStudent` and `listMentees` both use it.
+- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`
+  whose Student is not marked a dropout (`student.status = 'dropout'`; NULL or any other
+  status stays in), written once as `activeBlendedMappingSql(alias, yearParam)` in
+  `src/lib/blended-learning-access.ts` (`notBlendedDropoutSql(studentIdSql)` is the dropout
+  half). Every Blended Learning scope uses it: `canAccessBlendedStudent` (so a dropout's page,
+  log form, Conversations and write routes are a 404), `lockMappingInScope`, `listMentees`,
+  `listMentorCards`, `getMenteeDetail`, the Flags feed (a dropout's flags are hidden from
+  every viewer, admins included, and from "N new" and the Mentor filter), and Common Action
+  Item targets (count, preview, Mentor "(N students)", push and push again never reach a
+  dropout; a pasted dropout ID is listed as "found but with no active mentor"). Mapping rows
+  are never changed, so a Student whose status changes back reappears. Only the links import
+  reads the raw rows (`currentBlendedMappingRowSql`), so a dropout's links stay loaded.
+  Already-materialised Common Action Items on a dropout keep counting in the item's Open/Done.
 - **Read model:** `listMentees({ access, mentorUserId?, studentId?, today })` in
   `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
   enrollment (`enrollment_record`, `group_type = 'grade'`, `is_current`), program from the

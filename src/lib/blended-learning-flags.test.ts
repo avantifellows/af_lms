@@ -77,6 +77,40 @@ describe("listFlags", () => {
   });
 });
 
+// A dropout's flags leave every feed, an admin's included, and every badge.
+const NOT_A_DROPOUT =
+  /^\s*(?:WHERE|AND) NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = flag\.student_id AND dropout_student\.status = 'dropout'\) AND \(NOT \$\d::boolean OR/m;
+
+describe("a dropout's flags", () => {
+  it("are left out of an admin's feed and New count", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 0 }] : []));
+
+    await listFlags(ADMIN, {}, { lastSeenAt: null });
+
+    const [listSql] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
+    expect(listSql).toMatch(NOT_A_DROPOUT);
+    const [countSql] = mockQuery.mock.calls.find(([sql]) => /count\(\*\)/.test(sql))!;
+    expect(countSql).toMatch(NOT_A_DROPOUT);
+  });
+
+  it("give the admin's Mentor filter no option of their own", async () => {
+    mockQuery.mockResolvedValue([{ mentor_user_id: "9001", mentor_name: "Synthetic Mentor" }]);
+
+    expect(await listFlagMentors(ADMIN)).toEqual([{ mentorUserId: 9001, name: "Synthetic Mentor" }]);
+    expect(mockQuery.mock.calls[0][0]).toMatch(
+      /WHERE NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = flag\.student_id AND dropout_student\.status = 'dropout'\)/
+    );
+  });
+
+  it("are left out of the badge without a visit", async () => {
+    mockQuery.mockResolvedValue([{ count: 0 }]);
+
+    await countNewFlags(ADMIN);
+
+    expect(mockQuery.mock.calls[0][0]).toMatch(NOT_A_DROPOUT);
+  });
+});
+
 describe("countNewFlags", () => {
   it("without a visit, counts against the viewer's stored last-seen", async () => {
     mockQuery.mockResolvedValue([{ count: 2 }]);
@@ -91,7 +125,7 @@ describe("countNewFlags", () => {
 // A Mentor's Flags tab: only flags on Students with an active current-year
 // Mapping to them, in every read, so another Mentor's flags never leave the DB.
 describe("a Mentor's flags", () => {
-  const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = \$(\d)::bigint\s+AND own\.academic_year = \$(\d) AND own\.ended_at IS NULL\)/;
+  const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = \$(\d)::bigint\s+AND own\.academic_year = \$(\d) AND own\.ended_at IS NULL AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = own\.student_id AND dropout_student\.status = 'dropout'\)\)/;
 
   it("narrows the feed to the Mentor's own Students and ignores a Mentor filter", async () => {
     mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 1 }] : [FLAG_ROW]));

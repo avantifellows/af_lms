@@ -2,6 +2,7 @@ import { test, expect, signInAs } from "../fixtures/auth";
 import type { Locator, Page } from "@playwright/test";
 import {
   BLENDED_MENTOR_A,
+  DROPOUT_MENTEE,
   MENTEES,
   OTHER_STUDENTS,
   fullName,
@@ -68,6 +69,21 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       for (const other of Object.values(OTHER_STUDENTS)) {
         await expect(page.getByText(fullName(other))).toHaveCount(0);
       }
+    });
+
+    test("a Mentee marked a dropout is left out though their Mapping is active; no status stays in", async ({ page }) => {
+      await expect(page.getByText(/^6 students · \d{4}-\d{4}$/)).toBeVisible();
+      await expect(page.getByText(fullName(DROPOUT_MENTEE))).toHaveCount(0);
+      await expect(page.getByRole("link", { name: `View ${fullName(DROPOUT_MENTEE)}` })).toHaveCount(0);
+      // Kabir's student.status is NULL.
+      await expect(entry(group(page, "Talk to first"), neverContacted)).toHaveCount(1);
+
+      // Not by Student ID in the search box either.
+      await page
+        .getByRole("searchbox", { name: "Search by name or Student ID" })
+        .fill(programStudentId(DROPOUT_MENTEE));
+      await expect(group(page, "Talk to first")).toHaveCount(0);
+      await expect(group(page, "Everyone else")).toHaveCount(0);
     });
 
     test("Talk to first is in priority order with dated Why now tags", async ({ page }) => {

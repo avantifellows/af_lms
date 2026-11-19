@@ -81,14 +81,32 @@ export function canBlendedLearning(
   return true;
 }
 
-// The Mapping source: active Mappings (`ended_at IS NULL`) for
-// CURRENT_ACADEMIC_YEAR. `yearParam` is the placeholder bound to it.
-export function activeBlendedMappingSql(alias: string, yearParam: string): string {
+// The Student (`studentIdSql`, the SQL for a `student.id`) is not marked a
+// dropout (`student.status = 'dropout'`). A NULL or any other status passes.
+export function notBlendedDropoutSql(studentIdSql: string): string {
+  return `NOT EXISTS (SELECT 1 FROM student dropout_student
+            WHERE dropout_student.id = ${studentIdSql} AND dropout_student.status = 'dropout')`;
+}
+
+// Mapping rows as stored: active (`ended_at IS NULL`) for CURRENT_ACADEMIC_YEAR,
+// whatever the Student's status. Only operator data loads (the links import)
+// use it; everything Mentors and admins see goes through
+// activeBlendedMappingSql.
+export function currentBlendedMappingRowSql(alias: string, yearParam: string): string {
   return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL`;
 }
 
-// A Student is in scope with an active current-year Mapping; for a Mentor
-// that Mapping must be to them.
+// The Mapping source: active current-year Mappings of Students not marked a
+// dropout. A dropout leaves Blended Learning everywhere (list, Mentor cards,
+// Flags, Common Action Items, their page) while the Mapping row stays, so they
+// come back if their status changes back. `yearParam` is the placeholder
+// bound to CURRENT_ACADEMIC_YEAR.
+export function activeBlendedMappingSql(alias: string, yearParam: string): string {
+  return `${currentBlendedMappingRowSql(alias, yearParam)} AND ${notBlendedDropoutSql(`${alias}.student_id`)}`;
+}
+
+// A Student is in scope with an active current-year Mapping and not marked a
+// dropout; for a Mentor that Mapping must be to them.
 export async function canAccessBlendedStudent(
   access: BlendedLearningAccess | null,
   studentId: number

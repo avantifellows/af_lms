@@ -5,6 +5,8 @@ import {
   ACTION_ITEM_MENTEES,
   BLENDED_MENTOR_A,
   CONTACTS,
+  DROPOUT_FLAG,
+  DROPOUT_MENTEE,
   EARLIER_ACTION_ITEMS,
   IRA_HISTORY,
   MENTEES,
@@ -230,6 +232,49 @@ for (const { label, viewport } of VIEWPORTS) {
     });
   });
 }
+
+// Yash is mapped to Mentor A and the Mapping is still active, but he is marked
+// a dropout: his page, log form, saved Conversation and write routes are out
+// of scope for everyone, as for an unmapped Student.
+test.describe("Blended Learning Mentee detail — a dropout", () => {
+  async function dropoutConversationId(): Promise<number> {
+    const pool = getTestPool();
+    try {
+      const result = await pool.query<{ id: string }>(
+        `SELECT c.id FROM blended_learning_conversations c
+         JOIN blended_learning_mentor_flags flag ON flag.conversation_id = c.id
+         WHERE c.student_id = $1 AND flag.comment = $2`,
+        [studentIds[DROPOUT_MENTEE.key], DROPOUT_FLAG.comment]
+      );
+      return Number(result.rows[0].id);
+    } finally {
+      await pool.end();
+    }
+  }
+
+  for (const persona of [BLENDED_MENTOR_A, BLENDED_ADMIN]) {
+    test(`${persona === BLENDED_ADMIN ? "an admin" : "their Mentor"} gets a 404 for his page, log form and Conversation`, async ({ page }) => {
+      await signInAs(page, persona);
+
+      for (const path of [detailPath(DROPOUT_MENTEE), `${detailPath(DROPOUT_MENTEE)}/log`]) {
+        const response = await page.goto(path);
+        expect(response?.status()).toBe(404);
+        await expect(page.getByText(fullName(DROPOUT_MENTEE))).toHaveCount(0);
+      }
+      const notes = await page.request.get(`/api/blended-learning/conversations/${await dropoutConversationId()}/notes`);
+      expect(notes.status()).toBe(404);
+    });
+  }
+
+  test("his Mentor cannot log for him", async ({ page }) => {
+    await signInAs(page, BLENDED_MENTOR_A);
+    const todayIST = new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
+    const response = await page.request.post(`/api/blended-learning/students/${studentIds[DROPOUT_MENTEE.key]}/entries`, {
+      data: { kind: "attempt", occurredOn: todayIST },
+    });
+    expect(response.status()).toBe(404);
+  });
+});
 
 test.describe("Blended Learning Mentee detail — admin", () => {
   test("a Blended Learning Admin opens any mapped Mentee, but not an unmapped Student", async ({ page }) => {
