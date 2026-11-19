@@ -121,7 +121,8 @@ async function shownCounts(page: Page) {
 }
 
 // What the counts should be: a Mentor's (or everyone's) Students with an
-// active current-year Mapping, by their latest update.
+// active current-year Mapping, not marked a dropout (the tab hides them), by
+// their latest update.
 async function expectedCounts(mentorEmail: string | null) {
   return withPool(async (pool) => {
     const result = await pool.query<{ filled: string; not_filled: string; not_recorded: string; total: string }>(
@@ -135,6 +136,7 @@ async function expectedCounts(mentorEmail: string | null) {
          WHERE u.student_id = mapping.student_id ORDER BY u.id DESC LIMIT 1
        ) latest ON true
        WHERE mapping.academic_year = $1 AND mapping.ended_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM student st WHERE st.id = mapping.student_id AND st.status = 'dropout')
          AND ($2::text IS NULL OR mapping.mentor_user_id = (SELECT id FROM "user" WHERE email = $2))`,
       [CURRENT_ACADEMIC_YEAR, mentorEmail]
     );
