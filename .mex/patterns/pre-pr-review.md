@@ -20,7 +20,7 @@ edges:
     condition: when a paired db-service PR's schema must match the e2e fixture (step 8)
   - target: patterns/deploy-staging-pr.md
     condition: only when the person running the review asks for staging and approves it (step 3)
-last_updated: 2026-10-28
+last_updated: 2026-11-18
 ---
 
 # Pre-PR review for af_lms
@@ -94,8 +94,9 @@ npx fallow audit --base <base> --coverage unit-coverage/coverage-final.json
 npm run build                    # when routes, config or server/client boundaries changed
 ```
 
-- Fallow's gate is new-only on changed files, the same as `.github/workflows/fallow.yml`. Use the major version in
-  that workflow's `uses: fallow-rs/fallow@vN` line (a newer major gave different results on #435). If a unit test
+- Fallow's gate is new-only on changed files, the same as `.github/workflows/fallow.yml`. Run the version the repo
+  pins (`npx fallow` after `npm ci`): `package.json` pins it exactly and CI installs that same version, so never
+  `npx -y fallow@latest` (a different version gave different results on #435 and #533). If a unit test
   times out, vitest writes no coverage file and Fallow silently falls back to an estimate; rerun with
   `npm run test:unit:coverage -- --testTimeout=30000`. Fix the findings; don't suppress them unless the repo
   already suppresses that kind.
