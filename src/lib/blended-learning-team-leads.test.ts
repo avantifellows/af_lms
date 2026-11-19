@@ -71,6 +71,42 @@ describe("listBlendedMentorOptions", () => {
   });
 });
 
+// A fake blended_learning_mentor_supervisions table for the end UPDATE: it
+// applies the statement's own WHERE (id, year, running) to these rows.
+type SupervisionRow = { id: number; supervisor_user_id: number; mentor_user_id: number; academic_year: string; ended_at: string | null };
+function givenSupervisions(table: SupervisionRow[]) {
+  mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (!sql.startsWith("UPDATE blended_learning_mentor_supervisions")) return [];
+    expect(sql).toContain("WHERE id = $1 AND academic_year = $2 AND ended_at IS NULL");
+    const hit = table.filter((row) => row.id === params?.[0] && row.academic_year === params?.[1] && row.ended_at === null);
+    for (const row of hit) row.ended_at = "2026-11-19T00:00:00Z";
+    return hit.map((row) => ({ id: row.id }));
+  });
+}
+
+describe("endTeamLeadLink", () => {
+  it("ends only the row by its id: an old id leaves the pair's replacement running", async () => {
+    // The pair was ended (row 4) and started again (row 5) before this end of row 4 ran.
+    const table: SupervisionRow[] = [
+      { id: 4, supervisor_user_id: 9003, mentor_user_id: 9001, academic_year: "2026-2027", ended_at: "2026-11-18T00:00:00Z" },
+      { id: 5, supervisor_user_id: 9003, mentor_user_id: 9001, academic_year: "2026-2027", ended_at: null },
+    ];
+    givenSupervisions(table);
+
+    expect(await endTeamLeadLink(ADMIN, 4)).toMatchObject({ ok: false, status: 404 });
+    expect(table.find((row) => row.id === 5)?.ended_at).toBeNull();
+
+    expect(await endTeamLeadLink(ADMIN, 5)).toEqual({ ok: true });
+    expect(table.find((row) => row.id === 5)?.ended_at).not.toBeNull();
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("is a 404 for another year's running row", async () => {
+    givenSupervisions([{ id: 6, supervisor_user_id: 9003, mentor_user_id: 9001, academic_year: "2025-2026", ended_at: null }]);
+    expect(await endTeamLeadLink(ADMIN, 6)).toMatchObject({ status: 404 });
+  });
+});
+
 describe("writes", () => {
   it("refuses a Mentor or a read-only admin without reading", async () => {
     for (const access of [MENTOR, READ_ONLY_ADMIN]) {

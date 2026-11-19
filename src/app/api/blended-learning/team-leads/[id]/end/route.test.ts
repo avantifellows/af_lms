@@ -24,28 +24,23 @@ beforeEach(() => {
 });
 
 describe("POST /api/blended-learning/team-leads/[id]/end", () => {
-  it("ends the running Supervision, recorded as from the Manage page by the admin", async () => {
+  it("ends the running Supervision by its id, recorded as from the Manage page by the admin", async () => {
     signedInAs(ADMIN);
-    db.query.mockResolvedValueOnce([{ supervisor_user_id: "9003", mentor_user_id: "9001" }]);
-    db.clientQuery.mockResolvedValueOnce(rows({ id: 7 }));
+    db.query.mockResolvedValueOnce([{ id: "7" }]);
 
     const res = await end("7");
 
     expect(res.status).toBe(204);
-    expect(db.query.mock.calls[0][1]).toEqual([7, "2026-2027"]);
-    expect(db.query.mock.calls[0][0]).toContain("supervision.ended_at IS NULL");
-    const [update, params] = db.clientQuery.mock.calls[0];
+    const [update, params] = db.query.mock.calls[0];
     expect(update).toContain("SET ended_at = GREATEST(started_at,");
-    expect(params).toEqual([9003, 9001, "2026-2027", "admin@test.local", "af_lms_manage_ui", "supervision_ended", null]);
+    expect(update).toContain("WHERE id = $1 AND academic_year = $2 AND ended_at IS NULL");
+    expect(params).toEqual([7, "2026-2027", "admin@test.local", "af_lms_manage_ui", "supervision_ended"]);
+    expect(db.clientQuery).not.toHaveBeenCalled();
   });
 
   it("is a 404 for a Supervision that isn't running, or ended meanwhile", async () => {
     signedInAs(ADMIN);
-    expect((await end("7")).status).toBe(404);
-    expect(db.clientQuery).not.toHaveBeenCalled();
-
-    db.query.mockResolvedValueOnce([{ supervisor_user_id: 9003, mentor_user_id: 9001 }]);
-    db.clientQuery.mockResolvedValueOnce(rows());
+    db.query.mockResolvedValueOnce([]);
     expect((await end("7")).status).toBe(404);
   });
 

@@ -1,16 +1,15 @@
 import { query, withTransaction } from "./db";
 import { activeBlendedMappingSql, canBlendedLearning, type BlendedLearningAccess } from "./blended-learning-access";
 import type { FieldErrors } from "./blended-learning-manage-input";
-import { endSupervision, insertSupervision, type SupervisionAudit } from "./blended-learning-supervisions-load";
+import { insertSupervision, type SupervisionAudit } from "./blended-learning-supervisions-load";
 import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 
 // The Manage page's Team leads (server-only): Blended Learning Admins who may
 // `manage` list, start and end Supervisions (blended_learning_mentor_supervisions)
 // for the current academic year without SQL. A team lead (the supervisor)
 // lands on cards for themselves and the Mentors they lead, and views those
-// Mentors' Students read-only. Writes share the operator loader's SQL
-// (insertSupervision, endSupervision), recorded as from the Manage page with
-// the admin's email; a Supervision is ended, never deleted.
+// Mentors' Students read-only. Writes are recorded as from the Manage page
+// with the admin's email; a Supervision is ended, never deleted.
 
 export type TeamLeadPerson = { userId: number; name: string };
 export type TeamLeadLink = { id: number; teamLead: TeamLeadPerson; reportee: TeamLeadPerson; startedOn: string };
@@ -20,6 +19,7 @@ export type TeamLeadResult =
   | { ok: false; status: 403 | 404 | 409 | 422; error: string; fieldErrors?: FieldErrors };
 
 const TEAM_LEAD_SOURCE = "af_lms_manage_ui";
+const END_REASON = "supervision_ended";
 
 const FORBIDDEN: TeamLeadResult = { ok: false, status: 403, error: "Forbidden" };
 const NOT_FOUND: TeamLeadResult = { ok: false, status: 404, error: "Not found" };
@@ -143,18 +143,19 @@ export async function createTeamLeadLink(access: BlendedLearningAccess, raw: unk
   return { ok: true };
 }
 
-// Ends a running current-year Supervision (by its id); a 404 when none runs.
+// Ends a running current-year Supervision by its id, in one conditional
+// UPDATE, so a pair ended and started again meanwhile keeps its new row; a 404
+// when that row is not running (ended already, another year, or no such id).
 export async function endTeamLeadLink(access: BlendedLearningAccess, id: number): Promise<TeamLeadResult> {
   if (!canBlendedLearning(access, "manage")) return FORBIDDEN;
   if (!Number.isSafeInteger(id) || id <= 0) return NOT_FOUND;
-  const rows = await query<{ supervisor_user_id: number | string; mentor_user_id: number | string }>(
-    `SELECT supervision.supervisor_user_id, supervision.mentor_user_id
-     FROM blended_learning_mentor_supervisions supervision
-     WHERE supervision.id = $1 AND supervision.academic_year = $2 AND supervision.ended_at IS NULL`,
-    [id, CURRENT_ACADEMIC_YEAR]
+  const rows = await query<{ id: number | string }>(
+    `UPDATE blended_learning_mentor_supervisions
+     SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
+         ended_by_email = $3, end_source = $4, end_reason = $5, end_audit_reason = NULL, updated_at = now()
+     WHERE id = $1 AND academic_year = $2 AND ended_at IS NULL
+     RETURNING id`,
+    [id, CURRENT_ACADEMIC_YEAR, access.actorEmail, TEAM_LEAD_SOURCE, END_REASON]
   );
-  if (!rows[0]) return NOT_FOUND;
-  const pair = { supervisorUserId: Number(rows[0].supervisor_user_id), mentorUserId: Number(rows[0].mentor_user_id) };
-  const ended = await withTransaction((client) => endSupervision(client, pair, audit(access)));
-  return ended === 0 ? NOT_FOUND : { ok: true };
+  return rows.length === 0 ? NOT_FOUND : { ok: true };
 }
