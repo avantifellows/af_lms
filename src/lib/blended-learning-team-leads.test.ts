@@ -34,14 +34,17 @@ beforeEach(() => {
 describe("listTeamLeadLinks", () => {
   it("lists the running current-year Supervisions by team lead, with IST start dates", async () => {
     mockQuery.mockResolvedValue([
-      { id: "4", supervisor_user_id: "9003", supervisor_name: "Synthetic Lead", mentor_user_id: 9001, mentor_name: "Synthetic Reportee", started_on: "2026-11-12" },
+      {
+        id: "4", supervisor_user_id: "9003", supervisor_name: "Synthetic Lead", supervisor_email: "lead@test.local",
+        mentor_user_id: 9001, mentor_name: "Synthetic Reportee", mentor_email: "reportee@test.local", started_on: "2026-11-12",
+      },
     ]);
 
     expect(await listTeamLeadLinks(ADMIN)).toEqual([
       {
         id: 4,
-        teamLead: { userId: 9003, name: "Synthetic Lead" },
-        reportee: { userId: 9001, name: "Synthetic Reportee" },
+        teamLead: { userId: 9003, name: "Synthetic Lead", email: "lead@test.local" },
+        reportee: { userId: 9001, name: "Synthetic Reportee", email: "reportee@test.local" },
         startedOn: "2026-11-12",
       },
     ]);
@@ -63,11 +66,14 @@ describe("listTeamLeadLinks", () => {
 
 describe("listBlendedMentorOptions", () => {
   it("lists only people with a live blended_mentor permission, Mappings alone not counting", async () => {
-    mockQuery.mockResolvedValue([{ id: "9001", name: "Synthetic Reportee" }, { id: 9003, name: "Synthetic Lead" }]);
+    mockQuery.mockResolvedValue([
+      { id: "9001", name: "Synthetic Reportee", email: "reportee@test.local" },
+      { id: 9003, name: "Synthetic Lead", email: null },
+    ]);
 
     expect(await listBlendedMentorOptions(ADMIN)).toEqual([
-      { userId: 9001, name: "Synthetic Reportee" },
-      { userId: 9003, name: "Synthetic Lead" },
+      { userId: 9001, name: "Synthetic Reportee", email: "reportee@test.local" },
+      { userId: 9003, name: "Synthetic Lead", email: null },
     ]);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toContain("permission.role = $1 AND permission.revoked_at IS NULL");

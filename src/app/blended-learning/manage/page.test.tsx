@@ -78,14 +78,14 @@ beforeEach(() => {
   mockListTeamLeadLinks.mockResolvedValue([
     {
       id: 4,
-      teamLead: { userId: 78, name: "Synthetic Lead" },
-      reportee: { userId: 77, name: "Synthetic Reportee" },
+      teamLead: { userId: 78, name: "Synthetic Lead", email: "lead@test.local" },
+      reportee: { userId: 77, name: "Synthetic Reportee", email: "reportee@test.local" },
       startedOn: "2026-11-12",
     },
   ]);
   mockListBlendedMentorOptions.mockResolvedValue([
-    { userId: 78, name: "Synthetic Lead" },
-    { userId: 77, name: "Synthetic Reportee" },
+    { userId: 78, name: "Synthetic Lead", email: "lead@test.local" },
+    { userId: 77, name: "Synthetic Reportee", email: "reportee@test.local" },
   ]);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ count: 3 }))));
 });

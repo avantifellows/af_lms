@@ -13,7 +13,9 @@ import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 // Mentors' Students read-only. Writes are recorded as from the Manage page
 // with the admin's email; a Supervision is ended, never deleted.
 
-export type TeamLeadPerson = { userId: number; name: string };
+// `email` (the `user` row's) is shown on the Manage page (admins only) only
+// to tell apart Mentors who share a display name.
+export type TeamLeadPerson = { userId: number; name: string; email: string | null };
 export type TeamLeadLink = { id: number; teamLead: TeamLeadPerson; reportee: TeamLeadPerson; startedOn: string };
 
 export type TeamLeadResult =
@@ -40,14 +42,14 @@ const BLENDED_MENTOR_IDS_SQL = `
   WHERE permission.role = $1 AND permission.revoked_at IS NULL`;
 
 async function blendedMentors(): Promise<TeamLeadPerson[]> {
-  const rows = await query<{ id: number | string; name: string }>(
-    `SELECT mentor.id, ${NAME_SQL("mentor")} AS name
+  const rows = await query<{ id: number | string; name: string; email: string | null }>(
+    `SELECT mentor.id, ${NAME_SQL("mentor")} AS name, mentor.email
      FROM (${BLENDED_MENTOR_IDS_SQL}) mentors
      JOIN "user" mentor ON mentor.id = mentors.id
      ORDER BY name, mentor.id`,
     [BLENDED_MENTOR_ROLE]
   );
-  return rows.map((row) => ({ userId: Number(row.id), name: row.name }));
+  return rows.map((row) => ({ userId: Number(row.id), name: row.name, email: row.email }));
 }
 
 // Who can be a team lead or a reportee, A–Z.
@@ -60,8 +62,10 @@ type LinkRow = {
   id: number | string;
   supervisor_user_id: number | string;
   supervisor_name: string;
+  supervisor_email: string | null;
   mentor_user_id: number | string;
   mentor_name: string;
+  mentor_email: string | null;
   started_on: string;
 };
 
@@ -70,7 +74,8 @@ export async function listTeamLeadLinks(access: BlendedLearningAccess): Promise<
   if (!canBlendedLearning(access, "manage")) return [];
   const rows = await query<LinkRow>(
     `SELECT supervision.id, supervision.supervisor_user_id, ${NAME_SQL("lead")} AS supervisor_name,
-            supervision.mentor_user_id, ${NAME_SQL("reportee")} AS mentor_name,
+            lead.email AS supervisor_email,
+            supervision.mentor_user_id, ${NAME_SQL("reportee")} AS mentor_name, reportee.email AS mentor_email,
             ((supervision.started_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS started_on
      FROM blended_learning_mentor_supervisions supervision
      JOIN "user" lead ON lead.id = supervision.supervisor_user_id
@@ -81,8 +86,8 @@ export async function listTeamLeadLinks(access: BlendedLearningAccess): Promise<
   );
   return rows.map((row) => ({
     id: Number(row.id),
-    teamLead: { userId: Number(row.supervisor_user_id), name: row.supervisor_name },
-    reportee: { userId: Number(row.mentor_user_id), name: row.mentor_name },
+    teamLead: { userId: Number(row.supervisor_user_id), name: row.supervisor_name, email: row.supervisor_email },
+    reportee: { userId: Number(row.mentor_user_id), name: row.mentor_name, email: row.mentor_email },
     startedOn: row.started_on,
   }));
 }

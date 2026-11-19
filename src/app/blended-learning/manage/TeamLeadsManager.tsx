@@ -21,8 +21,26 @@ import { manageRequest } from "./manageRequest";
 
 type Errors = Record<string, string>;
 
-function linkLabel(link: TeamLeadLink): string {
-  return `${link.teamLead.name} → ${link.reportee.name}`;
+// Display names two or more different Mentors share (in the dropdowns or the
+// saved links): only those people are shown with their email.
+function sharedNames(mentors: TeamLeadPerson[], links: TeamLeadLink[]): Set<string> {
+  const people = new Map<number, string>();
+  for (const person of [...mentors, ...links.flatMap((link) => [link.teamLead, link.reportee])]) {
+    people.set(person.userId, person.name);
+  }
+  const counts = new Map<string, number>();
+  for (const name of people.values()) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
+}
+
+// A person's label: their name, plus their email when another Mentor shares it.
+type Label = (person: TeamLeadPerson) => string;
+function labeller(shared: Set<string>): Label {
+  return (person) => (shared.has(person.name) && person.email ? `${person.name} (${person.email})` : person.name);
+}
+
+function linkLabel(link: TeamLeadLink, label: Label): string {
+  return `${label(link.teamLead)} → ${label(link.reportee)}`;
 }
 
 function MentorSelect({
@@ -30,12 +48,14 @@ function MentorSelect({
   value,
   onChange,
   mentors,
+  personLabel,
   error,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   mentors: TeamLeadPerson[];
+  personLabel: Label;
   error?: string;
 }) {
   const id = useId();
@@ -52,7 +72,7 @@ function MentorSelect({
         <option value="">Choose a mentor</option>
         {mentors.map((mentor) => (
           <option key={mentor.userId} value={mentor.userId}>
-            {mentor.name}
+            {personLabel(mentor)}
           </option>
         ))}
       </BlendedSelect>
@@ -61,7 +81,7 @@ function MentorSelect({
   );
 }
 
-function AddTeamLeadForm({ mentors }: { mentors: TeamLeadPerson[] }) {
+function AddTeamLeadForm({ mentors, personLabel }: { mentors: TeamLeadPerson[]; personLabel: Label }) {
   const router = useRouter();
   const [lead, setLead] = useState("");
   const [reportee, setReportee] = useState("");
@@ -90,12 +110,13 @@ function AddTeamLeadForm({ mentors }: { mentors: TeamLeadPerson[] }) {
     <form onSubmit={submit} aria-label="Add a team lead" className="space-y-3 border-t border-border pt-4">
       <h3 className="text-sm font-bold text-text-primary">Add a team lead</h3>
       <div className="grid gap-3 sm:grid-cols-2">
-        <MentorSelect label="Team lead" value={lead} onChange={setLead} mentors={mentors} error={errors.supervisorUserId} />
+        <MentorSelect label="Team lead" value={lead} onChange={setLead} mentors={mentors} personLabel={personLabel} error={errors.supervisorUserId} />
         <MentorSelect
           label="Mentor they lead"
           value={reportee}
           onChange={setReportee}
           mentors={mentors}
+          personLabel={personLabel}
           error={errors.mentorUserId}
         />
       </div>
@@ -108,21 +129,31 @@ function AddTeamLeadForm({ mentors }: { mentors: TeamLeadPerson[] }) {
   );
 }
 
-function LinkRow({ link, busy, onEnd }: { link: TeamLeadLink; busy: boolean; onEnd: () => void }) {
+function LinkRow({
+  link,
+  personLabel,
+  busy,
+  onEnd,
+}: {
+  link: TeamLeadLink;
+  personLabel: Label;
+  busy: boolean;
+  onEnd: () => void;
+}) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <p className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-text-primary">
-          <span>{link.teamLead.name}</span>
+          <span>{personLabel(link.teamLead)}</span>
           <ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
           <span className="sr-only">leads</span>
-          <span>{link.reportee.name}</span>
+          <span>{personLabel(link.reportee)}</span>
         </p>
         <p className="text-xs text-text-muted">
           Since <span className="font-mono">{formatCalendarDate(link.startedOn)}</span>
         </p>
       </div>
-      <Button type="button" variant="secondary" className="shrink-0" aria-label={`End ${linkLabel(link)}`} disabled={busy} onClick={onEnd}>
+      <Button type="button" variant="secondary" className="shrink-0" aria-label={`End ${linkLabel(link, personLabel)}`} disabled={busy} onClick={onEnd}>
         End
       </Button>
     </div>
@@ -161,6 +192,7 @@ function useEndLink() {
 export function TeamLeadsManager({ links, mentors }: { links: TeamLeadLink[]; mentors: TeamLeadPerson[] }) {
   const end = useEndLink();
   const { ending } = end;
+  const personLabel = labeller(sharedNames(mentors, links));
 
   return (
     <section aria-labelledby="manage-team-leads">
@@ -180,12 +212,12 @@ export function TeamLeadsManager({ links, mentors }: { links: TeamLeadLink[]; me
           <ul aria-label="Team leads" className="divide-y divide-border">
             {links.map((link) => (
               <li key={link.id} className="py-3 first:pt-0">
-                <LinkRow link={link} busy={end.busy} onEnd={() => end.setEnding(link)} />
+                <LinkRow link={link} personLabel={personLabel} busy={end.busy} onEnd={() => end.setEnding(link)} />
               </li>
             ))}
           </ul>
         )}
-        <AddTeamLeadForm mentors={mentors} />
+        <AddTeamLeadForm mentors={mentors} personLabel={personLabel} />
       </Card>
       <ConfirmDialog
         open={ending !== null}
@@ -198,8 +230,8 @@ export function TeamLeadsManager({ links, mentors }: { links: TeamLeadLink[]; me
         onCancel={end.cancel}
       >
         <p>
-          <span className="font-bold text-text-primary">{ending?.teamLead.name}</span> will no longer see{" "}
-          <span className="font-bold text-text-primary">{ending?.reportee.name}</span>&apos;s students. The record
+          <span className="font-bold text-text-primary">{ending && personLabel(ending.teamLead)}</span> will no longer see{" "}
+          <span className="font-bold text-text-primary">{ending && personLabel(ending.reportee)}</span>&apos;s students. The record
           is kept.
         </p>
       </ConfirmDialog>

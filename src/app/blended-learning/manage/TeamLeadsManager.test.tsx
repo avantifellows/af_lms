@@ -7,9 +7,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) 
 
 import { TeamLeadsManager } from "./TeamLeadsManager";
 
-const LEAD = { userId: 78, name: "Synthetic Lead" };
-const REPORTEE = { userId: 77, name: "Synthetic Reportee" };
-const OTHER = { userId: 79, name: "Synthetic Other" };
+const LEAD = { userId: 78, name: "Synthetic Lead", email: "lead@test.local" };
+const REPORTEE = { userId: 77, name: "Synthetic Reportee", email: "reportee@test.local" };
+const OTHER = { userId: 79, name: "Synthetic Other", email: "other@test.local" };
 const LINK = { id: 4, teamLead: LEAD, reportee: REPORTEE, startedOn: "2026-11-12" };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -89,6 +89,39 @@ describe("TeamLeadsManager", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/blended-learning/team-leads/4/end", expect.objectContaining({ method: "POST" }));
     expect(mockRefresh).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows emails only for Mentors who share a display name, in the dropdowns, the list and the confirmation", async () => {
+    const user = userEvent.setup();
+    const twinA = { userId: 80, name: "Synthetic Twin", email: "twin.a@test.local" };
+    const twinB = { userId: 81, name: "Synthetic Twin", email: "twin.b@test.local" };
+    const link = { id: 5, teamLead: LEAD, reportee: twinA, startedOn: "2026-11-12" };
+    render(<TeamLeadsManager links={[link]} mentors={[LEAD, twinA, twinB]} />);
+
+    const form = screen.getByRole("form", { name: "Add a team lead" });
+    expect(within(within(form).getByLabelText("Team lead")).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Choose a mentor",
+      "Synthetic Lead",
+      "Synthetic Twin (twin.a@test.local)",
+      "Synthetic Twin (twin.b@test.local)",
+    ]);
+    const row = within(screen.getByRole("list", { name: "Team leads" })).getByRole("listitem");
+    expect(row).toHaveTextContent("Synthetic LeadleadsSynthetic Twin (twin.a@test.local)");
+
+    await user.click(screen.getByRole("button", { name: "End Synthetic Lead → Synthetic Twin (twin.a@test.local)" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "Synthetic Lead will no longer see Synthetic Twin (twin.a@test.local)'s students."
+    );
+  });
+
+  it("counts a same-name Mentor who is only in a saved link (no longer an option)", () => {
+    const departed = { userId: 82, name: "Synthetic Reportee", email: "departed@test.local" };
+    render(<TeamLeadsManager links={[{ id: 6, teamLead: LEAD, reportee: departed, startedOn: "2026-11-12" }]} mentors={[LEAD, REPORTEE]} />);
+
+    expect(within(screen.getByRole("list", { name: "Team leads" })).getByRole("listitem")).toHaveTextContent(
+      "Synthetic Reportee (departed@test.local)"
+    );
+    expect(screen.getAllByRole("option", { name: "Synthetic Reportee (reportee@test.local)" })).toHaveLength(2);
   });
 
   it("closes the dialog on Cancel without ending", async () => {
