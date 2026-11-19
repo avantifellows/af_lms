@@ -72,8 +72,10 @@ const COMMON_TARGET_COLUMNS: TargetSql = {
   ids: "common.target_student_ids",
 };
 
-// The Student ids a target reaches: active current-year Mappings (the same
-// source as the Mentee list) and the list's grade. The SQL arguments are the
+// The Student ids a target reaches: active current-year Mappings, dropouts
+// left out (the same source as the Mentee list), and the list's grade. So a
+// push or a later push again never adds an Action Item for a dropout. The SQL
+// arguments are the
 // target's kind, grade, Mentor user id and listed `student.student_id`s:
 // placeholders, or COMMON_TARGET_COLUMNS. `yearParam` is bound to
 // CURRENT_ACADEMIC_YEAR.
@@ -113,7 +115,7 @@ async function countTargeted(target: CommonTarget): Promise<number> {
 }
 
 // Listed Student IDs that match no Student, and those whose Student has no
-// active current-year Mapping, in the order pasted.
+// active current-year Mapping (a dropout counts as none), in the order pasted.
 async function unmatchedStudentIds(studentIds: string[]): Promise<Pick<TargetPreview, "notFound" | "noMentor">> {
   const rows = await query<{ student_id: string; found: boolean; mapped: boolean }>(
     `SELECT listed.student_id,

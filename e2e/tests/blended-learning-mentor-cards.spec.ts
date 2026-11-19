@@ -4,6 +4,7 @@ import { getTestPool } from "../helpers/db";
 import {
   BLENDED_MENTOR_A,
   BLENDED_MENTOR_B,
+  DROPOUT_MENTEE,
   MENTEES,
   fullName,
 } from "../helpers/blended-learning-fixtures";
@@ -17,8 +18,8 @@ import {
 //   6 assigned, 4 + 2, last 7 days = Rohan, 30+ days = Kabir, Meera, Nikhil.
 //   Mentor B — Sana G12 (nothing), Tara G13 (flagged Conversations 35 and 40
 //   days ago, #453): 2 assigned, 1 + 1, last 7 days = 0, 30+ days = both.
-//   Sana's ended Mapping to Mentor A and Uday's previous-year Mapping never
-//   count for Mentor A.
+//   Sana's ended Mapping to Mentor A, Uday's previous-year Mapping and Yash's
+//   active Mapping (he is marked a dropout) never count for Mentor A.
 // Mentor C's Mentees are mutated by other specs, so no count is asserted.
 const EXPECTED_CARDS = [
   {
@@ -179,6 +180,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await page.goto(`/blended-learning/mentors/${mentorAUserId}`);
       await expect(entries(group(page, "Talk to first"))).toHaveCount(4);
       await expect(entries(group(page, "Everyone else"))).toHaveCount(2);
+      await expect(page.getByText(fullName(DROPOUT_MENTEE))).toHaveCount(0);
 
       // Kabir's ready draft is shown, but not as a link into a log form a
       // read-only admin can't use (QA-14).

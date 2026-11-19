@@ -4,14 +4,21 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 
 import { query } from "./db";
 import {
+  activeBlendedMappingSql,
   canAccessBlendedStudent,
   canBlendedLearning,
+  currentBlendedMappingRowSql,
   getBlendedLearningAccess,
+  lockMappingInScope,
+  notBlendedDropoutSql,
   type BlendedLearningAccess,
   type BlendedLearningAction,
 } from "./blended-learning-access";
 
 const mockQuery = vi.mocked(query);
+
+// What the scope SQL adds to leave dropouts out.
+const DROPOUT_PREDICATE = "dropout_student.status = 'dropout'";
 
 type Row = {
   email: string;
@@ -175,11 +182,16 @@ describe("canAccessBlendedStudent", () => {
     actorEmail: "shalinijha@avantifellows.org",
   };
 
-  // Fixture: the active current-year Mapping per Student (what the SQL returns).
-  function givenActiveMappings(mappings: { student_id: number; mentor_user_id: number }[]) {
+  // Fixture: the active current-year Mapping per Student, and each Student's
+  // status (omitted: NULL). The SQL's dropout predicate is applied when present.
+  function givenActiveMappings(mappings: { student_id: number; mentor_user_id: number; status?: string | null }[]) {
     mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
       if (!sql.includes("blended_learning_mentor_mentee_mappings")) return [];
-      return mappings.filter((m) => m.student_id === Number(params?.[0]));
+      const dropoutsHidden = sql.includes(DROPOUT_PREDICATE);
+      return mappings
+        .filter((m) => m.student_id === Number(params?.[0]))
+        .filter((m) => !dropoutsHidden || m.status !== "dropout")
+        .map(({ mentor_user_id }) => ({ mentor_user_id }));
     });
   }
 
@@ -204,6 +216,23 @@ describe("canAccessBlendedStudent", () => {
     expect(await canAccessBlendedStudent(readOnlyAdmin, 503)).toBe(false);
   });
 
+  it("refuses everyone a Student marked a dropout, though their Mapping is still active", async () => {
+    givenActiveMappings([{ student_id: 504, mentor_user_id: 9001, status: "dropout" }]);
+    expect(await canAccessBlendedStudent(mentor, 504)).toBe(false);
+    expect(await canAccessBlendedStudent(readOnlyAdmin, 504)).toBe(false);
+  });
+
+  it("still lets everyone reach a Student with no status or another status", async () => {
+    givenActiveMappings([
+      { student_id: 505, mentor_user_id: 9001, status: null },
+      { student_id: 506, mentor_user_id: 9001, status: "enrolled" },
+    ]);
+    for (const studentId of [505, 506]) {
+      expect(await canAccessBlendedStudent(mentor, studentId)).toBe(true);
+      expect(await canAccessBlendedStudent(readOnlyAdmin, studentId)).toBe(true);
+    }
+  });
+
   it("refuses a Mentor with no Mentor user id, an invalid Student id and no access, without reading", async () => {
     givenActiveMappings([{ student_id: 501, mentor_user_id: 9001 }]);
     expect(await canAccessBlendedStudent({ ...mentor, mentorUserId: null }, 501)).toBe(false);
@@ -211,5 +240,48 @@ describe("canAccessBlendedStudent", () => {
     expect(await canAccessBlendedStudent(mentor, 0)).toBe(false);
     expect(await canAccessBlendedStudent(null, 501)).toBe(false);
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("the Mapping source SQL", () => {
+  it("is an active current-year Mapping whose Student is not marked a dropout", () => {
+    const sql = activeBlendedMappingSql("mapping", "$2");
+    expect(sql).toContain("mapping.academic_year = $2 AND mapping.ended_at IS NULL");
+    expect(sql).toContain(notBlendedDropoutSql("mapping.student_id"));
+  });
+
+  it("leaves out only status 'dropout', so a NULL status stays in", () => {
+    // NOT EXISTS over `status = 'dropout'`: a NULL status never matches the
+    // inner row, so the Student stays. A `status <> 'dropout'` test would drop NULLs.
+    expect(notBlendedDropoutSql("own.student_id")).toMatch(
+      /^NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = own\.student_id AND dropout_student\.status = 'dropout'\)$/
+    );
+    expect(notBlendedDropoutSql("own.student_id")).not.toMatch(/<>|!=|IS DISTINCT/);
+  });
+
+  it("keeps the stored Mapping rows, dropouts included, for operator data loads", () => {
+    expect(currentBlendedMappingRowSql("mapping", "$1")).toBe("mapping.academic_year = $1 AND mapping.ended_at IS NULL");
+  });
+});
+
+describe("lockMappingInScope", () => {
+  const mentor: BlendedLearningAccess = {
+    kind: "mentor", role: "blended_mentor", readOnly: false,
+    actorEmail: "mentor@test.local", mentorUserId: 9001,
+  };
+  const mapping = { mentor_user_id: 9001, program_id: 80, academic_year: "2026-2027" };
+
+  it("locks the Mapping only when the Student is not a dropout", async () => {
+    const clientQuery = vi.fn().mockResolvedValue({ rows: [mapping] });
+    expect(await lockMappingInScope({ query: clientQuery } as never, mentor, 501)).toEqual(mapping);
+    const [sql, params] = clientQuery.mock.calls[0];
+    expect(sql).toContain(DROPOUT_PREDICATE);
+    expect(sql).toMatch(/FOR SHARE$/);
+    expect(params).toEqual([501, "2026-2027"]);
+  });
+
+  it("is null when the scoped read finds no Mapping, as for a dropout", async () => {
+    const clientQuery = vi.fn().mockResolvedValue({ rows: [] });
+    expect(await lockMappingInScope({ query: clientQuery } as never, mentor, 504)).toBeNull();
   });
 });
