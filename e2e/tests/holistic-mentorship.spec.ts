@@ -767,8 +767,9 @@ test.describe("Holistic Mentorship release workflows", () => {
     const completedRow = completedBody.rows.find(
       (row: { studentId: number }) => row.studentId === fixture.profileGrade11StudentId
     );
+    // Phase 1 closed when Grade 11's next Phase opened (#536).
     expect(completedRow).toMatchObject({
-      phaseState: "open",
+      phaseState: "closed",
       progress: "completed",
       answers: [{
         position: 1,
@@ -807,6 +808,8 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect((await phaseOpen).status()).toBe(200);
     const openedPhase = holisticAdminPage.getByText("Synthetic Grade 11 Locked", { exact: true }).locator("..").locator("..");
     await expect(openedPhase.getByText("Active", { exact: true })).toBeVisible();
+    // Opening it closed the Phase that was Active for Grade 11 until now.
+    await expect(holisticAdminPage.getByRole("button", { name: /Synthetic Grade 11 Active/ })).toContainText("Closed");
 
     await holisticAdminPage.getByRole("tab", { name: "Students & Progress" }).click();
     await holisticAdminPage.route("**/api/holistic-mentorship/profiles/*", async (route) => {
