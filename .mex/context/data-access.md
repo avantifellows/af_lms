@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-15
+last_updated: 2026-11-19
 ---
 
 # Data Access
@@ -146,7 +146,17 @@ On the same local snapshot (September 24, 2026), the Unassigned SELECT took 22â€
 
 ## Holistic Grade 12 phase labels
 
-Student detail now returns only real current Grade 12 phases when no continuing Grade 11 history applies; it no longer invents four placeholder tabs or forces numbering to start at 5. Existing plan-wide numbering is retained (the reported Maharashtra plan displays Grade 12 as Phase 2). Continuing prior-year history, phase IDs, context precedence, permissions and database access are unchanged. Missing generated profiles do not change numbering and do not establish source-form completion. No schema/data repair is involved.
+Student detail now returns only real current Grade 12 phases when no continuing Grade 11 history applies; it no longer invents four placeholder tabs or forces numbering to start at 5. Plan-wide numbering was kept at the time (the reported Maharashtra plan displayed Grade 12 as Phase 2); issue #516 replaced it, see "Holistic Phase numbers" below. Continuing prior-year history, phase IDs, context precedence, permissions and database access are unchanged. Missing generated profiles do not change numbering and do not establish source-form completion. No schema/data repair is involved.
+
+## Holistic Phase numbers
+
+Issue #516 (Audience: the six Holistic Mentorship Programs; nothing for NVS Schools). The displayed `Phase N` is per Grade: a Phase's place among its own Grade's Phases in Plan order, plus 3 for Grade 12. Grade 11 Phases read 1, 2, 3 and Grade 12 Phases 4, 5, 6, whatever order the Grades' Phases were added in (JNV CoE's Plan runs Grade 11, 12, 11, 12 and used to read 1, 2, 3, 4).
+
+- One rule, in client-safe `src/lib/holistic-phase-number.ts`: `holisticPhaseNumber(grade, placeInGrade)`, `withHolisticPhaseNumbers(phases)` for rows that carry `grade` and `position`, and `holisticPhaseNumberSql(phaseAlias, gradeNumberExpr)` for the one query that sorts and pages by the number. Used by `getHolisticPhasePlan` (Phase Setup), `numberPhases` in `holistic-student-phase.ts` (student page tabs, heading, "From Phase N" context label; each Academic Year's Plan numbered on its own), `listAssignedMentees` and `getHolisticProgressOptions` in `holistic-progress.ts` (rows, Phase filter, sort by Phase, CSV, and the MCP `holistic_progress` view that wraps the same route), and `heatmapPhases`.
+- Nothing stores the number. `holistic_mentorship_phases.position` is unchanged and still drives Active (highest-position Open Phase per Grade) and Skipped: the progress query now selects `phase_position` beside `phase_number` and compares `phase_position` with `initial_active_position`.
+- A Grade holds at most `HOLISTIC_PHASES_PER_GRADE` (3) Phases per Plan. `addHolisticPhase` and `updateHolisticPhase` (a Grade change) return 422 "Grade N already has 3 Phases" (`gradeIsFull`, counted under the Plan row lock both paths already take). Copy previous year copies a Plan as is; no Plan has more than 3 per Grade.
+- Phase Setup (`PhasePlanSetup.tsx`) lists the Plan in two groups, Grade 11 then Grade 12. Move up / Move down swap a Phase with its neighbour in the same Grade (`gradeNeighbour`) and send the whole Plan order to the unchanged reorder action; Add Phase starts in the first Grade with room and is off when both are full; a full Grade's button is disabled for a Phase of the other Grade.
+- No schema or data change is needed for the numbers. Phase titles that already had a number typed in ("Phase 2 - ...") are data and need a one-off title fix on production.
 
 ## September investigation and verification record
 

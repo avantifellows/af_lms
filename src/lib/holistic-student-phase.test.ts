@@ -87,7 +87,7 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
-  it.each([2, 5])("returns only configured Grade 12 Phase %s without placeholders", (phaseNumber) => {
+  it.each([4, 5])("returns only configured Grade 12 Phase %s without placeholders", (phaseNumber) => {
     expect(buildHolisticApplicablePhases({
       currentGrade: 12,
       entryGrade: 12,
@@ -118,7 +118,7 @@ describe("Holistic Student Phase derivation", () => {
       profileRows: [],
       context: { label: null, items: [], missing: "Profile unavailable" },
     },
-  ])("keeps the configured Grade 12 phase ID and number $label", async ({ entryGrade, profileRows, context }) => {
+  ])("keeps the configured Grade 12 phase ID and numbers it Phase 4 $label", async ({ entryGrade, profileRows, context }) => {
     mockQuery
       .mockResolvedValueOnce([{
         student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
@@ -154,14 +154,46 @@ describe("Holistic Student Phase derivation", () => {
     expect(result).toMatchObject({
       phases: [{
         phaseId: 6,
-        number: 2,
+        number: 4,
         title: "Grade 12 start",
         grade: 12,
         academicYear: "2026-2027",
       }],
-      selectedPhase: { phaseId: 6, number: 2, context },
+      selectedPhase: { phaseId: 6, number: 4, context },
     });
     expect(result?.phases.every((phase) => phase.phaseId !== null)).toBe(true);
+  });
+
+  // Issue #516: the JNV CoE Plan is ordered Grade 11, 12, 11, 12.
+  it.each([
+    { grade: 11, phaseId: 15, tabs: [[1, 1], [15, 2]] },
+    { grade: 12, phaseId: 16, tabs: [[2, 4], [16, 5]] },
+  ])("numbers a Grade $grade Mentee's tabs per Grade when the Plan mixes Grades", async ({ grade, phaseId, tabs }) => {
+    const phase = (id: number, phaseGrade: number, position: number) => ({
+      id, academic_year: "2026-2027", grade: phaseGrade, title: `Phase row ${id}`,
+      position, revision: 1, state: "open", guidance_markdown: "Listen first.",
+    });
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade, entry_grade: grade,
+      }])
+      .mockResolvedValueOnce([phase(1, 11, 1), phase(2, 12, 2), phase(15, 11, 3), phase(16, 12, 4)])
+      .mockResolvedValue([]);
+
+    const result = await getHolisticStudentPhase({
+      programId: PROGRAM_IDS.COE,
+      studentId: 41,
+      phaseId,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    expect(result?.phases.map((item) => [item.phaseId, item.number])).toEqual(tabs);
+    expect(result?.selectedPhase.number).toBe(tabs[1][1]);
   });
 
   it("shows real prior-year Grade 11 history for a continuing Grade 12 Mentee", () => {

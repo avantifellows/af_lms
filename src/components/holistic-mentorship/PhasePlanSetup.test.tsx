@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -375,6 +375,163 @@ describe("PhasePlanSetup", () => {
       expect(second).toHaveAccessibleDescription("");
       expect(screen.queryByText(academicHint)).not.toBeInTheDocument();
       expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    });
+  });
+
+  // Issue #516: the list is grouped by Grade, numbered 1-3 and 4-6, and a Grade holds 3 Phases.
+  describe("Grades", () => {
+    const phase = (id: number, number: number, grade: 11 | 12, title: string, overrides = {}) => ({
+      id, number, grade, title, state: "locked",
+      guidanceMarkdown: "Guidance", revision: 1, frozen: false,
+      everOpened: false, used: false, active: false,
+      questions: [{ id: id * 10, text: "Question" }],
+      ...overrides,
+    });
+    const planResponse = (phases: unknown[]) => ({
+      ok: true, json: async () => ({ plan: { id: 7, academicYear: "2026-2027", editable: true, phases } }),
+    });
+    const listed = (grade: 11 | 12) =>
+      within(screen.getByRole("region", { name: `Grade ${grade} Phases` })).getAllByRole("button")
+        .map((button) => button.textContent);
+
+    it("lists a mixed Plan in two groups, Grade 11 then Grade 12, each in Plan order", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([
+        phase(1, 1, 11, "Building Relationship"),
+        phase(2, 4, 12, "Better Stress Management"),
+        phase(15, 2, 11, "Improved Self-Discipline"),
+        phase(16, 5, 12, "Strategic Preparation"),
+      ])));
+      render(<PhasePlanSetup />);
+
+      await screen.findByRole("region", { name: "Grade 11 Phases" });
+      expect(listed(11)).toEqual(["1Building RelationshipLocked", "2Improved Self-DisciplineLocked"]);
+      expect(listed(12)).toEqual(["4Better Stress ManagementLocked", "5Strategic PreparationLocked"]);
+      const groups = within(screen.getByRole("navigation", { name: "Ordered Phase Plan" }))
+        .getAllByRole("region").map((group) => group.getAttribute("aria-label"));
+      expect(groups).toEqual(["Grade 11 Phases", "Grade 12 Phases"]);
+    });
+
+    it("says so when one Grade has no Phases yet, and shows no groups for an empty Plan", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([phase(1, 1, 11, "Building Relationship")])));
+      const view = render(<PhasePlanSetup />);
+
+      expect(await screen.findByText("No Grade 12 Phases yet.")).toBeInTheDocument();
+      expect(screen.queryByText("No Grade 11 Phases yet.")).not.toBeInTheDocument();
+
+      view.unmount();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([])));
+      render(<PhasePlanSetup />);
+
+      expect(await screen.findByText("No Phases configured.")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Grade 11 Phases" })).not.toBeInTheDocument();
+    });
+
+    it("moves a Phase past its Grade neighbour and leaves the other Grade's Phase in place", async () => {
+      const user = userEvent.setup();
+      const phases = [
+        phase(21, 1, 11, "First Grade 11"), phase(31, 4, 12, "Only Grade 12"), phase(22, 2, 11, "Second Grade 11"),
+      ];
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(planResponse(phases))
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+        .mockResolvedValueOnce(planResponse(phases));
+      vi.stubGlobal("fetch", fetchMock);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Second Grade 11/ }));
+      await user.click(screen.getByRole("button", { name: "Move Phase 2 up" }));
+
+      expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({
+        action: "reorder",
+        phases: [{ id: 22 }, { id: 31 }, { id: 21 }],
+      });
+    });
+
+    it("does not offer to move a Phase across the other Grade", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([
+        phase(21, 1, 11, "First Grade 11"), phase(31, 4, 12, "Only Grade 12"), phase(22, 2, 11, "Second Grade 11"),
+      ])));
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Only Grade 12/ }));
+
+      expect(screen.getByRole("button", { name: "Move Phase 4 up" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Move Phase 4 down" })).toBeDisabled();
+    });
+
+    it("does not move a Phase past a Grade neighbour that has been opened", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([
+        phase(21, 1, 11, "Opened Grade 11", { state: "open", everOpened: true }),
+        phase(22, 2, 11, "Second Grade 11"),
+      ])));
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Second Grade 11/ }));
+
+      expect(screen.getByRole("button", { name: "Move Phase 2 up" })).toBeDisabled();
+    });
+
+    it("starts a new Phase in the Grade that still has room and blocks the full Grade", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([
+        phase(21, 1, 11, "One"), phase(22, 2, 11, "Two"), phase(23, 3, 11, "Three"), phase(31, 4, 12, "Four"),
+      ])));
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: "Add Phase" }));
+
+      expect(screen.getByRole("heading", { name: "New Phase" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Grade 12" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Grade 11" })).toBeDisabled();
+      expect(screen.getByText("Grade 11 already has 3 Phases.")).toBeInTheDocument();
+    });
+
+    it("lets a Phase stay in its own full Grade but not move into the other full Grade", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([
+        phase(21, 1, 11, "One"), phase(22, 2, 11, "Two"), phase(23, 3, 11, "Three"),
+        phase(31, 4, 12, "Four"), phase(32, 5, 12, "Five"), phase(33, 6, 12, "Six"),
+      ])));
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Three/ }));
+
+      expect(screen.getByRole("button", { name: "Grade 11" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Grade 12" })).toBeDisabled();
+      expect(screen.getByText("Grade 12 already has 3 Phases.")).toBeInTheDocument();
+      expect(screen.queryByText("Grade 11 already has 3 Phases.")).not.toBeInTheDocument();
+    });
+
+    it("turns Add Phase off and says why when both Grades have 3 Phases", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(planResponse([
+        phase(21, 1, 11, "One"), phase(22, 2, 11, "Two"), phase(23, 3, 11, "Three"),
+        phase(31, 4, 12, "Four"), phase(32, 5, 12, "Five"), phase(33, 6, 12, "Six"),
+      ])));
+      render(<PhasePlanSetup />);
+
+      expect(await screen.findByRole("button", { name: "Add Phase" })).toBeDisabled();
+      expect(screen.getByText("Each Grade already has 3 Phases.")).toBeInTheDocument();
+    });
+
+    it("shows the server's refusal when a 4th Phase is saved anyway", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(planResponse([phase(21, 1, 11, "One")]))
+        .mockResolvedValueOnce({
+          ok: false, status: 422, json: async () => ({ error: "Grade 11 already has 3 Phases" }),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: "Add Phase" }));
+      await user.type(screen.getByLabelText("Title"), "Late addition");
+      await user.type(screen.getByLabelText("Question 1"), "What next?");
+      await user.click(screen.getByRole("button", { name: "Save Phase" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Grade 11 already has 3 Phases");
+      expect(screen.getByLabelText("Title")).toHaveValue("Late addition");
     });
   });
 });

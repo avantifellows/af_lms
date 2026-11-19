@@ -2,6 +2,9 @@ import type { PoolClient } from "pg";
 
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query, withTransaction } from "./db";
+import {
+  HOLISTIC_PHASES_PER_GRADE, holisticGradeFullError, withHolisticPhaseNumbers,
+} from "./holistic-phase-number";
 
 export type HolisticPhaseQuestion = {
   id: number;
@@ -135,6 +138,25 @@ async function recordPhaseMutation(
      VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), NOW())`,
     [phasePlanId, phaseId, action, actor.actorUserId ?? null, actor.actorEmail]
   );
+}
+
+// A Grade holds at most HOLISTIC_PHASES_PER_GRADE Phases, so Grade 12's numbers never
+// collide with Grade 11's. Callers hold the Plan row lock.
+async function gradeIsFull(
+  client: PoolClient,
+  phasePlanId: number,
+  grade: 11 | 12,
+  exceptPhaseId: number | null = null,
+): Promise<boolean> {
+  const result = await client.query<{ count: number | string }>(
+    `SELECT COUNT(*) AS count
+     FROM holistic_mentorship_phases phase
+     JOIN grade ON grade.id = phase.grade_id
+     WHERE phase.phase_plan_id = $1 AND grade.number = $2
+       AND ($3::bigint IS NULL OR phase.id <> $3)`,
+    [phasePlanId, grade, exceptPhaseId]
+  );
+  return Number(result.rows[0]?.count ?? 0) >= HOLISTIC_PHASES_PER_GRADE;
 }
 
 export function validateAcademicYear(value: string): boolean {
@@ -281,6 +303,9 @@ async function updatePhaseTransaction(
   const phase = checked.phase;
   const invalidChange = validateDefinitionChange(phase, input);
   if (invalidChange) return invalidChange;
+  if (await gradeIsFull(client, Number(phase.phase_plan_id), input.grade, input.phaseId)) {
+    return { ok: false, status: 422, error: holisticGradeFullError(input.grade) };
+  }
   const ownershipError = await validateQuestionOwnership(client, input.phaseId, input.questions);
   if (ownershipError) return ownershipError;
   const updated = await client.query<{ revision: number }>(
@@ -342,17 +367,20 @@ export async function getHolisticPhasePlan(
   for (const row of rows) {
     if (row.state === "open") activeByGrade.set(Number(row.grade), Number(row.id));
   }
+  const numbered = withHolisticPhaseNumbers(
+    rows.map((row) => ({ ...row, grade: Number(row.grade) as 11 | 12 }))
+  );
 
   return {
     id: Number(plans[0].id),
     programId: Number(plans[0].program_id),
     academicYear: plans[0].academic_year,
     editable: academicYear === CURRENT_ACADEMIC_YEAR,
-    phases: rows.map((row, index) => ({
+    phases: numbered.map((row) => ({
       id: Number(row.id),
-      number: index + 1,
+      number: row.number,
       gradeId: Number(row.grade_id),
-      grade: Number(row.grade) as 11 | 12,
+      grade: row.grade,
       title: row.title,
       position: row.position,
       state: row.state,
@@ -361,7 +389,7 @@ export async function getHolisticPhasePlan(
       frozen: row.frozen_at !== null,
       everOpened: row.ever_opened,
       used: row.used,
-      active: activeByGrade.get(Number(row.grade)) === Number(row.id),
+      active: activeByGrade.get(row.grade) === Number(row.id),
       questions: questionRows
         .filter((question) => Number(question.phase_id) === Number(row.id))
         .map((question) => ({ ...question, id: Number(question.id) })),
@@ -460,6 +488,9 @@ export async function addHolisticPhase(params: {
       params.programId,
     );
     if (!planId) return { ok: false, status: 404, error: "Plan not found" };
+    if (await gradeIsFull(client, planId, params.grade)) {
+      return { ok: false, status: 422, error: holisticGradeFullError(params.grade) };
+    }
     const inserted = await client.query<{ id: number | string; phase_plan_id: number | string }>(
       `INSERT INTO holistic_mentorship_phases
          (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision, inserted_at, updated_at)

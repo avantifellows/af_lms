@@ -137,6 +137,7 @@ describe("/api/holistic-mentorship/phase-plans", () => {
           guidance_markdown: "Old Guidance", academic_year: "2026-2027", frozen_at: null,
           ever_opened: true, used: false,
         }] })
+        .mockResolvedValueOnce({ rows: [{ count: "0" }] })
         .mockResolvedValueOnce({ rows: [{ id: "41" }] })
         .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
         .mockResolvedValue({ rows: [] }),

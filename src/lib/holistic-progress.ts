@@ -4,6 +4,7 @@ import {
   groupHolisticChallengeCategories,
   knownHolisticChallengeCategories,
 } from "./holistic-challenge-categories";
+import { holisticPhaseNumberSql, withHolisticPhaseNumbers } from "./holistic-phase-number";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
 import type { UserPermission } from "./permissions";
@@ -401,7 +402,8 @@ async function listAssignedMentees(
               COALESCE(current_roster.grade, historical_grade.grade) AS grade,
               NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name,
               mentor.email AS mentor_email,
-              selected_phase.id AS phase_id, selected_phase.position AS phase_number,
+              selected_phase.id AS phase_id, selected_phase.number AS phase_number,
+              selected_phase.position AS phase_position,
               selected_phase.title AS phase_title,
               selected_phase.phase_availability AS phase_state,
               initial_active.position AS initial_active_position
@@ -434,6 +436,7 @@ async function listAssignedMentees(
        ) historical_grade ON true
        LEFT JOIN LATERAL (
          SELECT phase.id, phase.position, phase.title,
+                ${holisticPhaseNumberSql("phase", "phase_grade.number")} AS number,
                 CASE WHEN phase.state = 'locked' THEN 'locked'
                      WHEN phase.position = (
                        SELECT MAX(active_phase.position)
@@ -477,7 +480,7 @@ async function listAssignedMentees(
        SELECT base.*,
               CASE WHEN base.phase_id IS NULL THEN 'no_active_phase'
                    WHEN notes.state = 'submitted' THEN 'completed'
-                   WHEN base.initial_active_position IS NOT NULL AND base.phase_number < base.initial_active_position THEN 'skipped'
+                   WHEN base.initial_active_position IS NOT NULL AND base.phase_position < base.initial_active_position THEN 'skipped'
                    ELSE 'pending' END AS progress,
               CASE WHEN notes.state = 'submitted' THEN notes.first_submitted_at END AS completed_at,
               CASE WHEN notes.state = 'submitted' THEN notes.last_edited_at END AS notes_last_edited_at,
@@ -626,9 +629,11 @@ export async function getHolisticProgressOptions(
   return {
     schools,
     mentors: mentors.map((mentor) => ({ userId: Number(mentor.user_id), name: mentor.name || mentor.email })),
-    phases: phases.map((phase) => ({
-      id: Number(phase.id), number: phase.position, title: phase.title,
-      grade: Number(phase.grade) as 11 | 12, state: phase.state,
+    phases: withHolisticPhaseNumbers(
+      phases.map((phase) => ({ ...phase, grade: Number(phase.grade) as 11 | 12 }))
+    ).map((phase) => ({
+      id: Number(phase.id), number: phase.number, title: phase.title,
+      grade: phase.grade, state: phase.state,
     })),
   };
 }

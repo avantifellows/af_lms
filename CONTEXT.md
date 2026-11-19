@@ -263,8 +263,8 @@ The academic-year version of one Program's full ordered Holistic Phase sequence 
 _Avoid_: Evergreen phase configuration, separate mentorship cycle
 
 **Holistic Phase**:
-A stable item in a Holistic Phase Plan, assigned to Grade 11 or Grade 12, given a required short title, and placed in the Program's full phase sequence. Its displayed `Phase N` number is derived from that order rather than stored as identity.
-_Avoid_: Session, fixed phase number
+A stable item in a Holistic Phase Plan, assigned to Grade 11 or Grade 12, given a required short title, and placed in the Program's full phase sequence. Its displayed `Phase N` number is derived from its place among its own Grade's Phases (Grade 11: 1 to 3, Grade 12: 4 to 6) rather than stored as identity.
+_Avoid_: Session, stored phase number
 
 **Student Context**:
 The live preparation content resolved for one Holistic Mentee and Phase from the Student Profile, earlier submitted Post-Session Notes, or Historical Holistic Notes.
@@ -567,7 +567,9 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - The Holistic Mentorship runtime allowlist contains canonical Main DB Program IDs `1` (`JNV CoE`), `74` (`Punjab CoE`), `94` (`Punjab Nodal`), `78` (`EMRS CoE`), `88` (`Uttarakhand CoE`), and `99` (`Maharashtra Coaching Test Prep`) and covers every School in those Programs; it does not hard-code School IDs or counts
 - Each Program has one **Holistic Phase Plan** per academic year; when creating a new Plan, an Admin can start blank or, when a prior-year Plan exists, copy its Grade, title, order, Guidance, and Questions into new Phase records that are all Locked with none Active, while student work and Phase state are never copied and the prior Plan's definition and state stay read-only
 - The **Holistic Mentorship Admin** and **Admin** Academic Year selector always includes the current year and includes an earlier year only when that Program has a Phase Plan or Mentor-Mentee Mapping data for it; Program Manager and Program Admin year options apply the same rule inside their resolved School and Program scope
-- Each **Holistic Phase** keeps a stable internal identity and required short title; LMS derives its displayed `Phase N` number from its position in the Plan's full ordered sequence
+- Each **Holistic Phase** keeps a stable internal identity and required short title; LMS derives its displayed `Phase N` number per Grade, from the Phase's place among its own Grade's Phases in Plan order: Grade 11 Phases are 1, 2, 3 and Grade 12 Phases are 4, 5, 6, whatever order the two Grades' Phases were added in (issue #516). Every screen, export and query takes the number from `src/lib/holistic-phase-number.ts`
+- A Grade holds at most three **Holistic Phases** in a Plan: adding a fourth, or changing a Phase's Grade into a Grade that already has three, is refused, so Grade 12's numbers never collide with Grade 11's
+- Phase Setup lists a Plan in two groups, Grade 11 then Grade 12; Move up and Move down swap a Phase with its neighbour in the same Grade and leave the other Grade's Phases in place
 - Opening a **Holistic Phase** makes it available for the selected Program, academic year, and Grade; every already Open Phase stays Open and usable
 - A Program, academic year, and Grade has no Active Phase before any Phase is Open; afterward, Active is derived as the latest ordered Open Phase, with no separate Make Active control
 - A **Holistic Mentorship Admin** may open Phases out of sequence; LMS does not enforce sequential transitions, and the latest ordered Open Phase remains Active
@@ -587,7 +589,7 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - Because LMS has no trustworthy historical Holistic eligibility-start date, a Mentee's first Mapping in an academic year is the v1 starting point: applicable Phases ordered before the current Active Phase start Skipped, while the Active and later applicable Phases start Pending when available; if no Phase is Active, nothing is initially Skipped
 - A Skipped Phase remains available for later work; for its authoring current Mentor the first non-empty Notes draft changes it to Pending, and Notes submission changes Pending or Skipped to Completed. Non-author progress surfaces treat the draft as absent, so an otherwise Skipped Phase stays Skipped.
 - Pending, Skipped, and Completed are system-derived with no manual status control; only the authoring current Mentor sees a saved Notes draft as Pending with the Draft saved indicator, non-authors derive status without that draft, and only Notes submission creates Completed status
-- Grade 12 launch Mentees with no LMS Grade 11 Holistic history see only their real configured Grade 12 Phases, each using the existing plan-wide numbering for the displayed `Phase N`; a real Locked Phase remains disabled with no persisted Notes access until it is opened
+- Grade 12 launch Mentees with no LMS Grade 11 Holistic history see only their real configured Grade 12 Phases, each with its per-Grade `Phase N` (4 to 6); a real Locked Phase remains disabled with no persisted Notes access until it is opened
 - In later academic years, a Grade 12 Mentee sees their real prior-year Grade 11 Phase history instead of placeholders, alongside current Grade 12 Phases
 - A current Mentor may start and complete a prior-year Pending or Skipped Phase for their Mentee; the historical Phase definition and Program state remain frozen, and submitted-Notes editing continues to follow author-only rules
 - V1 stores one complete **Phase Guidance** Markdown body per Phase; it has no separate Phase Overview fields or top-of-page Overview section

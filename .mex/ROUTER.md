@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-11-18
+last_updated: 2026-11-19
 ---
 
 # Session Bootstrap
@@ -38,6 +38,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Issue #516 (feature branch `fix/issue-516-phase-numbers-per-grade`; Audience: the six Holistic Mentorship Programs, nothing for NVS Schools): the displayed Holistic `Phase N` is per Grade, Grade 11 = 1, 2, 3 and Grade 12 = 4, 5, 6 in Plan order, from one rule in client-safe `src/lib/holistic-phase-number.ts` used by Phase Setup, the student Phase page, Students & Progress (rows, filter, sort, CSV, MCP view) and the Challenge Category heatmap. A Grade holds at most 3 Phases per Plan (add or Grade change → 422). Phase Setup lists Grade 11 then Grade 12 and moves a Phase only within its Grade. `position`, Active and Skipped are unchanged; no schema or data change for the numbers. See `context/data-access.md` "Holistic Phase numbers".
 - Exam-portal passwords KMS-encrypted (feature branch `feat/exam-password-kms`; Audience: physical centres only, as the Exams tab): the LMS encrypts with AWS KMS before writing (`src/lib/exam-password-crypto.ts`), the DB Service and BigQuery hold only ciphertext (`application_password_ciphertext`), no list read carries a password, and a stored one is revealed on demand by `POST /api/students/[id]/exam-records/[recordId]/password`, gated on the new `exam_passwords` feature and logged to `lms_exam_password_reveals`. Needs the db-service migrations, a KMS key + IAM user (`EXAM_PASSWORD_KMS_*`), then `scripts/encrypt-exam-passwords.ts` for the legacy plaintext. See `context/student-addition.md` "Exam Registrations".
 - Blended Learning hides dropouts (feature branch; Blended Learning only): a Student marked a dropout (`student.status = 'dropout'`; NULL stays in) leaves Blended Learning everywhere while their Mapping stays active: the Mentee list, Mentor cards and a Mentor's page, the Flags feed (admins included, "N new" and the Mentor filter too), Common Action Item counts and pushes, and their page (404). One change in `activeBlendedMappingSql` (`notBlendedDropoutSql`); no data writes, so a status changed back brings them back. The links import still reads raw Mapping rows. See `context/data-access.md` ("Mapping source").
 - PR #486 stakeholder restyle of the **list page** `/school-visit-summary` (feature branch; physical centres only; presentation only): both tabs share title + "N visits found" → Filters panel (Download CSV + Clear filters; "Required actions" label) → five stat cards (Total visits, Completed, Schools, PMs from `getSummaryStats`; Schools with recurring concerns from `getSchoolWiseView`, which the Visits tab now also calls) → boxed tabs. School-wise: "N schools" + freshness line + Recurring concerns only (`RecurringOnlyToggle`), rows with a severity bar, bold name over region, compact Last-visit pill (stale tint + sr-only label), an **Open concerns** column (plain number like Visits, sort key `open`) before the red recurring circle, chevron. See `context/visits.md` "List page layout".
