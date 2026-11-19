@@ -604,16 +604,21 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
   `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
   filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an
-  array of Mentor ids). Written by the operator script
-  (`src/lib/blended-learning-supervisions-load.ts`: dry run on a read-only connection; apply = one
-  transaction, `ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; `--end` sets the end columns) and,
-  since 2026-11-18, by the Manage page's **Team leads** section (`src/lib/blended-learning-team-leads.ts`,
-  `POST /api/blended-learning/team-leads` and `POST /api/blended-learning/team-leads/[id]/end`, both
-  `manage`): it reuses the loader's exported `insertSupervision`/`endSupervision` with
-  `assignment_source`/`end_source` `af_lms_manage_ui` and the admin's email in
-  `assigned_by_email`/`ended_by_email` (`end_reason` `supervision_ended`). Both people must be
-  Blended Learning Mentors (an active current-year Mapping, or a live `blended_mentor` permission
-  resolved to its `user` id); self-supervision is a 422, a running pair a 409.
+  array of Mentor ids). Only Supervisions whose reportee still holds a live (not revoked)
+  `blended_mentor` permission count (`liveBlendedMentorSql`, resolved by `permissionUserIdSql`), so a
+  departed Mentor's Students drop out of the team lead's view. Written only by the Manage page's
+  **Team leads** section (since 2026-11-18; the operator loader script was removed 2026-11-19):
+  `src/lib/blended-learning-team-leads.ts`, `POST /api/blended-learning/team-leads` and
+  `POST /api/blended-learning/team-leads/[id]/end`, both `manage`, with `assignment_source`/`end_source`
+  `af_lms_manage_ui` and the admin's email in `assigned_by_email`/`ended_by_email` (`end_reason`
+  `supervision_ended`). Add: both people must hold a live `blended_mentor` permission (Mappings alone
+  do not count), checked inside the insert's transaction with their permission rows locked
+  `FOR SHARE`, then `INSERT … ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; self-supervision is a
+  422, a running pair a 409. End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND ended_at IS
+  NULL`, a 404 when nothing matched (so a pair ended and re-added meanwhile keeps its new row).
+- Flags tab Mentor filter: for a team lead ("My students" or a reportee) it matches the Student's
+  current active Mapping's Mentor (dropouts left out), not who logged the flagged Conversation; an
+  admin's filter still matches the Conversation's Mentor.
 - e2e: `BLENDED_SUPERVISOR` (one own Mentee, `SUPERVISOR_MENTEE`) supervises Mentor B and has an
   ended Supervision of Mentor A; `e2e/tests/blended-learning-supervisor.spec.ts` asserts on them.
   The Manage spec makes Mentor D lead Mentor C inside one test and ends it before finishing.

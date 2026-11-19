@@ -3,7 +3,6 @@ import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
 import { canBlendedLearning, permissionUserIdSql, type BlendedLearningAccess } from "./blended-learning-access";
 import type { FieldErrors } from "./blended-learning-manage-input";
-import { insertSupervision, type SupervisionAudit } from "./blended-learning-supervisions-load";
 import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 
 // The Manage page's Team leads (server-only): Blended Learning Admins who may
@@ -137,8 +136,20 @@ async function notMentors(client: PoolClient, pair: Pair): Promise<FieldErrors |
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
-function audit(access: BlendedLearningAccess): SupervisionAudit {
-  return { by: access.actorEmail, source: TEAM_LEAD_SOURCE, reason: null };
+// Starts the pair's Supervision for the current academic year, as from the
+// Manage page by the admin; 0 when the pair already runs one (the active-pair
+// unique index), else 1.
+async function insertSupervision(client: PoolClient, pair: Pair, actorEmail: string): Promise<number> {
+  const result = await client.query(
+    `INSERT INTO blended_learning_mentor_supervisions
+       (supervisor_user_id, mentor_user_id, academic_year, started_at,
+        assigned_by_email, assignment_source, assignment_audit_reason)
+     VALUES ($1, $2, $3, date_trunc('second', now() AT TIME ZONE 'UTC'), $4, $5, $6)
+     ON CONFLICT (supervisor_user_id, mentor_user_id, academic_year) WHERE ended_at IS NULL DO NOTHING
+     RETURNING id`,
+    [pair.supervisorUserId, pair.mentorUserId, CURRENT_ACADEMIC_YEAR, actorEmail, TEAM_LEAD_SOURCE, null]
+  );
+  return result.rows.length;
 }
 
 // Starts a team lead's Supervision of a Mentor; a 409 when it already runs.
@@ -149,7 +160,7 @@ export async function createTeamLeadLink(access: BlendedLearningAccess, raw: unk
   // Field errors when either is not a live Mentor, else the rows inserted.
   const outcome = await withTransaction(async (client) => {
     const people = await notMentors(client, parsed.pair);
-    return people ?? (await insertSupervision(client, parsed.pair, audit(access)));
+    return people ?? (await insertSupervision(client, parsed.pair, access.actorEmail));
   });
   if (typeof outcome !== "number") return invalid(outcome);
   if (outcome === 0) return { ok: false, status: 409, error: "This team lead already leads this mentor." };
