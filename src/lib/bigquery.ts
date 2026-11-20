@@ -70,6 +70,7 @@ export const MAJOR_TEST_FORMATS = [
   "mock_test",
   "part_test",
   "full_syllabus_test",
+  "previous_year_test",
 ];
 
 // Advanced papers are excluded from Academic Level by the warehouse — see

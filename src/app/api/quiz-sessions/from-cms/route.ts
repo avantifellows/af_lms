@@ -12,6 +12,7 @@ import {
   courseForCmsExamTrack,
   isCmsExamTrack,
   isCmsTestType,
+  testFormatForCmsTestType,
   streamForCmsExamTrack,
   type CmsExamTrack,
 } from "@/lib/cms-tests";
@@ -378,7 +379,7 @@ export async function POST(request: NextRequest) {
       course: courseForCmsExamTrack(body.examTrack),
       test_code: body.testCode ?? "",
       test_name: body.testName ?? sessionName,
-      test_format: body.testType,
+      test_format: testFormatForCmsTestType(body.testType),
       test_purpose: "test",
       test_type: "assessment",
       is_retest: body.isRetest,

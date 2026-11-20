@@ -1999,10 +1999,10 @@ function QuizSessionCreateModal({
                         <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                           {cmsTestType === "chapter_test"
                             ? "No chapter tests found for this chapter."
-                            : `No ${(
+                            : `No ${
                                 CMS_TEST_TYPE_OPTIONS.find((option) => option.value === cmsTestType)?.label ??
-                                "tests"
-                              ).toLowerCase()}s found for this exam track and grade.`}
+                                "test"
+                              }s found for this exam track and grade.`}
                         </div>
                       ) : (
                         <div className="space-y-2">
