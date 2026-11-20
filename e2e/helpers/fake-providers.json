@@ -1,0 +1,6 @@
+{
+  "englishTranscript": "transcribed by the e2e server fake",
+  "hindiTranscript": "आज छात्र ने maths का homework पूरा किया",
+  "translation": "Today the student finished the maths homework, translated by the e2e fake",
+  "steeringFileName": "af-lms-e2e-fake-providers-steering.json"
+}

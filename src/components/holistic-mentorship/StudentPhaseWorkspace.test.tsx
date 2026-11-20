@@ -1008,6 +1008,88 @@ describe("StudentPhaseWorkspace", () => {
     expect(textbox).toHaveValue("Keep this answer");
   });
 
+  describe("answer character counter", () => {
+    const counter = (text: string) => screen.queryByText(text);
+
+    it("shows the counter in a draft box from 9,000 characters", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+      const textbox = screen.getByRole("textbox", { name: "What helped?" });
+
+      fireEvent.change(textbox, { target: { value: "a".repeat(8_999) } });
+      expect(screen.queryByText(/\/ 10,000$/)).not.toBeInTheDocument();
+
+      fireEvent.change(textbox, { target: { value: "a".repeat(9_000) } });
+      expect(counter("9,000 / 10,000")).toBeInTheDocument();
+      expect(textbox).toHaveAccessibleDescription("9,000 / 10,000");
+    });
+
+    it("shows the counter in the author's Edit of submitted Notes", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+      expect(screen.queryByText(/\/ 10,000$/)).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      const textbox = screen.getByRole("textbox", { name: "What helped?" });
+      fireEvent.change(textbox, { target: { value: "a".repeat(8_999) } });
+      expect(screen.queryByText(/\/ 10,000$/)).not.toBeInTheDocument();
+
+      fireEvent.change(textbox, { target: { value: "a".repeat(10_001) } });
+      expect(counter("10,001 / 10,000")).toBeInTheDocument();
+      expect(textbox).toHaveAccessibleDescription("10,001 / 10,000");
+    });
+
+    it("shows the counter in each Add Follow-up Note box beside the existing too-long message", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Add notes" }));
+      const dialog = screen.getByRole("dialog", { name: "Add follow-up notes" });
+      const [challenges, solutions, actionPlan] = within(dialog).getAllByRole("textbox");
+
+      fireEvent.change(challenges, { target: { value: "a".repeat(8_999) } });
+      fireEvent.change(solutions, { target: { value: "a".repeat(9_000) } });
+      fireEvent.change(actionPlan, { target: { value: "a".repeat(10_001) } });
+
+      expect(within(dialog).queryByText("8,999 / 10,000")).not.toBeInTheDocument();
+      expect(challenges).not.toHaveAccessibleDescription();
+      expect(within(dialog).getByText("9,000 / 10,000")).toBeInTheDocument();
+      expect(solutions).toHaveAccessibleDescription("9,000 / 10,000");
+      expect(within(dialog).getByText("10,001 / 10,000")).toBeInTheDocument();
+      expect(actionPlan).toHaveAccessibleDescription(
+        "Keep this answer to 10,000 characters or fewer 10,001 / 10,000");
+      expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    const longSubmittedNotes = (authorName: string): NonNullable<OpenPhase["notes"]> => ({
+      state: "submitted",
+      revision: 3,
+      authorName,
+      firstSubmittedAt: "2026-07-02T00:00:00Z",
+      lastEditedAt: "2026-07-02T00:00:00Z",
+      answers: [{ questionId: 91, question: "What helped?", answer: "a".repeat(9_500) }],
+    });
+    const longFollowUp: OpenPhase["followUpNotes"] = [{
+      id: 503, submittedAt: "2026-08-02T09:30:00Z", authorName: "Nila Sen",
+      answers: [{ key: "solutions", answer: "b".repeat(9_500) }],
+    }];
+    const mentorSubmitted = (canEditNotes: boolean) => {
+      const detail = completedTeacherDetail(longFollowUp);
+      Object.assign(detail.selectedPhase, { notes: longSubmittedNotes("Anita Sharma"), canEditNotes });
+      return detail;
+    };
+
+    it.each([
+      ["an Admin read-only workspace", adminDetail({
+        progress: "completed", notes: longSubmittedNotes("Divya Menon"), followUpNotes: longFollowUp,
+      })],
+      ["the Mentor's submitted Notes before Edit", mentorSubmitted(true)],
+      ["another author's submitted Notes", mentorSubmitted(false)],
+    ])("shows no counter on long answers in %s", (_view, detail) => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
+
+      expect(screen.getByText("a".repeat(9_500))).toBeInTheDocument();
+      expect(screen.getByText("b".repeat(9_500))).toBeInTheDocument();
+      expect(screen.queryByText(/\/ 10,000$/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("Challenge Categories", () => {
     const okResponse = (revision: number) => new Response(JSON.stringify({ revision }), { status: 200 });
     const submittedNotes = (challengeCategories: string[]): OpenPhase["notes"] => ({
@@ -1540,7 +1622,8 @@ describe("StudentPhaseWorkspace", () => {
       fireEvent.change(solutions, { target: { value: "a".repeat(10_001) } });
 
       expect(solutions).toHaveAttribute("aria-invalid", "true");
-      expect(solutions).toHaveAccessibleDescription("Keep this answer to 10,000 characters or fewer");
+      expect(solutions).toHaveAccessibleDescription(
+        "Keep this answer to 10,000 characters or fewer 10,001 / 10,000");
       expect(within(dialog).getAllByText("Keep this answer to 10,000 characters or fewer")).toHaveLength(1);
       expect(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }))
         .not.toHaveAttribute("aria-invalid");
@@ -1557,7 +1640,8 @@ describe("StudentPhaseWorkspace", () => {
       fireEvent.change(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }),
         { target: { value: "" } });
       fireEvent.change(solutions, { target: { value: " ".repeat(10_001) } });
-      expect(solutions).toHaveAccessibleDescription("Keep this answer to 10,000 characters or fewer");
+      expect(solutions).toHaveAccessibleDescription(
+        "Keep this answer to 10,000 characters or fewer 10,001 / 10,000");
       expect(save).toBeDisabled();
     });
 
