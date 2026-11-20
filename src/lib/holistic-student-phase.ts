@@ -84,6 +84,11 @@ export type HolisticPhaseSummary =
       academicYear: string;
       locked: false;
       active: boolean;
+      /**
+       * Opened, but no longer the Active Phase of the Mentee's current Grade:
+       * Notes stay readable and nothing can be added or changed (#536).
+       */
+      closed: boolean;
       progress: HolisticPhaseProgress;
       draftSaved: boolean;
     };
@@ -667,6 +672,19 @@ function studentSummary(student: StudentRow, grade: 11 | 12) {
   };
 }
 
+// Active = the latest ordered Open Phase of its Grade in the current Academic
+// Year's Plan. A past year's Plan has no Active Phase, whichever year is viewed.
+function isActivePhase(phase: NumberedPhase, active: Map<string, number>) {
+  return phase.academic_year === CURRENT_ACADEMIC_YEAR &&
+    active.get(`${phase.academic_year}:${phase.grade}`) === phase.id;
+}
+
+// The same rule as the Mentor write scope: only the Active Phase takes writes.
+// An earlier Open Phase, and every opened Phase of a past year's Plan, are Closed.
+function isClosedPhase(phase: NumberedPhase, active: Map<string, number>) {
+  return !isActivePhase(phase, active);
+}
+
 function summarizePhase(
   phase: NumberedPhase | { phaseId: null; number: number; title: string; placeholder: true },
   notesByPhase: Map<number, PhaseNotes>,
@@ -685,7 +703,8 @@ function summarizePhase(
     grade: phase.grade,
     academicYear: phase.academic_year,
     locked: false,
-    active: active.get(`${phase.academic_year}:${phase.grade}`) === phase.id,
+    active: isActivePhase(phase, active),
+    closed: isClosedPhase(phase, active),
     progress: progress.get(phase.id) ?? "pending",
     draftSaved: notes?.state === "draft",
   };
@@ -775,6 +794,7 @@ function canEditSelectedNotes(
 ) {
   if (!teacher) return false;
   if (!params.canEdit) return false;
+  if (isClosedPhase(params.selected, params.active)) return false;
   if (!notes) return true;
   if (notes.authorUserId === params.actorUserId) return true;
   return erasedDraft;
@@ -792,8 +812,8 @@ function openSelectedPhase(params: OpenSelectedPhaseParams) {
     grade: params.selected.grade,
     academicYear: params.selected.academic_year,
     locked: false as const,
-    active: params.active.get(`${params.selected.academic_year}:${params.selected.grade}`) ===
-      params.selected.id,
+    active: isActivePhase(params.selected, params.active),
+    closed: isClosedPhase(params.selected, params.active),
     progress: params.progress.get(params.selected.id) ?? "pending",
     draftSaved: notes?.state === "draft" && !erasedDraft,
     revision: params.selected.revision,
@@ -861,7 +881,8 @@ export async function getHolisticStudentPhase(params: {
     notesByPhase,
   });
   const active = activePhases(numbered);
-  const phases = applicable.map((phase) => summarizePhase(phase, notesByPhase, progress, active));
+  const phases = applicable.map((phase) =>
+    summarizePhase(phase, notesByPhase, progress, active));
   const selectedSummary = summarizePhase(selected, notesByPhase, progress, active);
   const readOnly = params.role !== "teacher" || !params.canEdit;
   if (selected.state === "locked") {

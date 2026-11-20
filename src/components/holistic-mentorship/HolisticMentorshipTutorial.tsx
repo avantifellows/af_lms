@@ -226,7 +226,8 @@ const teacherSteps: GuideStep[] = [
     callout: (
       <GuideCallout>
         To correct submitted notes, choose <strong>Edit Notes</strong>, update the
-        answers, and select <strong>Save Changes</strong>.
+        answers, and select <strong>Save Changes</strong>. This works only while the
+        phase is still the current one; notes in a closed phase cannot be changed.
       </GuideCallout>
     ),
   },
@@ -316,6 +317,11 @@ const adminSteps: GuideStep[] = [
           Open a phase only when teachers are ready to use it. Once a mentor saves notes,
           its setup becomes read-only.
         </GuideCallout>
+        <GuideCallout tone="warning" title="Opening closes the earlier phase for that grade">
+          Each grade has one active phase. When you open the next phase, the earlier phase
+          closes: mentors can still read its notes but can no longer add or change them.
+          The confirmation tells you how many mentees still have no submitted notes there.
+        </GuideCallout>
       </>
     ),
     media: {
@@ -395,6 +401,7 @@ const teacherHelp = [
   ["No Holistic Mentorship tab", "Ask your Program Manager to check your teacher access and school assignment."],
   ["Student is missing", "Ask your Program Manager to check the student's school, grade, and Academic Year."],
   ["No active phase", "Ask the Mentorship Admin (Rahul or Nitin) to open the phase for that grade."],
+  ["Phase shows Closed", "A newer phase is active for that grade. You can read the notes in a closed phase, but notes can be added or changed only in the active phase."],
 ] as const;
 
 const adminHelp = [
