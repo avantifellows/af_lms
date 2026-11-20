@@ -26,7 +26,7 @@ import { Modal } from "@/components/ui/Modal";
 import GuidancePreview from "./GuidancePreview";
 import { DictationMicButton, DictationSaveHint, DictationStatus } from "./DictationMicButton";
 import {
-  DICTATION_OFF, dictationBusy, useDictationRecorder, useSharedDictationAvailability,
+  DICTATION_OFF, dictationBusy, dictationHoldsClip, useDictationRecorder, useSharedDictationAvailability,
   type DictationAvailability, type DictationRecorder, type SharedDictationAvailability,
 } from "./useDictationRecorder";
 
@@ -214,6 +214,14 @@ const DICTATION_TOO_LONG = "Not added: the answer would go over 10,000 character
 // not lost. While it waits, the save button is described by this hint id.
 function dictationSaveHintId(recorder: DictationRecorder, id: string) {
   return dictationBusy(recorder.state) ? id : undefined;
+}
+
+// A save drops a failed clip still waiting for Retry, so its one confirm says
+// so; the clip is dropped only after the Mentor agrees.
+function finalWriteQuestion(action: string, recorder: DictationRecorder) {
+  return dictationHoldsClip(recorder.state)
+    ? `A recording hasn't been transcribed. ${action} without it?`
+    : `${action}?`;
 }
 
 function dictationApiUrl(props: DictationRouteScope) {
@@ -682,13 +690,13 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   };
   const dictation = useNotesDictation(props, value.answers, updateAnswer);
   const submit = async () => {
-    dictation.discard();
     if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
-    if (!(await flushDraft()) || !window.confirm("Submit these Post-Session Notes?")) {
+    if (!(await flushDraft()) || !window.confirm(finalWriteQuestion("Submit these Post-Session Notes", dictation))) {
       setFinalWriting(false);
       return;
     }
+    dictation.discard();
     setStatus("saving");
     setSuccess("");
     try {
@@ -709,13 +717,13 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     }
   };
   const saveCorrection = async () => {
-    dictation.discard();
     if (!validateFinalWrite(SAVE_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
-    if (!window.confirm("Save changes to submitted Notes?")) {
+    if (!window.confirm(finalWriteQuestion("Save changes to submitted Notes", dictation))) {
       setFinalWriting(false);
       return;
     }
+    dictation.discard();
     setStatus("saving");
     setSuccess("");
     try {
@@ -742,12 +750,13 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setMissingCategories([]);
     setSuccess("");
   };
+  // A recording, or a failed clip waiting for Retry, is dropped only once the Mentor agrees.
   const cancelCorrection = () => {
-    dictation.discard();
-    if (JSON.stringify(value) !== JSON.stringify(savedValue)) {
-      void discardSubmittedChanges();
+    if (valueChanged || dictationHoldsClip(dictation.state)) {
+      if (discardSubmittedChanges()) dictation.discard();
       return;
     }
+    dictation.discard();
     setEditingSubmitted(false);
     setStatus("idle");
     setMissingCategories([]);
@@ -1779,9 +1788,10 @@ function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
   </>;
 }
 
-// The modal owns its own Dictation recorder; closing it or leaving the page
-// drops any recording and ignores a transcription still in flight. Save waits
-// until the recording's words have arrived.
+// The modal owns its own Dictation recorder; closing it (after the Mentor
+// agrees, when it holds a clip) or leaving the page drops any recording and
+// ignores a transcription still in flight. Save waits until the recording's
+// words have arrived, and asks before dropping a failed clip.
 function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }: {
   open: boolean;
   apiUrl: string;
@@ -1829,12 +1839,13 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
 
   function requestClose() {
     if (saving) return;
-    recorder.discard();
-    if (Object.values(draft).some(Boolean) && !window.confirm("Discard this follow-up note?")) return;
+    const wouldLose = Object.values(draft).some(Boolean) || dictationHoldsClip(recorder.state);
+    if (wouldLose && !window.confirm("Discard this follow-up note?")) return;
     close();
   }
 
   async function save() {
+    if (dictationHoldsClip(recorder.state) && !window.confirm(finalWriteQuestion("Save", recorder))) return;
     recorder.discard();
     setError("");
     setSaving(true);

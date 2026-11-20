@@ -418,21 +418,41 @@ describe("StudentPhaseWorkspace Dictation", () => {
       });
     });
 
-    it("Cancel in Edit still drops a recording, releases the mic, and uploads nothing", async () => {
+    it("Cancel in Edit drops a recording once the Mentor agrees, releases the mic, and uploads nothing", async () => {
       const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
 
       fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
       await act(async () => fireEvent.click(mic("What helped?")));
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
+      expect(confirm).toHaveBeenCalledExactlyOnceWith("Discard unsaved Notes changes?");
       expect(tracks[0].stop).toHaveBeenCalled();
       expect(network.dictationCalls).toHaveLength(0);
       expect(screen.getByRole("button", { name: "Edit Notes" })).toBeInTheDocument();
     });
 
+    it("Cancel in Edit asks before dropping a recording, and No keeps it running", async () => {
+      const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      await act(async () => fireEvent.click(mic("What helped?")));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(confirm).toHaveBeenCalledWith("Discard unsaved Notes changes?");
+      expect(tracks[0].stop).not.toHaveBeenCalled();
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "true");
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await network.transcribe("They agreed");
+      expect(box("What helped?")).toHaveValue("First answer They agreed");
+    });
+
     it("Cancel in Edit ignores a transcription that arrives late", async () => {
       const network = stubNetwork();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
 
       fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
@@ -797,33 +817,58 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(network.dictationCalls).toHaveLength(2);
     });
 
-    it("Submit drops the failed clip, even when the Mentor backs out of submitting", async () => {
+    const UNTRANSCRIBED = "A recording hasn't been transcribed.";
+    const finalWrites = (network: ReturnType<typeof stubNetwork>) =>
+      network.notesCalls.filter(({ body }) => body.action !== "draft");
+
+    it("Submit warns about a failed clip in its one confirm, and keeps Retry on No or a blank answer", async () => {
       const network = stubNetwork();
-      vi.spyOn(window, "confirm").mockReturnValue(false);
-      renderWorkspace(mentorDetail(draft({ 91: "A plan", 92: "Review it" })));
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWorkspace(mentorDetail({ ...draft({ 91: "A plan", 92: "" })!,
+        challengeCategories: ["academic.other", "non_academic.other"] }));
 
       await failOnce(network, "What helped?");
       await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit Notes" })));
+      expect(confirm).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
 
-      noRetry();
+      fireEvent.change(box("What happens next?"), { target: { value: "Review it" } });
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit Notes" })));
+      expect(confirm).toHaveBeenCalledExactlyOnceWith(`${UNTRANSCRIBED} Submit these Post-Session Notes without it?`);
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(finalWrites(network)).toHaveLength(0);
+
+      confirm.mockReturnValue(true);
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit Notes" })));
+      expect(confirm).toHaveBeenCalledTimes(2);
+      expect(finalWrites(network)).toHaveLength(1);
       expect(network.dictationCalls).toHaveLength(1);
     });
 
-    it("Save Changes drops the failed clip", async () => {
+    it("Save Changes warns about a failed clip in its one confirm, keeps Retry on No, and drops it on Yes", async () => {
       const network = stubNetwork();
-      vi.spyOn(window, "confirm").mockReturnValue(false);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
       renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
 
       fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
       await failOnce(network, "What helped?");
       await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save Changes" })));
 
+      expect(confirm).toHaveBeenCalledExactlyOnceWith(`${UNTRANSCRIBED} Save changes to submitted Notes without it?`);
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(finalWrites(network)).toHaveLength(0);
+
+      confirm.mockReturnValue(true);
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save Changes" })));
+      expect(finalWrites(network)).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
       noRetry();
       expect(network.dictationCalls).toHaveLength(1);
     });
 
-    it("Cancel in Edit drops the failed clip", async () => {
+    it("Cancel in Edit drops the failed clip once the Mentor agrees", async () => {
       const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
 
       fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
@@ -831,6 +876,7 @@ describe("StudentPhaseWorkspace Dictation", () => {
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
 
+      expect(confirm).toHaveBeenCalledExactlyOnceWith("Discard unsaved Notes changes?");
       noRetry();
       expect(network.dictationCalls).toHaveLength(1);
     });
@@ -1155,27 +1201,31 @@ describe("Follow-up Note Dictation", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
-    it("Cancel stops the recording, releases the mic, and uploads nothing", async () => {
+    it("Cancel with nothing typed asks, then stops the recording, releases the mic, and uploads nothing", async () => {
       const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(completedDetail());
       const dialog = openModal();
 
       await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
       await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
 
+      expect(confirm).toHaveBeenCalledExactlyOnceWith("Discard this follow-up note?");
       expect(tracks[0].stop).toHaveBeenCalled();
       expect(network.dictationCalls).toHaveLength(0);
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
-    it("closing with Escape stops the recording, releases the mic, and uploads nothing", async () => {
+    it("closing with Escape asks, then stops the recording, releases the mic, and uploads nothing", async () => {
       const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(completedDetail());
       const dialog = openModal();
 
       await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
       await act(async () => fireEvent.keyDown(document, { key: "Escape" }));
 
+      expect(confirm).toHaveBeenCalledExactlyOnceWith("Discard this follow-up note?");
       expect(tracks[0].stop).toHaveBeenCalled();
       expect(network.dictationCalls).toHaveLength(0);
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -1202,7 +1252,7 @@ describe("Follow-up Note Dictation", () => {
       for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) expect(modalMic(dialog, question)).toBeEnabled();
     });
 
-    it("Cancel stops the recording even when the Mentor keeps the note open", async () => {
+    it("Cancel asks first, and No keeps the recording running and its words land", async () => {
       const network = stubNetwork();
       const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
       renderWorkspace(completedDetail());
@@ -1213,10 +1263,59 @@ describe("Follow-up Note Dictation", () => {
       await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
 
       expect(confirm).toHaveBeenCalledWith("Discard this follow-up note?");
-      expect(tracks[0].stop).toHaveBeenCalled();
-      expect(network.dictationCalls).toHaveLength(0);
+      expect(tracks[0].stop).not.toHaveBeenCalled();
+      expect(modalMic(dialog, SOLUTIONS)).toHaveAttribute("aria-pressed", "true");
+      await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
+      await network.transcribe("Daily check-in");
+      expect(modalBox(dialog, SOLUTIONS)).toHaveValue("Daily check-in");
       expect(modalBox(dialog, CHALLENGES)).toHaveValue("Homesick");
-      expect(modalMic(dialog, SOLUTIONS)).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("Escape asks before dropping a failed clip with nothing typed, but not for a notice", async () => {
+      const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await network.respond({ error: "Couldn't transcribe. Try again" }, 502);
+      await act(async () => fireEvent.keyDown(document, { key: "Escape" }));
+
+      expect(confirm).toHaveBeenCalledExactlyOnceWith("Discard this follow-up note?");
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Retry" })));
+      expect(network.dictationCalls).toHaveLength(2);
+
+      // Nothing heard leaves only a notice: nothing to lose, so no question.
+      await network.respond({ outcome: "nothing_heard", remainingSeconds: 1_797 });
+      expect(within(dialog).getByText(/^Didn't catch anything\./)).toBeInTheDocument();
+      await act(async () => fireEvent.keyDown(document, { key: "Escape" }));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("Save asks before dropping a failed clip, and No keeps the note open with Retry", async () => {
+      const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, CHALLENGES), { target: { value: "Homesick" } });
+
+      await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
+      await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
+      await network.respond({ error: "Couldn't transcribe. Try again" }, 502);
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+
+      expect(confirm).toHaveBeenCalledExactlyOnceWith("A recording hasn't been transcribed. Save without it?");
+      expect(network.notesCalls).toHaveLength(0);
+      expect(within(dialog).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+      confirm.mockReturnValue(true);
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+      expect(network.notesCalls).toHaveLength(1);
+      expect(network.notesCalls[0].body).toEqual({ answers: { challenges: "Homesick", solutions: "", action_plan: "" } });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
   });
 
@@ -1242,8 +1341,9 @@ describe("Follow-up Note Dictation", () => {
       expect(within(dialog).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     });
 
-    it("closing the modal drops a failed clip", async () => {
+    it("closing the modal drops a failed clip once the Mentor agrees", async () => {
       const network = stubNetwork();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(completedDetail());
       let dialog = openModal();
 
@@ -1315,6 +1415,7 @@ describe("Follow-up Note Dictation", () => {
 
     it("enables the Follow-up mics again once the Post-Session recording is dropped", async () => {
       stubNetwork();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
       let dialog = await recordInEditThenOpenModal();
       for (const button of followUpMics(dialog)) expect(button).toBeDisabled();
 

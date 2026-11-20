@@ -454,3 +454,8 @@ export function useDictationRecorder(options: {
 export function dictationBusy(state: DictationState) {
   return state.kind === "requesting_mic" || state.kind === "recording" || state.kind === "transcribing";
 }
+
+/** The recorder holds words the Mentor would lose to discard(): a clip in progress, or a failed one waiting for Retry. */
+export function dictationHoldsClip(state: DictationState) {
+  return dictationBusy(state) || state.kind === "failed";
+}
