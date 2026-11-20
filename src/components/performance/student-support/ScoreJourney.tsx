@@ -59,6 +59,9 @@ const COLUMNS: { key: SortKey | null; label: string; title?: string; className?:
 ];
 
 const RETEST_TITLE = "Retest — not counted in Latest AL, the score graph or the change.";
+const RETEST_COLUMN_TITLE =
+  "Retest: students had already taken this paper. Not counted in the AL, Latest AL, the score graph or the change, " +
+  "for anyone (a student who sat only the retest counts as absent from the original).";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -104,6 +107,15 @@ function TestCell({ row, test }: { row: ScoreJourneyRow; test: JourneyTest }) {
   const r = row.results[test.sessionId];
   if (!r) return <span className="text-text-muted">AB</span>;
   const level = r.level === "Not Qualified" ? "NQ" : r.level;
+  if (test.retest) {
+    // The whole column is a retest: shown for reference, greyed, never counted.
+    return (
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-text-muted opacity-60" title={RETEST_COLUMN_TITLE}>
+        <span className="tabular-nums line-through decoration-text-muted/60">{r.marks !== null ? formatMarks(r.marks) : "—"}</span>
+        <span className="rounded border border-border px-1 text-[11px]">{level}</span>
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1 whitespace-nowrap">
       <span className="tabular-nums">{r.marks !== null ? formatMarks(r.marks) : "—"}</span>
@@ -119,14 +131,16 @@ function TestCell({ row, test }: { row: ScoreJourneyRow; test: JourneyTest }) {
 }
 
 function TestHeader({ test }: { test: JourneyTest }) {
-  const title = `${test.retest ? `${RETEST_TITLE} ` : ""}${test.name} · out of ${test.max !== null ? formatMarks(test.max) : "—"}`;
+  const title = `${test.retest ? `${RETEST_COLUMN_TITLE} ` : ""}${test.name} · out of ${test.max !== null ? formatMarks(test.max) : "—"}`;
   return (
-    <th className={`px-2 py-2 font-semibold normal-case ${test.retest ? "text-accent" : ""}`} title={title}>
+    <th className={`px-2 py-2 font-semibold normal-case ${test.retest ? "bg-bg-card-alt opacity-70" : ""}`} title={title}>
       <div className="max-w-[7.5rem] truncate">{test.name}</div>
-      <div className="font-normal text-[10.5px]">
-        {formatDate(test.date)}
-        {test.retest && " · Retest"}
-      </div>
+      <div className="font-normal text-[10.5px]">{formatDate(test.date)}</div>
+      {test.retest && (
+        <div className="mt-0.5 inline-block rounded bg-border/60 px-1 text-[10px] font-semibold uppercase tracking-wide">
+          Retest · not in AL
+        </div>
+      )}
     </th>
   );
 }
@@ -169,7 +183,9 @@ function Row({
       <td className="px-3 py-2"><NotesCell count={notes} onOpen={onOpenNotes} /></td>
       <td className="px-3 py-2"><GraphCell trend={row.trend} /></td>
       {tests.map((t) => (
-        <td key={t.sessionId} className="px-2 py-2 text-center"><TestCell row={row} test={t} /></td>
+        <td key={t.sessionId} className={`px-2 py-2 text-center ${t.retest ? "bg-bg-card-alt/60" : ""}`}>
+          <TestCell row={row} test={t} />
+        </td>
       ))}
     </tr>
   );
@@ -341,6 +357,13 @@ function JourneyBody({
       </div>
 
       {notesFailed && <p className="text-sm text-text-muted">Mentor notes unavailable</p>}
+
+      {data.tests.some((t) => t.retest) && (
+        <p className="text-xs text-text-muted">
+          Greyed columns marked <b>Retest · not in AL</b> are retests of a paper students had already taken. They are
+          shown for reference and don&apos;t count toward the AL, Latest AL, the score graph or the change, for anyone.
+        </p>
+      )}
 
       {shown.length === 0 && (
         <div className="rounded-lg border border-border bg-bg-card-alt p-8 text-center text-sm text-text-muted shadow-sm">

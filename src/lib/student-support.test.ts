@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const bq = vi.hoisted(() => vi.fn());
 const cumulative = vi.hoisted(() => vi.fn());
+const retestIds = vi.hoisted(() => vi.fn());
 const pg = vi.hoisted(() => vi.fn());
 
 vi.mock("./bigquery", () => ({
@@ -14,6 +15,7 @@ vi.mock("./bigquery", () => ({
   SUBMITTED_ONLY: "AND has_quiz_ended IS NOT FALSE",
 }));
 vi.mock("./db", () => ({ query: pg }));
+vi.mock("./quiz-session-retests", () => ({ getRetestSessionIds: retestIds }));
 
 type Module = typeof import("./student-support");
 let mod: Module;
@@ -59,6 +61,7 @@ beforeEach(async () => {
   vi.resetAllMocks();
   // The caches live in the module: a fresh copy per test.
   vi.resetModules();
+  retestIds.mockResolvedValue(new Set());
   mod = await import("./student-support");
 });
 
@@ -251,6 +254,35 @@ describe("getScoreJourney", () => {
     // The retest is still a result, for its column; and the newest score.
     expect(asha.results.r).toEqual({ level: "M1", marks: 200, max: 300, retest: true });
     expect(asha.latestPct).toBe(66.7);
+  });
+
+  it("greys a session flagged as a retest, whatever its name, for every taker, even one who sat only the retest", async () => {
+    warehouse({ students: [ASHA, { ...ASHA, uid: "102" }, { ...ASHA, uid: "103" }], cutoffs: CUTOFFS });
+    const sit = (session_id: string, academic_level: string, marks_scored: number) => ({
+      session_id, academic_level, marks_scored, max_marks_possible: 300,
+    });
+    cumulative.mockResolvedValue({
+      tests: [
+        { session_id: "mt3", test_name: "JEE_G12_MT3_UK_COE", start_date: "2026-08-17", stream: null, course: "JEE Mains" },
+        { session_id: "re", test_name: "JEE_G12_MT3_UK_COE_Re-test", start_date: "2026-09-14", stream: null, course: "JEE Mains" },
+      ],
+      students: [
+        { student_id: "101", progression: [sit("mt3", "M2", 100), sit("re", "M1", 275)] },
+        { student_id: "102", progression: [sit("mt3", "M3", 50), sit("re", "M1", 200)] },
+        // Missed the original, sat only the retest.
+        { student_id: "103", progression: [sit("re", "M1", 210)] },
+      ],
+    });
+    // The creator answered "Yes, this is a retest" for "re".
+    retestIds.mockResolvedValue(new Set(["re"]));
+    const data = await mod.getScoreJourney("70705", 12, "JNV CoE");
+    expect(data.tests.map((t) => [t.sessionId, t.retest])).toEqual([["mt3", false], ["re", true]]);
+    const byUid = Object.fromEntries(data.students.map((s) => [s.uid, s]));
+    expect(byUid["101"].latestAl).toEqual({ level: "M2", marks: 100, test: "JEE_G12_MT3_UK_COE" });
+    expect(byUid["103"].results.re.retest).toBe(true);
+    // 103's only sitting is the retest: no Latest AL from it.
+    expect(byUid["103"].latestAl).toBeNull();
+    expect(retestIds).toHaveBeenCalledWith(["mt3", "re"]);
   });
 
   it("counts another batch's sitting of the same test name as a first sitting, not a retest", async () => {

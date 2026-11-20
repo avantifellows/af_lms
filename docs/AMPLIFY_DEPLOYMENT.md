@@ -33,13 +33,44 @@ GitHub Push → GitHub Actions → Sync Env Vars to Amplify → Trigger Amplify 
 7. Copy the **App ID** from the URL: `https://console.aws.amazon.com/amplify/home#/d1234abcdef/...`
    - The App ID is `d1234abcdef` (the part after `#/`)
 
-### Step 2: Create AWS IAM User for GitHub Actions
+### Step 2: Create an AWS IAM Role for GitHub Actions (OIDC)
 
-1. Go to AWS IAM Console → Users → Create user
-2. Name: `github-actions-amplify`
-3. Attach policy: `AdministratorAccess-Amplify` (or create custom policy below)
-4. Create access key → Select "Application running outside AWS"
-5. Save `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+GitHub Actions logs in to AWS with a short-lived role through GitHub's OIDC provider. No access key is stored in GitHub.
+
+1. The AWS account needs the GitHub OIDC identity provider (`token.actions.githubusercontent.com`, audience `sts.amazonaws.com`). Create it once per account under IAM → Identity providers.
+2. Go to IAM → Roles → Create role → **Web identity** → pick that provider.
+3. Limit the role to this repo's deploy environments in the trust policy (below).
+4. Attach the custom policy below (least privilege).
+5. Put the role's ARN in `AWS_DEPLOY_ROLE_ARN` at the top of `.github/workflows/deploy-amplify.yml`. The ARN is not a secret.
+
+This repo's role is `af-lms-amplify-deploy`.
+
+**Trust policy:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": [
+            "repo:avantifellows/af_lms:environment:Preview",
+            "repo:avantifellows/af_lms:environment:Production"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+Only jobs that declare `environment: Preview` or `environment: Production` can use the role.
 
 **Custom policy (least privilege):**
 ```json
@@ -52,7 +83,10 @@ GitHub Push → GitHub Actions → Sync Env Vars to Amplify → Trigger Amplify 
         "amplify:UpdateApp",
         "amplify:StartJob",
         "amplify:GetApp",
-        "amplify:GetBranch"
+        "amplify:GetBranch",
+        "amplify:CreateBranch",
+        "amplify:UpdateBranch",
+        "amplify:DeleteBranch"
       ],
       "Resource": "arn:aws:amplify:*:*:apps/YOUR_APP_ID/*"
     }
@@ -68,8 +102,6 @@ Add these secrets:
 
 | Secret Name | Value |
 |-------------|-------|
-| `AWS_ACCESS_KEY_ID` | From IAM user |
-| `AWS_SECRET_ACCESS_KEY` | From IAM user |
 | `AWS_REGION` | e.g., `ap-south-1` |
 | `AMPLIFY_APP_ID` | From Step 1 |
 | `DATABASE_HOST` | Your DB host |
@@ -82,9 +114,13 @@ Add these secrets:
 | `NEXTAUTH_SECRET` | Random 32+ char string |
 | `NEXTAUTH_URL` | Amplify URL (update after first successful deploy) |
 
+AWS credentials are not stored as secrets; the workflow assumes the role from Step 2.
+
 ### Step 4: Create GitHub Actions Workflow
 
-Create file `.github/workflows/deploy-amplify.yml`:
+The example below is a minimal version. The real workflow is `.github/workflows/deploy-amplify.yml`.
+
+> **Keep Amplify CLI output out of the logs.** This repo is public, so its Actions logs are public. `aws amplify get-branch`, `create-branch`, `update-branch` and `update-app` return the environment variables in their output, and GitHub only masks values that the running workflow file references as secrets. Always discard that output (`> /dev/null`) or narrow it with `--query`.
 
 ```yaml
 name: Deploy to AWS Amplify
@@ -98,13 +134,15 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: Production
+    permissions:
+      id-token: write # AWS login through OIDC
 
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::YOUR_ACCOUNT_ID:role/af-lms-amplify-deploy
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Sync environment variables to Amplify
@@ -120,14 +158,16 @@ jobs:
               GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
               GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
               NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},\
-              NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }}"
+              NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }}" \
+            > /dev/null
 
       - name: Trigger Amplify build
         run: |
           aws amplify start-job \
             --app-id ${{ secrets.AMPLIFY_APP_ID }} \
             --branch-name main \
-            --job-type RELEASE
+            --job-type RELEASE \
+            --query 'jobSummary.jobId' --output text
 
           echo "Build triggered! Check status at:"
           echo "https://console.aws.amazon.com/amplify/home#/${{ secrets.AMPLIFY_APP_ID }}/main"

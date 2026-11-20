@@ -26,6 +26,7 @@ interface PatchQuizSessionBody {
   shuffle?: boolean;
   gurukulFormatType?: string;
   isActive?: boolean;
+  isRetest?: boolean;
 }
 
 interface DbServiceSession {
@@ -202,6 +203,8 @@ export async function PATCH(
         ? { show_scores: body.showScores }
         : {}),
       ...(typeof body.shuffle === "boolean" ? { shuffle: body.shuffle } : {}),
+      // Session-only: the warehouse reads it (dim_session) to keep retests out of the AL.
+      ...(typeof body.isRetest === "boolean" ? { is_retest: body.isRetest } : {}),
       ...(nextGurukulFormatType || nextShuffle
         ? { gurukul_format_type: nextShuffle ? "qa" : nextGurukulFormatType }
         : {}),

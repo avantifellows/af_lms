@@ -5,6 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import StudentPhaseWorkspace from "@/components/holistic-mentorship/StudentPhaseWorkspace";
 import { authOptions } from "@/lib/auth";
 import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
+import { coverageReturnQuery, splitCoverageReturn } from "@/lib/holistic-coverage-filters";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { validateAcademicYear } from "@/lib/holistic-phase-plans";
 import {
@@ -23,6 +24,8 @@ type StudentPhasePageProps = {
     academic_year?: string;
     program_id?: string;
     source?: string;
+    // The coverage view to return to: `centre_id` and the `hm_` filters.
+    [returnParam: string]: string | string[] | undefined;
   }>;
 };
 
@@ -56,7 +59,14 @@ async function studentPhaseRequest({ params, searchParams }: StudentPhasePagePro
     validateAcademicYear(academicYear),
   ].every(Boolean);
   if (!valid) notFound();
-  return { studentId, phaseId, schoolCode, academicYear, programId, source };
+  const returnQuery = source === "school" || source === "school-progress"
+    ? coverageReturnQuery({ get: (name) => singleParam(queryParams[name]) })
+    : "";
+  return { studentId, phaseId, schoolCode, academicYear, programId, source, returnQuery };
+}
+
+function singleParam(value: string | string[] | undefined) {
+  return typeof value === "string" ? value : null;
 }
 
 async function studentPhaseAccess(
@@ -74,16 +84,31 @@ async function studentPhaseAccess(
   redirect(access.status === 401 ? "/" : "/dashboard");
 }
 
+// Assignment Coverage opened on a Centre page returns to that Centre; otherwise
+// to the School (keeping the Students & Progress origin). Both keep the filters.
+function coverageBackHref(
+  schoolCode: string,
+  programId: number,
+  source: "school" | "school-progress",
+  returnQuery: string,
+) {
+  const { centreId, filterQuery } = splitCoverageReturn(returnQuery);
+  const filters = filterQuery ? `&${filterQuery}` : "";
+  if (centreId && source === "school") return `/centre/${centreId}?tab=holistic_mentorship${filters}`;
+  const origin = source === "school-progress" ? "&source=progress" : "";
+  return `/school/${schoolCode}?tab=holistic_mentorship&program_id=${programId}${filters}${origin}`;
+}
+
 function studentPhaseBackHref(
   role: string,
   schoolCode: string,
   programId: number,
   source?: HolisticStudentPhaseSource,
+  returnQuery = "",
 ) {
   if (source === "progress") return `/admin/holistic-mentorship?program_id=${programId}`;
   if (source === "school" || source === "school-progress") {
-    const origin = source === "school-progress" ? "&source=progress" : "";
-    return `/school/${schoolCode}?tab=holistic_mentorship&program_id=${programId}${origin}`;
+    return coverageBackHref(schoolCode, programId, source, returnQuery);
   }
   const admin = role === "admin" || role === "holistic_mentorship_admin";
   return admin
@@ -117,6 +142,7 @@ function redirectFromLockedPhase(detail: HolisticStudentPhaseDetail, request: {
   academicYear: string;
   programId: number;
   source?: HolisticStudentPhaseSource;
+  returnQuery: string;
 }, role: string) {
   if (!("locked" in detail.selectedPhase) || !detail.selectedPhase.locked) return;
   const source = request.source;
@@ -129,9 +155,10 @@ function redirectFromLockedPhase(detail: HolisticStudentPhaseDetail, request: {
       academicYear: request.academicYear,
       programId: request.programId,
       source,
+      returnQuery: request.returnQuery,
     }));
   }
-  redirect(studentPhaseBackHref(role, request.schoolCode, request.programId, source));
+  redirect(studentPhaseBackHref(role, request.schoolCode, request.programId, source, request.returnQuery));
 }
 
 export default async function StudentPhasePage(props: StudentPhasePageProps) {
@@ -160,6 +187,7 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
     request.schoolCode,
     request.programId,
     source,
+    request.returnQuery,
   );
   const canRegenerateProfile = access.canEdit && (
     access.permission.role === "admin" ||
@@ -177,7 +205,7 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
         <StudentPhaseWorkspace key={detail.student.id} detail={detail}
           schoolCode={request.schoolCode} academicYear={request.academicYear}
           programId={request.programId}
-          source={source} backHref={backHref}
+          source={source} returnQuery={request.returnQuery} backHref={backHref}
           canRegenerateProfile={canRegenerateProfile}
           viewerRole={access.permission.role} />
       </main>

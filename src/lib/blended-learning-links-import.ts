@@ -1,6 +1,6 @@
 import type ExcelJS from "exceljs";
 
-import { activeBlendedMappingSql } from "./blended-learning-access";
+import { currentBlendedMappingRowSql } from "./blended-learning-access";
 import type {
   LegacyActionItem,
   LegacyConversationInvalidReason,
@@ -142,13 +142,15 @@ function normaliseName(value: string): string {
     .trim();
 }
 
+// Dropouts included: their links are kept for when their status changes back,
+// and a workbook row for one is matched rather than reported as no_match.
 async function loadActiveMappedStudents(): Promise<StudentIndex> {
   const rows = await query<MappedStudentRow>(
     `SELECT DISTINCT st.id, st.student_id, account.first_name, account.last_name
      FROM blended_learning_mentor_mentee_mappings mapping
      JOIN student st ON st.id = mapping.student_id
      JOIN "user" account ON account.id = st.user_id
-     WHERE ${activeBlendedMappingSql("mapping", "$1")}`,
+     WHERE ${currentBlendedMappingRowSql("mapping", "$1")}`,
     [CURRENT_ACADEMIC_YEAR]
   );
 

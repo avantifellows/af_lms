@@ -8,11 +8,21 @@ import {
   type ExamOption,
 } from "@/lib/competitive-exams";
 
+/**
+ * What a save does to a registration's stored password. The Exams tab never
+ * holds the stored password, so it can't echo it back: a registration that
+ * leaves `application_password` out of the body keeps whatever is stored.
+ */
+export type PasswordChange =
+  | { action: "keep" }
+  | { action: "clear" }
+  | { action: "set"; value: string };
+
 export interface CanonicalExamRecordInput {
   exam_id: number;
   exam_name: string;
   application_number: string;
-  application_password: string | null;
+  password: PasswordChange;
   sessions_applied: number[] | null;
 }
 
@@ -62,6 +72,29 @@ function canonicalizeSessions(
   return { ok: true, sessions: (sessions as number[]).sort((a, b) => a - b) };
 }
 
+/**
+ * Absent → keep what is stored. `null` or blank → clear it. Anything else must
+ * be a string, and becomes the new password.
+ */
+function canonicalizePassword(
+  entry: Record<string, unknown>,
+  examName: string,
+): { ok: true; change: PasswordChange } | { ok: false; error: string } {
+  if (!("application_password" in entry) || entry.application_password === undefined) {
+    return { ok: true, change: { action: "keep" } };
+  }
+  const raw = entry.application_password;
+  if (raw !== null && typeof raw !== "string") {
+    return { ok: false, error: `Application password for ${examName} is not valid` };
+  }
+  const value = trimmed(raw);
+  if (!value) return { ok: true, change: { action: "clear" } };
+  if (value.length > APPLICATION_PASSWORD_MAX_LENGTH) {
+    return { ok: false, error: `Application password for ${examName} is too long` };
+  }
+  return { ok: true, change: { action: "set", value } };
+}
+
 type ExamResult =
   | { ok: true; exam: CanonicalExamRecordInput }
   | { ok: false; error: string };
@@ -78,10 +111,8 @@ function canonicalizeExam(raw: unknown, exam: ExamOption): ExamResult {
     return { ok: false, error: `Application number for ${exam.name} is too long` };
   }
 
-  const password = trimmed(entry.application_password);
-  if (password.length > APPLICATION_PASSWORD_MAX_LENGTH) {
-    return { ok: false, error: `Application password for ${exam.name} is too long` };
-  }
+  const password = canonicalizePassword(entry, exam.name);
+  if (!password.ok) return { ok: false, error: password.error };
 
   const sessions = canonicalizeSessions(entry.sessions_applied, exam.name);
   if (!sessions.ok) return { ok: false, error: sessions.error };
@@ -92,7 +123,7 @@ function canonicalizeExam(raw: unknown, exam: ExamOption): ExamResult {
       exam_id: exam.id,
       exam_name: exam.name,
       application_number: applicationNumber,
-      application_password: password || null,
+      password: password.change,
       sessions_applied: sessions.sessions,
     },
   };

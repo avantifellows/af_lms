@@ -975,13 +975,17 @@ export async function getHolisticAssignmentCoverageSummary(params: {
               COUNT(*) FILTER (WHERE mentor_user_id IS NOT NULL)::int AS assigned_count,
               COUNT(*) FILTER (WHERE mentor_user_id IS NULL)::int AS unassigned_count,
               COUNT(DISTINCT mentor_user_id)::int AS active_mentor_count,
+              -- Progress counts cover assigned Students only (as on Students &
+              -- Progress), so Completed + Pending + No active phase = Assigned.
               COUNT(*) FILTER (
-                WHERE active_phase_id IS NOT NULL AND has_submitted_notes
+                WHERE mentor_user_id IS NOT NULL AND active_phase_id IS NOT NULL AND has_submitted_notes
               )::int AS completed_count,
               COUNT(*) FILTER (
-                WHERE active_phase_id IS NOT NULL AND NOT has_submitted_notes
+                WHERE mentor_user_id IS NOT NULL AND active_phase_id IS NOT NULL AND NOT has_submitted_notes
               )::int AS pending_count,
-              COUNT(*) FILTER (WHERE active_phase_id IS NULL)::int AS no_active_phase_count
+              COUNT(*) FILTER (
+                WHERE mentor_user_id IS NOT NULL AND active_phase_id IS NULL
+              )::int AS no_active_phase_count
        FROM coverage_roster
      )
      SELECT eligible_count, assigned_count, unassigned_count, active_mentor_count,

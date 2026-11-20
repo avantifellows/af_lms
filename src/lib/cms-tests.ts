@@ -53,15 +53,16 @@ export function courseForCmsExamTrack(examTrack: CmsExamTrack): string {
   return CMS_EXAM_TRACK_COURSES[examTrack];
 }
 
-// Test subtypes the picker supports. chapter_test is chapter-scoped; major_test is
-// full-syllabus. Both flow through the same CMS list route + quiz-backend ingest, so
-// widening this list is a UI-only change.
-export const CMS_TEST_TYPES = ["chapter_test", "major_test"] as const;
+// Test subtypes the picker supports. chapter_test is chapter-scoped; major_test and
+// full_syllabus_test list straight off exam track + grade. All flow through the same CMS
+// list route + quiz-backend ingest, so widening this list is a UI-only change.
+export const CMS_TEST_TYPES = ["chapter_test", "major_test", "full_syllabus_test"] as const;
 export type CmsTestType = (typeof CMS_TEST_TYPES)[number];
 
 export const CMS_TEST_TYPE_OPTIONS: { value: CmsTestType; label: string }[] = [
   { value: "chapter_test", label: "Chapter Test" },
   { value: "major_test", label: "Major Test" },
+  { value: "full_syllabus_test", label: "Full Syllabus Test" },
 ];
 
 // Discriminator stored on sessions created from the new CMS (meta_data.cms_source). Used to
