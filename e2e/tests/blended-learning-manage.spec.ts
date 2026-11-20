@@ -4,7 +4,9 @@ import { getTestPool } from "../helpers/db";
 import {
   BLENDED_MENTOR_A,
   BLENDED_MENTOR_D,
+  DROPOUT_MENTEE,
   MANAGE_MENTEES,
+  programStudentId,
 } from "../helpers/blended-learning-fixtures";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
@@ -259,11 +261,17 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     // Preview counts for every kind of target.
     const preview = async (target: Record<string, unknown>) =>
       (await (await page.request.post("/api/blended-learning/common-action-items/preview", { data: target })).json()).count;
+    // Active Mappings, less Students marked a dropout (Yash, DROPOUT_MENTEE).
     const active = await withPool(async (pool) => {
-      const result = await pool.query<{ count: string }>(
-        `SELECT count(*) AS count FROM blended_learning_mentor_mentee_mappings WHERE academic_year = $1 AND ended_at IS NULL`,
+      const result = await pool.query<{ count: string; dropouts: string }>(
+        `SELECT count(*) FILTER (WHERE st.status IS DISTINCT FROM 'dropout') AS count,
+                count(*) FILTER (WHERE st.status = 'dropout') AS dropouts
+         FROM blended_learning_mentor_mentee_mappings mapping
+         JOIN student st ON st.id = mapping.student_id
+         WHERE mapping.academic_year = $1 AND mapping.ended_at IS NULL`,
         [CURRENT_ACADEMIC_YEAR]
       );
+      expect(Number(result.rows[0].dropouts)).toBe(1);
       return Number(result.rows[0].count);
     });
     expect(await preview({ kind: "all" })).toBe(active);
@@ -521,6 +529,65 @@ test.describe("Blended Learning Manage — specific students", () => {
     await item.getByRole("button", { name: `Remove: ${text}` }).click();
     await page.getByRole("dialog", { name: "Remove this action item?" }).getByRole("button", { name: "Remove" }).click();
     await expect(commonItem(page, text)).toHaveCount(0);
+    expect(await pushedRows(new RegExp(text))).toEqual([]);
+  });
+});
+
+// Yash (Mentor A's, still actively mapped) is marked a dropout: no target
+// reaches him, so a push never gives him an Action Item.
+test.describe("Blended Learning Manage — a dropout", () => {
+  const text = "Synthetic: a push that skips the dropout";
+  const dropoutId = programStudentId(DROPOUT_MENTEE);
+  const mappedId = programStudentId(MANAGE_MENTEES.second);
+
+  async function dropoutItemCount(): Promise<number> {
+    return withPool(async (pool) => {
+      const result = await pool.query<{ count: number }>(
+        `SELECT count(*)::int AS count
+         FROM blended_learning_action_items item
+         JOIN student st ON st.id = item.student_id
+         WHERE st.student_id = $1`,
+        [dropoutId]
+      );
+      return result.rows[0].count;
+    });
+  }
+
+  test("is left out of the Mentor's count, the preview and every push", async ({ page }) => {
+    await signInAs(page, BLENDED_ADMIN);
+    await openManage(page);
+    const form = page.getByRole("form", { name: "New program action item" });
+    await form.getByRole("radio", { name: "One mentor's students" }).check();
+    await expect(form.getByLabel("Mentor", { exact: true }).locator("option", {
+      hasText: `${BLENDED_MENTOR_A.name} (6 students)`,
+    })).toHaveCount(1);
+
+    const preview = await page.request.post("/api/blended-learning/common-action-items/preview", {
+      data: { kind: "students", studentIds: `${dropoutId} ${mappedId}` },
+    });
+    expect(preview.status()).toBe(200);
+    expect(await preview.json()).toEqual({ count: 1, notFound: [], noMentor: [dropoutId] });
+
+    // Listed alone, he reaches no Student, so nothing is saved.
+    const alone = await page.request.post("/api/blended-learning/common-action-items", {
+      data: { text, owner: "student", target: { kind: "students", studentIds: dropoutId } },
+    });
+    expect(alone.status()).toBe(422);
+
+    const pushed = await page.request.post("/api/blended-learning/common-action-items", {
+      data: { text, owner: "student", target: { kind: "students", studentIds: `${dropoutId} ${mappedId}` } },
+    });
+    expect(pushed.status()).toBe(201);
+    const { id, added } = await pushed.json();
+    expect(added).toBe(1);
+    const again = await page.request.post(`/api/blended-learning/common-action-items/${id}/push`);
+    expect(again.status()).toBe(200);
+    expect((await again.json()).added).toBe(0);
+    expect(await dropoutItemCount()).toBe(0);
+
+    // Clean up for later specs.
+    const removed = await page.request.delete(`/api/blended-learning/common-action-items/${id}`);
+    expect(removed.status()).toBe(200);
     expect(await pushedRows(new RegExp(text))).toEqual([]);
   });
 });

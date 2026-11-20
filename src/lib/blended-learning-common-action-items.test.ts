@@ -25,6 +25,9 @@ const MENTOR: BlendedLearningAccess = {
   kind: "mentor", role: "blended_mentor", readOnly: false, actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 const YEAR = "2026-2027";
+// The Mapping source's dropout predicate, on the targeted Mapping.
+const DROPOUTS_LEFT_OUT =
+  /mapping\.ended_at IS NULL AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/;
 
 function result(rows: Record<string, unknown>[] = [], rowCount = rows.length) {
   return { rows, rowCount };
@@ -70,6 +73,7 @@ describe("previewCommonTarget", () => {
     const [sql, bound] = mockQuery.mock.calls[0];
     expect(bound).toEqual(params);
     expect(sql).toMatch(/academic_year = \$5 AND mapping\.ended_at IS NULL/);
+    expect(sql).toMatch(DROPOUTS_LEFT_OUT);
     expect(sql).toMatch(/er\.group_type = 'grade' AND er\.is_current IS TRUE/);
     expect(sql).toMatch(/st\.student_id = ANY\(\$4::text\[\]\)/);
   });
@@ -92,6 +96,8 @@ describe("previewCommonTarget", () => {
     expect(mockQuery.mock.calls[0][1]).toEqual(["students", null, null, ids, YEAR]);
     const [unmatchedSql, unmatchedParams] = mockQuery.mock.calls[1];
     expect(unmatchedSql).toMatch(/unnest\(\$1::text\[\]\) WITH ORDINALITY/);
+    // A listed dropout is found, but not mapped: named among those that won't get it.
+    expect(unmatchedSql).toMatch(DROPOUTS_LEFT_OUT);
     expect(unmatchedParams).toEqual([ids, YEAR]);
   });
 
@@ -111,6 +117,8 @@ describe("listTargetMentors", () => {
 
     expect(await listTargetMentors(ADMIN)).toEqual([{ userId: 77, name: "Faizan Khan", students: 46 }]);
     expect(mockQuery.mock.calls[0][1]).toEqual([YEAR]);
+    // The "(N students)" count leaves dropouts out.
+    expect(mockQuery.mock.calls[0][0]).toMatch(DROPOUTS_LEFT_OUT);
   });
 });
 
@@ -174,6 +182,8 @@ describe("createCommonActionItem", () => {
     const [pushSql, pushParams] = clientQuery.mock.calls[1];
     expect(pushSql).toMatch(/ON CONFLICT \(common_action_item_id, student_id\) WHERE common_action_item_id IS NOT NULL DO NOTHING/);
     expect(pushSql).toMatch(/common\.removed_at IS NULL/);
+    // Never fanned out to a dropout, though their Mapping is still active.
+    expect(pushSql).toMatch(DROPOUTS_LEFT_OUT);
     expect(pushParams).toEqual([12, YEAR]);
   });
 

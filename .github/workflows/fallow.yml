@@ -41,7 +41,7 @@ jobs:
         run: npm run test:unit:coverage
 
       - name: Run Fallow audit
-        uses: fallow-rs/fallow@v2
+        uses: fallow-rs/fallow@v3
         with:
           command: audit
           coverage: unit-coverage/coverage-final.json

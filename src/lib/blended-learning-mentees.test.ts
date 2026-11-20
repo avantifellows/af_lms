@@ -63,6 +63,16 @@ describe("listMentees", () => {
     expect(lokeshs.everyoneElse.map((m) => m.name)).toEqual(["Tara Other"]);
   });
 
+  it("leaves out Mentees marked a dropout, though their Mapping is still active", async () => {
+    givenMappedMentees([FAIZANS]);
+
+    await listMentees({ access: ADMIN, today: "2026-10-22" });
+
+    expect(mockQuery.mock.calls[0][0]).toMatch(
+      /WHERE mapping\.academic_year = \$1 AND mapping\.ended_at IS NULL AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/
+    );
+  });
+
   it("gives a Mentor with no Mentor user id an empty list without reading", async () => {
     givenMappedMentees([FAIZANS]);
 

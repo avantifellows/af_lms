@@ -104,6 +104,8 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = [], items: It
     if (items) return items as never[];
     if (/FROM blended_learning_mentor_mentee_mappings/.test(sql)) {
       expect(params).toEqual(["2026-2027"]);
+      // Dropouts' links still load, for when their status changes back.
+      expect(sql).not.toContain("dropout");
       return mapped.map((m) => ({
         id: m.id, student_id: m.studentId, first_name: m.firstName, last_name: m.lastName,
       })) as never[];

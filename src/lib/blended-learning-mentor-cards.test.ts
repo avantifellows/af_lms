@@ -64,6 +64,10 @@ describe("listMentorCards", () => {
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     expect(mockQuery.mock.calls[0][1]).toEqual(["2026-2027", null, null]);
+    // A dropout counts on no card, though their Mapping is still active.
+    expect(mockQuery.mock.calls[0][0]).toContain(
+      "mapping.ended_at IS NULL AND NOT EXISTS (SELECT 1 FROM student dropout_student"
+    );
   });
 
   it("counts each Mentor's Mentees by grade and Last Contact recency, A–Z by name", async () => {

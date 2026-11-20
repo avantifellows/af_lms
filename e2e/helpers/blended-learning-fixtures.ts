@@ -53,7 +53,7 @@ export const MENTEES = {
   thirtyDays: { key: "A3", firstName: "Meera", lastName: "Thirty", gender: "Female", grade: 12, programId: 81 },
   legacy: { key: "A4", firstName: "Nikhil", lastName: "Legacy", gender: "Male", grade: 13, programId: 91 },
   twentyNineDays: { key: "A5", firstName: "Zoya", lastName: "TwentyNine", gender: "Female", grade: 12, programId: 79 },
-  recent: { key: "A6", firstName: "Rohan", lastName: "Recent", gender: "Male", grade: 12, programId: 82 },
+  recent: { key: "A6", firstName: "Rohan", lastName: "Recent", gender: "Male", grade: 12, programId: 82, category: "OBC" },
 } as const satisfies Record<string, FixtureMentee>;
 
 // Students Mentor A must never see.
@@ -64,6 +64,18 @@ export const OTHER_STUDENTS = {
   // Mapped to Mentor A in the previous academic year only.
   previousYear: { key: "P1", firstName: "Uday", lastName: "PastYear", gender: "Male", grade: 12, programId: 80 },
 } as const satisfies Record<string, FixtureMentee>;
+
+// Mapped to Mentor A for the current year and still active, but marked a
+// dropout (`student.status = 'dropout'`), so Blended Learning leaves him out
+// everywhere: the list, Mentor cards, the Flags feed, Common Action Item
+// targets and his own page (a 404). He has DROPOUT_FLAG, the newest fixture
+// flag, which no feed or badge may show.
+export const DROPOUT_MENTEE = {
+  key: "X1", firstName: "Yash", lastName: "Dropout", gender: "Male", grade: 12, programId: 80,
+} as const satisfies FixtureMentee;
+export const DROPOUT_FLAG = {
+  conversationDaysAgo: 50, insertedHoursAgo: 6, comment: "Synthetic: a dropout's flag no feed shows",
+} as const;
 
 // Mentor C's Mentees for the logging spec (#445), per viewport: one never
 // contacted (logs a Conversation), one whose last Conversation was
@@ -543,6 +555,7 @@ async function seedFeedFlags(
   const mentorA = { userId: mentors.mentorA, email: BLENDED_MENTOR_A.email };
   const mentorB = { userId: mentors.mentorB, email: BLENDED_MENTOR_B.email };
   await flagged(meera, mentorA, FEED_FLAGS.meeraChemistry, "chemistry");
+  await flagged(DROPOUT_MENTEE, mentorA, DROPOUT_FLAG, "maths");
   await flagged(tara, mentorB, FEED_FLAGS.taraMaths, "maths");
   await flagged(tara, mentorB, FEED_FLAGS.taraWellbeing, "emotional_wellbeing");
 
@@ -610,11 +623,16 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     ...loggingMentees,
     ...manageMentees,
     ...screenerMentees,
+    DROPOUT_MENTEE,
   ].entries()) {
     ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
+  await client.query(`UPDATE student SET status = 'dropout' WHERE id = $1`, [ids[DROPOUT_MENTEE.key]]);
+  // Kabir has no status at all, as most mapped Students in production do; a
+  // NULL status must stay in Blended Learning.
+  await client.query(`UPDATE student SET status = NULL WHERE id = $1`, [ids[MENTEES.neverContacted.key]]);
 
-  for (const mentee of Object.values(MENTEES)) {
+  for (const mentee of [...Object.values(MENTEES), DROPOUT_MENTEE]) {
     await seedMapping(client, {
       studentId: ids[mentee.key],
       mentorUserId: mentorA,
