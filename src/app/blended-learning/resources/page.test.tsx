@@ -102,6 +102,22 @@ describe("ResourcesPage", () => {
     expect(mockCountNewFlags).toHaveBeenCalledWith(MENTOR);
   });
 
+  it("gives a team lead their Team tab first, then My Students", async () => {
+    signedInAs({ ...MENTOR, supervisedMentorUserIds: [9002] });
+
+    render(await ResourcesPage());
+
+    const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "Team",
+      "My Students",
+      "Flags3 new",
+      "Resources",
+    ]);
+    expect(within(tabs).getByRole("link", { name: "Team" })).toHaveAttribute("href", "/blended-learning");
+    expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("href", "/blended-learning?tab=students");
+  });
+
   it("says so when there are no resources", async () => {
     signedInAs(MENTOR);
     mockListResources.mockResolvedValue([]);

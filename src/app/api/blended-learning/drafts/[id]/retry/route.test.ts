@@ -10,7 +10,7 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
 }));
 
 import { withTransaction } from "@/lib/db";
-import { MENTOR, READ_ONLY_ADMIN, mockBlendedDb, rows, signedInAs } from "@/app/api/blended-learning/test-db";
+import { MENTOR, READ_ONLY_ADMIN, SUPERVISOR, mockBlendedDb, rows, signedInAs } from "@/app/api/blended-learning/test-db";
 import { POST } from "./route";
 
 const mockFetch = vi.fn();
@@ -114,6 +114,16 @@ describe("POST /api/blended-learning/drafts/[id]/retry", () => {
       expect((await retry("41")).status).toBe(403);
     }
     expect(db.query).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 to a team lead for their reportee's Mentee's draft, and retries nothing", async () => {
+    signedInAs(SUPERVISOR);
+    // Draft 41's Student is mapped to 9001, whom the team lead (9003) supervises.
+    givenDraft(STUCK);
+
+    expect(await retry("41")).toEqual({ status: 404, body: { error: "Not found" } });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(withTransaction).not.toHaveBeenCalled();
   });
 
   it("returns 404 for another Mentor's Mentee's draft, an unknown draft and a malformed id", async () => {

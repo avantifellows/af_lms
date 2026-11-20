@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { ClipboardList, FileText } from "lucide-react";
 
 import { Badge, Button, Card } from "@/components/ui";
-import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning, isTeamLead, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
 import { describeSession, formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
@@ -20,6 +20,8 @@ import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../BlendedPageShell";
 import { ExternalLink } from "../../ExternalLink";
+import { myStudentsHref } from "../../SectionTabs";
+import { ViewOnlyNotice } from "../../ViewOnlyNotice";
 import { ACTION_ITEM_ROW_CLASSES, ActionItemMeta, OwnerPill } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
@@ -384,10 +386,13 @@ function backOrigin(from: string | string[] | undefined): BackOrigin | null {
 }
 
 // Back to the Flags tab when they came from it; otherwise a Mentor goes back
-// to their own list, an admin to the Student's Mentor's list.
+// to their own list (a team lead to their My Students tab), and a team lead
+// on a reportee's Mentee and an admin to the Student's Mentor's list.
 function backLink(access: BlendedLearningAccess, mentee: MenteeDetail, from: BackOrigin | null) {
   if (from === "flags") return { href: "/blended-learning?tab=flags", label: "Back to flags" };
-  if (access.kind === "mentor") return { href: "/blended-learning", label: "Back to students" };
+  if (access.kind === "mentor" && !mentee.viewOnly) {
+    return { href: myStudentsHref(isTeamLead(access)), label: "Back to students" };
+  }
   return {
     href: `/blended-learning/mentors/${mentee.mentor.userId}`,
     label: `Back to ${mentee.mentor.firstName}'s students`,
@@ -409,7 +414,8 @@ export default async function MenteeDetailPage({
     loadDashboardChrome(access),
     searchParams,
   ]);
-  const canLog = canBlendedLearning(access, "log");
+  // A supervised Mentor's Mentee is view only: no logging or draft changes.
+  const canLog = !mentee.viewOnly && canBlendedLearning(access, "log");
   const back = backLink(access, mentee, backOrigin(query?.from));
 
   return (
@@ -420,6 +426,7 @@ export default async function MenteeDetailPage({
       >
         <span aria-hidden="true">←</span> {back.label}
       </Link>
+      {mentee.viewOnly && <ViewOnlyNotice mentorName={mentee.mentor.firstName} students="this student" />}
       <Profile mentee={mentee} canLog={canLog} />
       {mentee.openDraft && (
         <DraftStatus
@@ -427,7 +434,7 @@ export default async function MenteeDetailPage({
           draftId={mentee.openDraft.id}
           initialState={mentee.openDraft.state}
           initialRetryOffered={draftStatus?.retryOffered ?? false}
-          canManage={canBlendedLearning(access, "manage_draft")}
+          canManage={!mentee.viewOnly && canBlendedLearning(access, "manage_draft")}
           reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
         />
       )}

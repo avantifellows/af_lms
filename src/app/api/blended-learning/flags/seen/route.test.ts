@@ -16,6 +16,8 @@ const ADMIN = "juned@avantifellows.org";
 const ADMIN_READ_ONLY = "shalinijha@avantifellows.org";
 const LMS_ADMIN = "admin@avantifellows.org";
 const TEACHER = "teacher@avantifellows.org";
+// A team lead (user 9003) who supervises Mentor A (9001).
+const TEAM_LEAD = "lead@test.local";
 
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
   [MENTOR_A]: { role: "blended_mentor", read_only: false, user_id: 9001 },
@@ -23,6 +25,7 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [LMS_ADMIN]: { role: "admin", read_only: false, user_id: 1 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [TEAM_LEAD]: { role: "blended_mentor", read_only: false, user_id: 9003 },
 };
 
 type FlagView = { viewer_email: string; last_seen_at: string };
@@ -36,10 +39,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   views = [{ viewer_email: "ShaliniJha@avantifellows.org", last_seen_at: "2026-10-19 09:30:00" }];
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
-    if (sql.includes("FROM user_permission")) {
+    // The permission read (the Supervisions read also checks user_permission).
+    if (sql.includes("FROM user_permission") && !sql.includes("FROM blended_learning_mentor_supervisions")) {
       const email = String(params?.[0]).toLowerCase();
       const row = PERMISSIONS[email];
       return row ? [{ email, level: 1, school_codes: null, regions: null, program_ids: [], ...row }] : [];
+    }
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      return params?.[0] === 9003 ? [{ mentor_user_id: "9001" }] : [];
     }
     if (sql.includes("INSERT INTO blended_learning_flag_views")) {
       const [email] = params ?? [];
@@ -98,6 +105,8 @@ describe("POST /api/blended-learning/flags/seen", () => {
     ["an LMS admin", LMS_ADMIN],
     // A Mentor's Flags tab is their own Students' flags; the visit is theirs.
     ["a Blended Learning Mentor", MENTOR_A],
+    // A team lead's tab also holds their reportees' flags; the visit is still only theirs.
+    ["a team lead", TEAM_LEAD],
   ])("records a first visit for %s", async (_case, email) => {
     signedInAs(email);
 

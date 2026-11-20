@@ -4,16 +4,18 @@ import {
   activeBlendedMappingSql,
   canBlendedLearning,
   notBlendedDropoutSql,
+  viewableMentorUserIds,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import { contactNumbers, present, type FlagRecipient } from "./blended-learning-mentee-detail";
 
 // The Flags feed (server-only): for a Blended Learning Admin every Mentor
 // Flag, for a Mentor only the flags on their own Students (an active
-// current-year Mapping to them), never a dropout's (notBlendedDropoutSql),
-// newest first by (inserted_at, id), and each
-// viewer's "last seen" time behind the "N new" badge. A Mentor's scope is in
-// every query here, so another Mentor's flags are never read. Flags have no
+// current-year Mapping to them) and on the Students of Mentors they supervise,
+// never a dropout's (notBlendedDropoutSql), newest first by (inserted_at, id),
+// and each viewer's "last seen" time behind the "N new" badge. A Mentor's
+// scope is in every query here, so any other Mentor's flags are never read.
+// Flags have no
 // resolution; the feed is read-only.
 //
 // A visit to the Flags tab starts when the admin opens the tab: the page reads
@@ -116,18 +118,36 @@ type FlagRow = {
 const MENTOR_NAME_SQL = `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', mentor.first_name, mentor.last_name)), ''),
                      mentor.email, CONCAT('Mentor ', c.mentor_user_id))`;
 
-// The viewer's scope as query parameters: whether to narrow to one Mentor's
-// own Students, and that Mentor. A Mentor with no `user` id matches nothing.
-function flagScope(access: BlendedLearningAccess): [boolean, number | null] {
-  return access.kind === "mentor" ? [true, access.mentorUserId ?? null] : [false, null];
+// The viewer's scope as query parameters: whether to narrow to some Mentors'
+// Students, and those Mentors (a Mentor's own id and the Mentors they
+// supervise). A Mentor with no `user` id matches nothing.
+function flagScope(access: BlendedLearningAccess): [boolean, number[] | null] {
+  const mentors = viewableMentorUserIds(access);
+  return mentors === null ? [false, null] : [true, mentors];
+}
+
+// The Mentor filter as the viewer may apply it, as [the Conversation's
+// Mentor, the Student's current Mentor]. An admin's picks any Mentor who
+// logged a flagged Conversation (listFlagMentors). A team lead's ("My
+// students" or a reportee) picks whose Students they are now, by the Student's
+// active Mapping: a Student moved from the lead to a reportee is the
+// reportee's, whoever logged the flag. Any value outside a Mentor's scope is
+// ignored.
+function mentorFilters(
+  access: BlendedLearningAccess,
+  mentorUserId: number | null | undefined
+): [number | null, number | null] {
+  const mentors = viewableMentorUserIds(access);
+  if (mentorUserId == null || (mentors !== null && !mentors.includes(mentorUserId))) return [null, null];
+  return mentors === null ? [mentorUserId, null] : [null, mentorUserId];
 }
 
 // The flag is in the viewer's scope (flagScope's parameters at `scoped` and
-// `mentor`; the academic year at `year`). A dropout's flags are in no one's.
-function inViewerScopeSql(scoped: string, mentor: string, year: string): string {
+// `mentors`; the academic year at `year`). A dropout's flags are in no one's.
+function inViewerScopeSql(scoped: string, mentors: string, year: string): string {
   return `${notBlendedDropoutSql("flag.student_id")} AND (NOT ${scoped}::boolean OR EXISTS (
             SELECT 1 FROM blended_learning_mentor_mentee_mappings own
-            WHERE own.student_id = flag.student_id AND own.mentor_user_id = ${mentor}::bigint
+            WHERE own.student_id = flag.student_id AND own.mentor_user_id = ANY(${mentors}::bigint[])
               AND ${activeBlendedMappingSql("own", year)}))`;
 }
 
@@ -168,8 +188,9 @@ export async function countNewFlags(access: BlendedLearningAccess, cutoff?: Flag
   return Number(rows[0]?.count ?? 0);
 }
 
-// One page of the viewer's feed, narrowed by the Conversation's Mentor (for
-// admins; a Mentor's feed is theirs already) and the Flag Recipient, with New
+// One page of the viewer's feed, narrowed by Mentor (mentorFilters: the
+// Conversation's for admins, the Student's current one for a team lead) and
+// the Flag Recipient, with New
 // marked against the visit's cutoff. Null when the actor may not see flags.
 export async function listFlags(
   access: BlendedLearningAccess,
@@ -177,6 +198,7 @@ export async function listFlags(
   cutoff: FlagsCutoff
 ): Promise<FlagsPage | null> {
   if (!canBlendedLearning(access, "view_flags")) return null;
+  const [conversationMentor, currentMentor] = mentorFilters(access, filters.mentorUserId);
   const [rows, newCount] = await Promise.all([
     query<FlagRow>(
       `SELECT flag.id, flag.recipient, flag.comment,
@@ -209,6 +231,10 @@ export async function listFlags(
        LEFT JOIN blended_learning_student_links links ON links.student_id = st.id
        WHERE ${inViewerScopeSql("$7", "$8", "$6")}
          AND ($2::bigint IS NULL OR c.mentor_user_id = $2::bigint)
+         AND ($9::bigint IS NULL OR EXISTS (
+               SELECT 1 FROM blended_learning_mentor_mentee_mappings current_mapping
+               WHERE current_mapping.student_id = flag.student_id AND current_mapping.mentor_user_id = $9::bigint
+                 AND ${activeBlendedMappingSql("current_mapping", "$6")}))
          AND ($3::varchar IS NULL OR flag.recipient = $3::varchar)
          AND ($4::bigint IS NULL OR (flag.inserted_at, flag.id) <
               (SELECT cursor_flag.inserted_at, cursor_flag.id FROM blended_learning_mentor_flags cursor_flag
@@ -217,12 +243,13 @@ export async function listFlags(
        LIMIT $5`,
       [
         cutoff.lastSeenAt,
-        access.kind === "admin" ? (filters.mentorUserId ?? null) : null,
+        conversationMentor,
         filters.recipient ?? null,
         filters.cursor ?? null,
         FLAGS_PAGE_SIZE + 1,
         CURRENT_ACADEMIC_YEAR,
         ...flagScope(access),
+        currentMentor,
       ]
     ),
     countNewFlags(access, cutoff),
@@ -256,7 +283,8 @@ export async function listFlags(
 }
 
 // The Mentors who have Conversations with flags, A–Z, for the admins' Mentor
-// filter. A Mentor has no such filter.
+// filter. A Mentor has none; a supervisor's lists themself and the Mentors
+// they supervise (listSupervisedMentors).
 export async function listFlagMentors(
   access: BlendedLearningAccess
 ): Promise<{ mentorUserId: number; name: string }[]> {

@@ -17,6 +17,8 @@ const MENTOR_A = "faizan@avantifellows.org";
 const ADMIN = "juned@avantifellows.org";
 const ADMIN_READ_ONLY = "shalinijha@avantifellows.org";
 const TEACHER = "teacher@avantifellows.org";
+// A team lead (user 9003) who supervises Mentor A (9001).
+const TEAM_LEAD = "lead@test.local";
 
 // Fixture tables, keyed the way the SQL reads them.
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
@@ -24,6 +26,7 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [ADMIN]: { role: "blended_admin", read_only: false, user_id: 11 },
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [TEAM_LEAD]: { role: "blended_mentor", read_only: false, user_id: 9003 },
 };
 // Active current-year Mappings: student → Mentor user id. Student 503 is unmapped.
 const MAPPINGS: Record<number, number> = { 501: 9001, 502: 9001, 601: 9002 };
@@ -35,6 +38,9 @@ const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12
 
 function givenTables() {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      return params?.[0] === 9003 ? [{ mentor_user_id: 9001 }] : [];
+    }
     if (sql.includes("FROM user_permission")) {
       const email = String(params?.[0]).toLowerCase();
       const row = PERMISSIONS[email];
@@ -155,6 +161,11 @@ describe("POST /api/blended-learning/students/[id]/recordings/upload-url", () =>
   ])("returns 403 to %s", async (_case, email) => {
     signedInAs(email);
     expect((await issue("501", { fileName: "call.mp3", byteSize: 1000 })).status).toBe(403);
+  });
+
+  it("returns 404 to a team lead for their reportee's Mentee, signing nothing", async () => {
+    signedInAs(TEAM_LEAD);
+    expect(await issue("501", { fileName: "call.mp3", byteSize: 1000 })).toEqual({ status: 404, body: { error: "Not found" } });
   });
 
   it.each([
