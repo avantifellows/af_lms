@@ -75,6 +75,22 @@ export function requiredExamNamesForBoardStream(
   return REQUIRED_EXAMS_BY_BOARD_STREAM[key] ?? [];
 }
 
+/**
+ * Every exam some Board Stream calls for, in picker order. The Enrollment
+ * tab's Data completeness table (#468) walks this list, so an exam no Student
+ * in scope is expected to sit can say so rather than simply be absent.
+ */
+export const STREAM_EXPECTED_EXAM_NAMES: readonly CompetitiveExamName[] = [
+  ...new Set(Object.values(REQUIRED_EXAMS_BY_BOARD_STREAM).flat()),
+].sort(compareExamNames);
+
+/** The Board Streams that call for this exam, e.g. "JEE Mains" → PCM, PCMB. */
+export function boardStreamsExpecting(examName: string): string[] {
+  return Object.entries(REQUIRED_EXAMS_BY_BOARD_STREAM)
+    .filter(([, names]) => (names as readonly string[]).includes(examName))
+    .map(([stream]) => stream);
+}
+
 // Exams that run the same paper more than once a year, with the sittings a
 // Student can apply for. Only these exams show the "Sessions applied"
 // checkboxes, and only these session numbers are accepted.
