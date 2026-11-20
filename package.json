@@ -36,7 +36,8 @@
     "pm:promodiff": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-promotion-school-diff.ts",
     "pm:mirror": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/mirror-seats-staging-to-prod.ts",
     "teacher-feedback:bundle": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/generate-teacher-feedback-bundle.ts",
-    "qa:ensure-staging-admin": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/ensure-staging-review-admin.ts"
+    "qa:ensure-staging-admin": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/ensure-staging-review-admin.ts",
+    "test-attendance:check": "JITI_ALIAS=\"{\\\"@/\\\":\\\"$PWD/src/\\\"}\" npx jiti scripts/check-test-attendance.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1025.0",
@@ -58,6 +59,7 @@
     "csv-parse": "^6.2.1",
     "dompurify": "^3.4.17",
     "exceljs": "^4.4.0",
+    "google-auth-library": "^10.5.0",
     "jszip": "^3.10.1",
     "katex": "^0.16.47",
     "lucide-react": "^1.7.0",
