@@ -133,7 +133,7 @@ describe("/api/holistic-mentorship/phase-plans", () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{
-          id: "21", phase_plan_id: "7", position: 1, revision: 2, state: "open",
+          id: "21", phase_plan_id: "7", grade: "12", position: 1, revision: 2, state: "open",
           guidance_markdown: "Old Guidance", academic_year: "2026-2027", frozen_at: null,
           ever_opened: true, used: false,
         }] })
