@@ -163,10 +163,13 @@ async function followUpCount(mentee: Mentee, phase: Phase) {
   return Number(row.count);
 }
 
-function changeState(program: Program, phase: Phase, state: "open" | "locked", expectedRevision = 1) {
+function changeState(
+  program: Program, phase: Phase, state: "open" | "locked", expectedRevision = 1,
+  expectedClosing?: { expectedClosingPhaseId: number | null }
+) {
   return setPhaseState({
     programId: program.programId, phaseId: phase.phaseId, expectedRevision, state,
-    confirmed: true, actorEmail: "issue536-admin@example.test",
+    confirmed: true, actorEmail: "issue536-admin@example.test", ...expectedClosing,
   });
 }
 
@@ -310,7 +313,7 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
 
     expect(await changeState(program, phase1, "open")).toEqual({
       ok: false, status: 422,
-      error: "Phase 3 is already Open for this Grade, so an earlier Phase cannot be opened",
+      error: "This Phase cannot be opened while Phase 3, a later Phase for this Grade, is Open",
     });
     const [row] = await db.query<{ state: string }>(
       "SELECT state FROM holistic_mentorship_phases WHERE id = $1", [phase1.phaseId]);
@@ -335,7 +338,7 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
     expect(await draft(program, drafting, phase1, 0, "Not yet")).toMatchObject({ ok: true });
 
     expect(await openImpact(program.programId, phase3.phaseId)).toEqual({
-      closing: { number: 1, title: "Synthetic phase 1", menteesWithoutNotes: 2, unsubmittedDrafts: 1 },
+      closing: { id: phase1.phaseId, number: 1, menteesWithoutNotes: 2, unsubmittedDrafts: 1 },
     });
     // Not a Locked Phase of this Program: nothing to report.
     expect(await openImpact(program.programId, phase1.phaseId)).toBeNull();
@@ -398,6 +401,32 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
     expect(await notesRows(mentee, phase1)).toEqual([]);
   });
 
+  it("refuses an open when another Admin changed the Phase that would close after the first was asked to confirm", async () => {
+    const program = await seedProgram();
+    const phase1 = await seedPhase(program, 1);
+    const phase2 = await seedPhase(program, 2, { state: "locked" });
+    const phase3 = await seedPhase(program, 3, { state: "locked" });
+
+    // Admin A is shown "Phase 1 will close" for opening Phase 3.
+    const shown = await openImpact(program.programId, phase3.phaseId);
+    expect(shown?.closing?.id).toBe(phase1.phaseId);
+    // Admin B opens Phase 2 before A confirms.
+    expect(await changeState(program, phase2, "open")).toMatchObject({ ok: true });
+
+    // A's confirmed open would now close Phase 2, which A was never told about.
+    const stale = await changeState(program, phase3, "open", 1, { expectedClosingPhaseId: shown!.closing!.id });
+    expect(stale).toMatchObject({ ok: false, status: 409 });
+    const [row] = await db.query<{ state: string; revision: number }>(
+      "SELECT state, revision FROM holistic_mentorship_phases WHERE id = $1", [phase3.phaseId]);
+    expect(row).toEqual({ state: "locked", revision: 1 });
+
+    // Asked again, A is shown Phase 2 and the open goes through.
+    const again = await openImpact(program.programId, phase3.phaseId);
+    expect(again?.closing?.id).toBe(phase2.phaseId);
+    expect(await changeState(program, phase3, "open", 1, { expectedClosingPhaseId: again!.closing!.id }))
+      .toMatchObject({ ok: true });
+  });
+
   it("does not deadlock a Mentor save with an Admin reordering Phases", async () => {
     const program = await seedProgram();
     // The reorder locks the Plan row, then every Phase row in order: it stops at
@@ -410,7 +439,8 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
     const [reordered, write] = await holdingPhaseRow(first, async (release) => {
       const reordering = reorder({
         programId: program.programId, academicYear: CURRENT_ACADEMIC_YEAR, actorEmail: "issue536-admin@example.test",
-        phases: [first, active, last].map((phase) => ({ id: phase.phaseId, expectedRevision: 1 })),
+        // A real change of order: the two Locked Phases swap around the Open one.
+        phases: [last, active, first].map((phase) => ({ id: phase.phaseId, expectedRevision: 1 })),
       });
       await waitForLockWaiters(1);
       // With the Phase row locked before the Plan row, this save would hold the
@@ -422,7 +452,10 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
       return Promise.all([reordering, saving]);
     });
 
-    expect(reordered).toHaveProperty("ok");
+    expect(reordered).toMatchObject({ ok: true });
     expect(write).toMatchObject({ ok: true, revision: 1 });
+    const order = await db.query<{ id: string | number }>(
+      "SELECT id FROM holistic_mentorship_phases WHERE phase_plan_id = $1 ORDER BY position", [program.planId]);
+    expect(order.map((row) => Number(row.id))).toEqual([last.phaseId, active.phaseId, first.phaseId]);
   });
 });

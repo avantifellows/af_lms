@@ -2,8 +2,6 @@ import type { PoolClient } from "pg";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { HOLISTIC_PHASE_CLOSED_ERROR } from "./holistic-phase-messages";
 
-export { HOLISTIC_PHASE_CLOSED_ERROR };
-
 export type HolisticMentorWriteScopeInput = {
   studentId: number;
   phaseId: number;
@@ -45,7 +43,7 @@ export async function loadHolisticMentorWriteScope(
   // Lock order is Plan, then Mapping and Phase: the same order every Phase
   // Plan change uses (holistic-phase-plans.ts), so a save never deadlocks with one.
   // The shared Plan lock makes this save wait for a Phase state change in flight.
-  await client.query(
+  const plan = await client.query(
     `SELECT plan.id
      FROM holistic_mentorship_phase_plans plan
      JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id
@@ -53,6 +51,8 @@ export async function loadHolisticMentorWriteScope(
      FOR SHARE OF plan`,
     [input.phaseId, input.programId]
   );
+  // No such Phase in this Program: nothing is in scope, and nothing else is locked.
+  if (!plan.rows[0]) return null;
   const scope = await client.query<ScopeRow>(
       `SELECT mapping.id AS mapping_id, mapping.mentor_user_id,
               phase.revision AS phase_revision, phase.state AS phase_state,

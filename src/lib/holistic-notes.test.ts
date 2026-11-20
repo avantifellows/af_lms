@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
 import { query, withTransaction } from "./db";
-import { HOLISTIC_PHASE_CLOSED_ERROR } from "./holistic-mentor-write-scope";
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "./holistic-phase-messages";
 import { saveHolisticNotes } from "./holistic-notes";
 
 const mockWithTransaction = vi.mocked(withTransaction);

@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
   checkHolisticMentorWriteScope,
-  HOLISTIC_PHASE_CLOSED_ERROR,
   loadHolisticMentorWriteScope,
 } from "./holistic-mentor-write-scope";
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "./holistic-phase-messages";
 
 const scopeInput = {
   studentId: 41,
@@ -22,6 +22,13 @@ describe("Holistic Mentor write scope", () => {
     const client = { query: vi.fn().mockResolvedValueOnce(planLock).mockResolvedValueOnce({ rows: [] }) };
 
     await expect(loadHolisticMentorWriteScope(client as never, scopeInput)).resolves.toBeNull();
+  });
+
+  it("returns null without locking a Mapping or Phase when the Phase is not in this Program", async () => {
+    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [] }) };
+
+    await expect(loadHolisticMentorWriteScope(client as never, scopeInput)).resolves.toBeNull();
+    expect(client.query).toHaveBeenCalledOnce();
   });
 
   const scopeRow = {

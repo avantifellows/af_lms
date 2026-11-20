@@ -195,12 +195,16 @@ test.describe("Closed Holistic Phases", () => {
       expect((await refused).status()).toBe(422);
 
       await expect(page.getByRole("alert").filter({ hasText: "This Phase was closed while you were writing." }))
-        .toContainText("Your latest changes were not saved. Copy anything you need from below, then open the current Phase.");
+        .toContainText("Nothing more can be saved or submitted here. Copy anything you need from below, then open the current Phase.");
       // What they typed is still readable, the form is gone, and nothing offers to save again.
       await expect(page.getByText(/typed after the Phase closed/)).toBeVisible();
       await expect(page.getByRole("textbox")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Submit Notes" })).toHaveCount(0);
+      // The rest of the page catches up by itself, with no reload: this Phase's tab
+      // now reads Closed, and the typed text is still on screen.
+      await expect(page.getByRole("tab", { name: /Synthetic Grade 11 Active/ })).toContainText("Closed");
+      await expect(page.getByText(/typed after the Phase closed/)).toBeVisible();
 
       // They can leave: the earlier Phase's tab opens.
       await page.getByRole("tab", { name: /Synthetic Grade 11 Completed/ }).click();

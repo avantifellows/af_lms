@@ -4,7 +4,7 @@ vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
 import { withTransaction } from "./db";
 import { addHolisticFollowUpNote } from "./holistic-follow-up-notes";
-import { HOLISTIC_PHASE_CLOSED_ERROR } from "./holistic-mentor-write-scope";
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "./holistic-phase-messages";
 
 const mockWithTransaction = vi.mocked(withTransaction);
 

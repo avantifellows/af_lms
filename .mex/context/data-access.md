@@ -198,7 +198,9 @@ Evidence: sibling `release-records/holistic-phase-label-20260917/` and
 
 Mentor-owned Holistic writes (Post-Session Notes and Follow-up Notes) share one
 guard in `src/lib/holistic-mentor-write-scope.ts`. `loadHolisticMentorWriteScope(client, { studentId, phaseId, schoolId, programId, academicYear })`
-runs inside the caller's transaction and takes `FOR UPDATE OF mapping, phase FOR SHARE OF plan`. It requires
+runs inside the caller's transaction in three statements: `FOR SHARE OF plan` on the Phase's Plan row
+(no row, no scope: it returns null there), then the scope query with `FOR UPDATE OF mapping, phase`, then
+the read of the Grade's Active Phase. Plan before Phase is the order every Phase Plan change uses. It requires
 an active Mapping, a non-dropout Student, a single current Grade 11/12 roster Grade, no
 privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 11 Phase
 for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
@@ -239,8 +241,12 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   Add notes. Admin/PM drill-down says "Closed Phase" and "Closed without Notes".
 - **A form open when its Phase closes:** the save is refused with `HOLISTIC_PHASE_CLOSED_ERROR`
   (`src/lib/holistic-phase-messages.ts`, shared with the client). `PostSessionNotesEditor`
-  recognises it, stops autosave and Retry, drops the navigation guard, and shows what was
-  typed read-only under an alert, so the Mentor can copy it and leave.
+  recognises it on autosave, Submit and Save Changes alike, stops autosave and Retry, drops the
+  navigation guard, and shows what was typed read-only under an alert, so the Mentor can copy
+  it and leave. It shows no Completed badge or "Submitted by" line over that text (the server
+  never took it) and calls `router.refresh()` once, so the Phase tabs and the Follow-up section
+  catch up while the typed text stays (it lives in client state). The Follow-up pop-up does the
+  same on that refusal: it stays open with the text read-only, Save off, and the page refreshed.
 - **Progress:** `phaseState` / the CSV **Availability** column is `active` | `closed` | `locked`
   (`closed` replaced `open`). Derived Pending / Skipped / Completed progress is unchanged.
 - **Phase Setup:** `setHolisticPhaseState` refuses to open a Phase ordered before an Open Phase
@@ -253,13 +259,20 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   many of those hold a draft with content), over the write scope's Mentee set, built from one
   `MATERIALIZED` roster snapshot (not a roster read per Mapping, which timed out in #321).
   `PhasePlanSetup` asks on every open and names the closing Phase from the server's answer,
-  because its own copy of the Plan can be stale; a failed count still warns that the Phase closes.
+  because its own copy of the Plan can be stale. If the impact read fails, the prompt falls back
+  to the screen's copy and to "Check Students & Progress" in place of the counts.
+  The open then sends back what the Admin was told: `expected_closing_phase_id` (the closing
+  Phase's id, or null for none; left out when the impact read failed). `setHolisticPhaseState`
+  compares it, under the Plan lock, with the Grade's latest Open Phase (`validateExpectedClosingPhase`)
+  and answers 409 `HOLISTIC_CLOSING_PHASE_CHANGED_ERROR` on a mismatch, so two Admins acting
+  within seconds cannot close a Phase neither was warned about; the screen reloads the Plan
+  and shows that message.
 - **Undo:** returning the unused Active Phase to Locked makes the previous Open Phase Active
   and writable again. There is no other reopen.
 - **Tests:** `holistic-closed-phases.integration.test.ts` (opt-in `HOLISTIC_NOTES_TEST_DATABASE`,
   real Postgres): the racing write and the reorder deadlock both drive the real Admin function,
   paused on a Phase row held by a third connection, and wait on `pg_stat_activity` instead of a
-  timer. Unit tests sit beside each module.
+  timer; the two-Admins case runs the impact read and both opens for real. Unit tests sit beside each module.
 
 ## Holistic Follow-up Notes (#377)
 

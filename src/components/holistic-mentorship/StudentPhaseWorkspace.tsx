@@ -376,9 +376,20 @@ function useNotesEditorState(props: NotesEditorProps) {
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false);
   const [finalWriting, setFinalWriting] = useState(false);
+  // Latched when the server refuses a save because the Phase closed after this
+  // form was loaded. It is set where the save fails, not read back from the
+  // error text, which the next keystroke clears.
+  const [closedWhileWriting, setClosedWhileWriting] = useState(false);
+  const failSave = useCallback((caught: unknown, fallback: string) => {
+    const refusal = caught instanceof NotesRequestError ? caught : null;
+    setStatus("failed");
+    setError(refusal?.message ?? fallback);
+    setConflict(refusal?.status === 409);
+    if (refusal?.message === HOLISTIC_PHASE_CLOSED_ERROR) setClosedWhileWriting(true);
+  }, []);
 
   return {
-    initialValue,
+    initialValue, closedWhileWriting, failSave,
     initialRevision: initialEditor.revision,
     value, setValue, savedValue, setSavedValue, notesState, setNotesState,
     editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
@@ -493,7 +504,7 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
   canAutosave: boolean;
   autosaveEnabled: boolean;
 }) {
-  const { value: notesValue, status, setStatus, setError, setConflict, setSavedValue } = state;
+  const { value: notesValue, status, setStatus, setError, setConflict, setSavedValue, failSave } = state;
   const { queuedRef, inFlightRef, autosaveTimerRef, savedRef } = refs;
   const pump = useCallback(() => {
     if (inFlightRef.current) return inFlightRef.current;
@@ -510,9 +521,7 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
           savedRef.current = JSON.stringify(value);
           setSavedValue(value);
         } catch (caught) {
-          setStatus("failed");
-          setError(caught instanceof NotesRequestError ? caught.message : "Could not save Notes");
-          setConflict(caught instanceof NotesRequestError && caught.status === 409);
+          failSave(caught, "Could not save Notes");
           return false;
         }
       }
@@ -521,7 +530,7 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
     })().finally(() => { inFlightRef.current = null; });
     inFlightRef.current = work;
     return work;
-  }, [inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedValue, setStatus]);
+  }, [failSave, inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedValue, setStatus]);
 
   const cancelAutosaveTimer = useCallback(() => {
     if (autosaveTimerRef.current === null) return;
@@ -559,7 +568,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     value, setValue, savedValue, setSavedValue, notesState, setNotesState,
     editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
     validationError, setValidationError, missingCategories, setMissingCategories,
-    success, setSuccess, conflict, setConflict, finalWriting, setFinalWriting,
+    success, setSuccess, conflict, setConflict, finalWriting, setFinalWriting, failSave,
   } = state;
   const valueChanged = JSON.stringify(value) !== JSON.stringify(savedValue);
   const localDirty = hasLocalNotesWork(valueChanged, status);
@@ -572,7 +581,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   // Once the Phase has closed under this form nothing can be saved again: the
   // form stops being editable, which stops autosave, Retry and the navigation
   // guard, and what was typed stays on screen, read-only, for the Mentor to copy.
-  const { closedWhileWriting, editable, editing } = useClosedWhileWriting(error, props.editable, editingSubmitted);
+  const { closedWhileWriting, editable, editing } = useClosedWhileWriting(state.closedWhileWriting, props, editingSubmitted, router);
   const canAutosave = canAutosaveNotes(editable, notesState);
   const autosaveEnabled = enabledUnlessDisabled(canAutosave, finalWriting);
   useNotesHydration({ props, apiUrl, state, refs, localDirty });
@@ -647,9 +656,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
       props.onNotesSaved(true);
       router.refresh();
     } catch (caught) {
-      setStatus("failed");
-      setError(caught instanceof NotesRequestError ? caught.message : "Could not submit Notes");
-      setConflict(caught instanceof NotesRequestError && caught.status === 409);
+      failSave(caught, "Could not submit Notes");
     } finally {
       setFinalWriting(false);
     }
@@ -673,8 +680,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
       props.onNotesSaved(false);
       router.refresh();
     } catch (caught) {
-      setStatus("failed");
-      setError(caught instanceof NotesRequestError ? caught.message : "Could not save Notes");
+      failSave(caught, "Could not save Notes");
     } finally {
       setFinalWriting(false);
     }
@@ -737,13 +743,18 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   </>;
 }
 
-// The server refused a save because the Phase closed after the form was loaded.
-// The refusal is latched: the next keystroke clears the error text, the Phase
-// stays closed. From then on the form is neither editable nor being edited.
-function useClosedWhileWriting(error: string, editable: boolean, editingSubmitted: boolean) {
-  const [closed, setClosed] = useState(false);
-  if (error === HOLISTIC_PHASE_CLOSED_ERROR && !closed) setClosed(true);
-  return { closedWhileWriting: closed, editable: editable && !closed, editing: editingSubmitted && !closed };
+// Once the server has refused a save because the Phase closed, the form is
+// neither editable nor being edited. The page data is refreshed once so the
+// tabs and the Follow-up section show the Phase as it now is; this editor
+// keeps what was typed, because unsaved local work is never overwritten.
+function useClosedWhileWriting(
+  closed: boolean, props: NotesEditorProps, editingSubmitted: boolean, router: ReturnType<typeof useRouter>
+) {
+  const refreshPage = useEffectEvent(() => router.refresh());
+  useEffect(() => {
+    if (closed) refreshPage();
+  }, [closed]);
+  return { closedWhileWriting: closed, editable: props.editable && !closed, editing: editingSubmitted && !closed };
 }
 
 function ClosedWhileWritingAlert() {
@@ -751,7 +762,7 @@ function ClosedWhileWritingAlert() {
     <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
     <p>
       <strong>This Phase was closed while you were writing.</strong>{" "}
-      Your latest changes were not saved. Copy anything you need from below, then open the current Phase.
+      Nothing more can be saved or submitted here. Copy anything you need from below, then open the current Phase.
     </p>
   </div>;
 }
@@ -772,13 +783,14 @@ function NotesHead({ showInputs, completed, draftMode, status, error, timestampN
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <h2 id="notes-heading" className="text-base font-bold uppercase text-text-primary">Post-Session Notes</h2>
-        {completed && <Badge variant="success">Completed</Badge>}
+        {completed && !closedWhileWriting && <Badge variant="success">Completed</Badge>}
       </div>
+      {/* After a refusal the text below is what was typed, saved or not: no badge or timestamp vouches for it. */}
       {showInputs
         ? <p className="mt-1 text-sm text-text-muted">
             All answers and a Challenge Category in each group are required before submission.
           </p>
-        : timestampNotes && <NotesTimestamp notes={timestampNotes} phaseClosed={phaseClosed || closedWhileWriting} />}
+        : timestampNotes && !closedWhileWriting && <NotesTimestamp notes={timestampNotes} phaseClosed={phaseClosed} />}
     </div>
     {draftMode && <NotesSaveState status={status} error={error} />}
     {completed && canEdit && <Button type="button" variant="secondary" className="shrink-0" onClick={onEdit}>
@@ -1358,7 +1370,7 @@ function SelectedPhaseContent({ phase, selectedPhase, activePhaseNumber, student
 // Mentor tabs never say "Active", so name the Phase that takes Notes. A Grade
 // with no Active Phase this year (nothing Open yet) gets the short form.
 function activePhaseNumberOf(phases: HolisticStudentPhaseDetail["phases"]): number | null {
-  const active = phases.find((phase) => "active" in phase && phase.active && !phase.closed);
+  const active = phases.find((phase) => "active" in phase && phase.active);
   return active ? active.number : null;
 }
 
@@ -1733,6 +1745,9 @@ function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiU
   </>;
 }
 
+const FOLLOW_UP_PHASE_CLOSED =
+  "This Phase was closed while you were writing. This follow-up note was not saved. Copy anything you need, then close this window.";
+
 function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
   open: boolean;
   apiUrl: string;
@@ -1744,6 +1759,9 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
   const [draft, setDraft] = useState<FollowUpDraft>(EMPTY_FOLLOW_UP_DRAFT);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // The Phase closed while this note was being written: nothing can be saved,
+  // the text stays here read-only so the Mentor can copy it.
+  const [phaseClosed, setPhaseClosed] = useState(false);
   const hasAnswer = Object.values(draft).some((answer) => answer.trim());
   const isTooLong = (answer: string) => answer.length > HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH;
   const hasTooLongAnswer = Object.values(draft).some(isTooLong);
@@ -1751,6 +1769,7 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
   function close() {
     setDraft(EMPTY_FOLLOW_UP_DRAFT);
     setError("");
+    setPhaseClosed(false);
     onClose();
   }
 
@@ -1777,6 +1796,12 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
       router.refresh();
       return;
     }
+    if (result?.error === HOLISTIC_PHASE_CLOSED_ERROR) {
+      setError(FOLLOW_UP_PHASE_CLOSED);
+      setPhaseClosed(true);
+      router.refresh();
+      return;
+    }
     if (!response.ok) {
       setError(result?.error || "Could not save follow-up notes");
       return;
@@ -1795,7 +1820,7 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
           <label htmlFor={`${fieldId}-${key}`} className="text-sm font-semibold text-text-primary">{text}</label>
           {/* readOnly, not disabled, so text stays selectable while a save is in flight. */}
           <textarea id={`${fieldId}-${key}`} rows={3}
-            value={draft[key]} readOnly={saving} aria-invalid={tooLong || undefined}
+            value={draft[key]} readOnly={saving || phaseClosed} aria-invalid={tooLong || undefined}
             aria-describedby={tooLong ? `${fieldId}-${key}-error` : undefined}
             onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
             className={`mt-1 w-full rounded-md border bg-bg-card p-2 text-sm text-text-primary ${
@@ -1809,7 +1834,7 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
     {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
     <div className="mt-5 flex justify-end gap-2">
       <Button type="button" variant="secondary" onClick={requestClose}>Cancel</Button>
-      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving} onClick={() => void save()}>
+      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving || phaseClosed} onClick={() => void save()}>
         Save
       </Button>
     </div>

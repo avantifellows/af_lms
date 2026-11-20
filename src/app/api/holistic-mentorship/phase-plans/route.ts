@@ -151,7 +151,8 @@ async function changePhaseState(
   const phaseId = positiveInteger(value.phase_id);
   const expectedRevision = positiveInteger(value.expected_revision);
   const state = value.state === "open" || value.state === "locked" ? value.state : null;
-  if (!phaseId || !expectedRevision || !state || value.confirmed !== true) {
+  const expectedClosing = expectedClosingPhaseId(value.expected_closing_phase_id);
+  if (!phaseId || !expectedRevision || !state || value.confirmed !== true || expectedClosing === false) {
     return holisticApiError("Invalid state change");
   }
   return response(await setHolisticPhaseState({
@@ -161,7 +162,15 @@ async function changePhaseState(
     state,
     ...actor,
     confirmed: true,
+    ...(state === "open" && expectedClosing !== undefined ? { expectedClosingPhaseId: expectedClosing } : {}),
   }));
+}
+
+// The Phase the Admin was told would close: a Phase id, null for "none", or
+// absent when the screen could not read it. false = not one of those.
+function expectedClosingPhaseId(value: unknown): number | null | undefined | false {
+  if (value === undefined || value === null) return value;
+  return positiveInteger(value) ?? false;
 }
 
 function parsePhaseOrder(value: unknown): { id: number; expectedRevision: number }[] | null {
