@@ -245,7 +245,10 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   navigation guard, and shows what was typed read-only under an alert, so the Mentor can copy
   it and leave. It shows no Completed badge or "Submitted by" line over that text (the server
   never took it) and calls `router.refresh()` once, so the Phase tabs and the Follow-up section
-  catch up while the typed text stays (it lives in client state). The Follow-up pop-up does the
+  catch up while the typed text stays (it lives in client state). The editor's React key
+  includes the Phase revision, so `useNotesDefinitionPinnedOnRefusal` pins the revision and
+  Questions the form was loaded with before that refresh: an Admin's definition edit made
+  just before the Phase closed must not rebuild the editor and drop the text. The Follow-up pop-up does the
   same on that refusal: it stays open with the text read-only, Save off, and the page refreshed.
 - **Progress:** `phaseState` / the CSV **Availability** column is `active` | `closed` | `locked`
   (`closed` replaced `open`). Derived Pending / Skipped / Completed progress is unchanged.
@@ -261,12 +264,13 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   `PhasePlanSetup` asks on every open and names the closing Phase from the server's answer,
   because its own copy of the Plan can be stale. If the impact read fails, the prompt falls back
   to the screen's copy and to "Check Students & Progress" in place of the counts.
-  The open then sends back what the Admin was told: `expected_closing_phase_id` (the closing
-  Phase's id, or null for none; left out when the impact read failed). `setHolisticPhaseState`
+  The open then sends back the Phase the prompt named: `expected_closing_phase_id` (the server's
+  answer, or the screen's copy when the impact read failed; null for none). `setHolisticPhaseState`
   compares it, under the Plan lock, with the Grade's latest Open Phase (`validateExpectedClosingPhase`)
   and answers 409 `HOLISTIC_CLOSING_PHASE_CHANGED_ERROR` on a mismatch, so two Admins acting
-  within seconds cannot close a Phase neither was warned about; the screen reloads the Plan
-  and shows that message.
+  within seconds cannot close a Phase neither was warned about; the screen reloads the Plan,
+  keeps any unsaved edits to that Phase, and shows that message (a different one if the reload
+  fails). The API skips the check only when the field is absent, which this screen never does.
 - **Undo:** returning the unused Active Phase to Locked makes the previous Open Phase Active
   and writable again. There is no other reopen.
 - **Tests:** `holistic-closed-phases.integration.test.ts` (opt-in `HOLISTIC_NOTES_TEST_DATABASE`,

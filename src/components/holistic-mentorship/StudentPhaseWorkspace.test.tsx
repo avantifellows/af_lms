@@ -1471,6 +1471,34 @@ describe("StudentPhaseWorkspace", () => {
         expect(mockRefresh).toHaveBeenCalledTimes(1);
       });
 
+      it("keeps the typed text when the refreshed page also brings a changed Phase definition", async () => {
+        vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => refusal()));
+        const view = render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+        vi.useFakeTimers();
+        fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), {
+          target: { value: "Typed after the Phase closed" },
+        });
+        await act(async () => vi.advanceTimersByTimeAsync(750));
+        expect(screen.getByRole("alert")).toHaveTextContent("This Phase was closed while you were writing.");
+
+        // What the automatic refresh brings back: the Phase is Closed, and an Admin
+        // had also reworded its Question (a new Phase revision) before it closed.
+        const refreshed = teacherDetail();
+        Object.assign(refreshed.phases[0], { active: false, closed: true });
+        Object.assign(refreshed.selectedPhase, {
+          active: false, closed: true, canEditNotes: false, revision: 6,
+          questions: [{ questionId: 91, text: "What helped the most?", position: 1 }],
+        });
+        view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={refreshed} />);
+
+        // The editor is not rebuilt from the new revision: the text and the alert stay,
+        // under the Question the Mentor was answering.
+        expect(screen.getByRole("alert")).toHaveTextContent("This Phase was closed while you were writing.");
+        expect(screen.getByText("Typed after the Phase closed")).toBeInTheDocument();
+        expect(screen.getByText("What helped?")).toBeInTheDocument();
+        expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+      });
+
       const categories = ["academic.exam_related" as const, "non_academic.time_management" as const];
 
       it("treats a refused Submit of an already saved draft the same way, without claiming changes were lost", async () => {
@@ -1501,6 +1529,8 @@ describe("StudentPhaseWorkspace", () => {
           ...submittedNotes, challengeCategories: categories,
         })} />);
         expect(screen.getByText(/Submitted by Nila Sen on/)).toBeInTheDocument();
+        const notesPanel = screen.getByRole("region", { name: "Post-Session Notes" });
+        expect(within(notesPanel).getByText("Completed")).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole("button", { name: /Edit Notes/ }));
         fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A correction typed too late" } });
@@ -1508,7 +1538,8 @@ describe("StudentPhaseWorkspace", () => {
 
         expect(await screen.findByRole("alert")).toHaveTextContent("This Phase was closed while you were writing.");
         expect(screen.getByText("A correction typed too late")).toBeInTheDocument();
-        // No "Submitted by" line or Edit button vouches for text the server never took.
+        // No Completed badge, "Submitted by" line or Edit button vouches for text the server never took.
+        expect(within(notesPanel).queryByText("Completed")).not.toBeInTheDocument();
         expect(screen.queryByText(/Submitted by/)).not.toBeInTheDocument();
         expect(screen.queryByRole("button", { name: /Edit Notes/ })).not.toBeInTheDocument();
         expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -1700,7 +1731,7 @@ describe("StudentPhaseWorkspace", () => {
       const fetchMock = vi.fn().mockResolvedValue(new Response(
         JSON.stringify({ error: HOLISTIC_PHASE_CLOSED_ERROR }), { status: 422 }));
       vi.stubGlobal("fetch", fetchMock);
-      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" programId={2}
+      const view = render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" programId={2}
         detail={completedTeacherDetail(followUpNotes)} />);
 
       const dialog = openAddNotes();
@@ -1717,6 +1748,15 @@ describe("StudentPhaseWorkspace", () => {
       expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(mockRefresh).toHaveBeenCalledTimes(1);
+
+      // What that refresh brings back: the Phase is now Closed. The pop-up and its text survive it.
+      const refreshed = completedTeacherDetail(followUpNotes);
+      Object.assign(refreshed.phases[0], { active: false, closed: true });
+      Object.assign(refreshed.selectedPhase, { active: false, closed: true, canEditNotes: false });
+      view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" programId={2} detail={refreshed} />);
+      expect(screen.getByRole("button", { name: "Add notes" })).toBeDisabled();
+      expect(within(screen.getByRole("dialog")).getByRole("textbox", { name: "What solutions did you suggest?" }))
+        .toHaveValue("Typed as the Phase closed");
     });
 
     it("saves a Follow-up Note, closes the modal, and refreshes the server data", async () => {

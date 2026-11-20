@@ -788,8 +788,8 @@ export async function setHolisticPhaseState(input: {
   state: "locked" | "open";
   confirmed: boolean;
   /**
-   * For an open: the Phase the Admin was told would close (null = none).
-   * Omitted when the screen could not read it; the open is then not checked.
+   * For an open: the Phase the Admin's confirmation named as closing (null =
+   * none). Phase Setup always sends it; a caller that omits it is not checked.
    */
   expectedClosingPhaseId?: number | null;
 } & AuditActor): Promise<PhasePlanResult> {

@@ -149,8 +149,10 @@ function returnToLockedPrompt(phase: Phase, plan: Plan | null | undefined) {
   ].join("\n\n");
 }
 
-function refusalMessage(status: number, data: { error?: string; currentRevision?: number }, closingChanged: boolean) {
-  if (closingChanged) return HOLISTIC_CLOSING_PHASE_CHANGED_ERROR;
+const CLOSING_CHANGED_RELOAD_FAILED =
+  "The Open Phases for this Grade changed while you were confirming, so nothing was opened. The Plan could not be reloaded. Reload the page before trying again.";
+
+function refusalMessage(status: number, data: { error?: string; currentRevision?: number }) {
   if (status !== 409) return data.error ?? "Could not save the Plan";
   return `${data.error}. Reload to review revision ${data.currentRevision ?? "latest"}; your unsaved text is preserved.`;
 }
@@ -247,17 +249,19 @@ export default function PhasePlanSetup({
         ? { ...loaded.plan, editable: false }
         : loaded.plan;
       const canCopy = canEdit && await priorPlanCanBeCopied(nextPlan, year, programId);
-      if (requestId !== loadId.current) return;
+      if (requestId !== loadId.current) return false;
       setMessage(loaded.error);
       setCanCopyPriorPlan(canCopy);
       setPlan(nextPlan);
       const keep = selectPhaseId ? nextPlan?.phases.find((phase) => phase.id === selectPhaseId) : undefined;
       if (keep) setDraft(draftFromPhase(keep));
+      return !loaded.error;
     } catch {
-      if (requestId !== loadId.current) return;
+      if (requestId !== loadId.current) return false;
       setMessage("Could not load the Plan");
       setCanCopyPriorPlan(false);
       setPlan(null);
+      return false;
     }
   }, [academicYear, canEdit, programId]);
 
@@ -279,11 +283,8 @@ export default function PhasePlanSetup({
       });
       const data = await result.json();
       if (!result.ok) {
-        // Another Admin opened or locked a Phase of the Grade after this Admin was
-        // asked to confirm: show the Plan as it is now, then say what happened.
-        const closingChanged = data.error === HOLISTIC_CLOSING_PHASE_CHANGED_ERROR;
-        if (closingChanged) await load(academicYear, Number(payload.phase_id));
-        setMessage(refusalMessage(result.status, data, closingChanged));
+        if (data.error === HOLISTIC_CLOSING_PHASE_CHANGED_ERROR) await showPlanAfterClosingChanged(Number(payload.phase_id));
+        else setMessage(refusalMessage(result.status, data));
         return false;
       }
       if (reload) await load();
@@ -294,6 +295,17 @@ export default function PhasePlanSetup({
     } finally {
       setBusy(false);
     }
+  }
+
+  // Another Admin opened or locked a Phase of the Grade after this Admin was asked
+  // to confirm, so nothing was opened: show the Plan as it is now, keep any unsaved
+  // edits to the Phase on screen (the reload would otherwise drop them), and say
+  // what happened. If the reload fails, do not claim the Plan is up to date.
+  async function showPlanAfterClosingChanged(phaseId: number) {
+    const unsaved = draft?.id === phaseId && draftIsDirty(draft, selectedPhase) ? draft : null;
+    const reloaded = await load(academicYear, phaseId);
+    if (reloaded && unsaved) setDraft(unsaved);
+    setMessage(reloaded ? HOLISTIC_CLOSING_PHASE_CHANGED_ERROR : CLOSING_CHANGED_RELOAD_FAILED);
   }
 
   async function create(copy: boolean) {
@@ -329,8 +341,9 @@ export default function PhasePlanSetup({
     const next = phase.state === "locked" ? "open" : "locked";
     let prompt = returnToLockedPrompt(phase, plan);
     // What the Admin is told will close goes back with the open, so the server
-    // can refuse it if another Admin has changed that in between. Left out when
-    // the counts could not be read and the prompt fell back to this screen's copy.
+    // can refuse it if another Admin has changed that in between. It is the Phase
+    // the prompt named: the server's answer, or this screen's copy when the
+    // counts could not be read.
     let expectedClosing: { expected_closing_phase_id: number | null } | undefined;
     if (next === "open") {
       const closing = activePhaseOfGrade(plan, phase);
@@ -338,7 +351,7 @@ export default function PhasePlanSetup({
       const impact = await fetchOpenImpact(phase.id, programId);
       setBusy(false);
       prompt = openPhasePrompt(phase, closing, impact);
-      if (impact) expectedClosing = { expected_closing_phase_id: impact.closing?.id ?? null };
+      expectedClosing = { expected_closing_phase_id: (impact ? impact.closing?.id : closing?.id) ?? null };
     }
     if (!window.confirm(prompt)) return;
     const changed = await request("PATCH", {

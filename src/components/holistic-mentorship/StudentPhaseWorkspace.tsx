@@ -48,6 +48,8 @@ type NotesEditorProps = {
   };
   timestampNotes: OpenSelectedPhase["notes"];
   onNotesSaved: (submitted: boolean) => void;
+  /** A save was refused because the Phase closed; called once, before the page refreshes. */
+  onClosedWhileWriting: () => void;
 };
 type NotesEditorStatus = "idle" | "saving" | "saved" | "failed";
 // Answers and Challenge Categories autosave, hydrate and submit together.
@@ -750,7 +752,11 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
 function useClosedWhileWriting(
   closed: boolean, props: NotesEditorProps, editingSubmitted: boolean, router: ReturnType<typeof useRouter>
 ) {
-  const refreshPage = useEffectEvent(() => router.refresh());
+  const refreshPage = useEffectEvent(() => {
+    // First, so the refreshed data cannot rebuild this editor (see useNotesDefinitionPinnedOnRefusal).
+    props.onClosedWhileWriting();
+    router.refresh();
+  });
   useEffect(() => {
     if (closed) refreshPage();
   }, [closed]);
@@ -1325,7 +1331,9 @@ function SelectedPhaseContent({ phase, selectedPhase, activePhaseNumber, student
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
   const tabId = phaseTabId(studentId, selectedPhase);
   const panelId = phasePanelId(studentId, selectedPhase);
+  const { notesPhase: pinnedNotesPhase, pinNotesDefinition } = useNotesDefinitionPinnedOnRefusal(phase);
   if (!phase) return <LockedPhasePanel bordered studentId={studentId} selectedPhase={selectedPhase} />;
+  const notesPhase = pinnedNotesPhase ?? phase;
   return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
     className="space-y-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
     <PhaseHeading phase={phase} />
@@ -1357,14 +1365,32 @@ function SelectedPhaseContent({ phase, selectedPhase, activePhaseNumber, student
       After the conversation
       <span aria-hidden="true" className="flex-1 border-t border-dashed border-border" />
     </div>
-    <PostSessionNotes key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
-      phase={phase} studentId={studentId} readOnly={readOnly}
+    <PostSessionNotes key={`${notesPhase.phaseId}-${notesPhase.mappingId}-${notesPhase.revision}`}
+      phase={notesPhase} studentId={studentId} readOnly={readOnly}
       schoolCode={schoolCode} academicYear={academicYear} programId={programId}
-      onSubmitted={() => onSubmitted(phase.phaseId)} />
+      onSubmitted={() => onSubmitted(phase.phaseId)} onClosedWhileWriting={pinNotesDefinition} />
     <MentorFollowUpNotes key={`${phase.phaseId}-${phase.mappingId}`} phase={phase} apiUrl={`/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}/follow-up-notes?${new URLSearchParams(
       { school_code: schoolCode, academic_year: academicYear, program_id: String(programId) }
     )}`} />
   </section>;
+}
+
+// A refused save refreshes the page data (useClosedWhileWriting). If an Admin had
+// also changed the Phase's definition since the form loaded, its new revision
+// would rebuild the Notes editor and discard what the Mentor typed. So from the
+// refusal on, the Notes editor keeps the revision and Questions it was loaded
+// with; everything else about the Phase (Closed, its Notes) comes from the refresh.
+function useNotesDefinitionPinnedOnRefusal(phase: OpenSelectedPhase | null) {
+  const [pinned, setPinned] = useState<
+    Pick<OpenSelectedPhase, "phaseId" | "mappingId" | "revision" | "questions"> | null
+  >(null);
+  const pinNotesDefinition = useCallback(() => {
+    if (!phase) return;
+    setPinned({ phaseId: phase.phaseId, mappingId: phase.mappingId, revision: phase.revision, questions: phase.questions });
+  }, [phase]);
+  const applies = !!phase && pinned?.phaseId === phase.phaseId && pinned.mappingId === phase.mappingId;
+  const notesPhase = applies ? { ...phase, revision: pinned.revision, questions: pinned.questions } : phase;
+  return { notesPhase, pinNotesDefinition };
 }
 
 // Mentor tabs never say "Active", so name the Phase that takes Notes. A Grade
@@ -1976,7 +2002,7 @@ function StudentContextBody({ context }: { context: OpenSelectedPhase["context"]
   </div>;
 }
 
-function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, programId, onSubmitted }: {
+function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, programId, onSubmitted, onClosedWhileWriting }: {
   phase: OpenSelectedPhase;
   studentId: number;
   readOnly: boolean;
@@ -1984,6 +2010,7 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
   academicYear: string;
   programId: number;
   onSubmitted: () => void;
+  onClosedWhileWriting: () => void;
 }) {
   const [visibleNotesOverride, setVisibleNotes] = useState<OpenSelectedPhase["notes"] | undefined>();
   const visibleNotes = visibleNotesOverride === undefined ? phase.notes : visibleNotesOverride;
@@ -2013,7 +2040,7 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
         academicYear={academicYear} programId={programId}
         editable={!readOnly && phase.canEditNotes} phaseClosed={phase.closed}
         questions={phase.questions} notes={phase.notes} timestampNotes={visibleNotes}
-        onNotesSaved={refreshNotesMetadata} />
+        onNotesSaved={refreshNotesMetadata} onClosedWhileWriting={onClosedWhileWriting} />
     </Card>
   </section>;
 }

@@ -420,8 +420,46 @@ describe("PhasePlanSetup", () => {
         "Phase 1 will close for Grade 11. Mentors will still be able to read its Notes, but not add or change them.",
         "Check Students & Progress for Mentees still pending in Phase 1.",
       ].join("\n\n"));
-      // The server never said which Phase closes, so there is nothing for it to check.
-      expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).not.toHaveProperty("expected_closing_phase_id");
+      // The prompt named this screen's copy, so that is what the server is asked to check.
+      expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toMatchObject({ expected_closing_phase_id: 21 });
+    });
+
+    it("keeps the Admin's unsaved edits to the Phase when the open is refused and the Plan reloads", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(ok(beforeOpening))
+        .mockResolvedValueOnce(ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } } }))
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: HOLISTIC_CLOSING_PHASE_CHANGED_ERROR }) })
+        .mockResolvedValueOnce(ok(beforeOpening));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.clear(screen.getByLabelText("Title"));
+      await user.type(screen.getByLabelText("Title"), "Unsaved new title");
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(await screen.findByText(HOLISTIC_CLOSING_PHASE_CHANGED_ERROR)).toBeInTheDocument();
+      expect(screen.getByLabelText("Title")).toHaveValue("Unsaved new title");
+    });
+
+    it("does not say the Plan is up to date when the reload after a refused open fails", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(ok(beforeOpening))
+        .mockResolvedValueOnce(ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } } }))
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: HOLISTIC_CLOSING_PHASE_CHANGED_ERROR }) })
+        .mockRejectedValueOnce(new Error("offline"));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(await screen.findByText(
+        "The Open Phases for this Grade changed while you were confirming, so nothing was opened. The Plan could not be reloaded. Reload the page before trying again."
+      )).toBeInTheDocument();
+      expect(screen.queryByText(HOLISTIC_CLOSING_PHASE_CHANGED_ERROR)).not.toBeInTheDocument();
     });
 
     it("reloads the Plan and says so when another Admin changed the Open Phase before this one confirmed", async () => {
