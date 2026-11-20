@@ -364,6 +364,9 @@ describe("Holistic Phase Plans", () => {
     // Stopped before the readiness check and before any write.
     expect(client.query).toHaveBeenCalledTimes(3);
     const [sql, params] = client.query.mock.calls[2];
+    // The message names the later Phase by its per-Grade number (#516).
+    expect(String(sql)).toContain("same_grade_phase.grade_id = later.grade_id");
+    expect(String(sql)).toContain("CASE WHEN later_grade.number = 12 THEN 3");
     expect(String(sql)).toContain("later.grade_id = target.grade_id");
     expect(String(sql)).toContain("later.state = 'open' AND later.position > target.position");
     expect(params).toEqual([21]);
@@ -723,6 +726,9 @@ describe("Holistic Phase Plans", () => {
         closing: { id: 15, number: 2, menteesWithoutNotes: 45, unsubmittedDrafts: 1 },
       });
 
+      // The closing Phase is named by its per-Grade number (#516).
+      expect(String(mockQuery.mock.calls[1][0])).toContain("same_grade_phase.grade_id = active.grade_id");
+      expect(String(mockQuery.mock.calls[1][0])).toContain("CASE WHEN active_grade.number = 12 THEN 3");
       const [sql, params] = mockQuery.mock.calls[2];
       // Program, Academic Year, Grade, and the Phase that will close.
       expect(params).toEqual([1, "2026-2027", 12, 15]);

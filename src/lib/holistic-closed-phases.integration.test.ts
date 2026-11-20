@@ -311,13 +311,35 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
     await seedPhase(program, 2, { gradeId: grade12Id }); // another Grade's Open Phase does not block
     await seedPhase(program, 3);
 
+    // The later Grade 11 Phase is third in the Plan and second in its Grade: Phase 2.
     expect(await changeState(program, phase1, "open")).toEqual({
       ok: false, status: 422,
-      error: "This Phase cannot be opened while Phase 3, a later Phase for this Grade, is Open",
+      error: "This Phase cannot be opened while Phase 2, a later Phase for this Grade, is Open",
     });
     const [row] = await db.query<{ state: string }>(
       "SELECT state FROM holistic_mentorship_phases WHERE id = $1", [phase1.phaseId]);
     expect(row.state).toBe("locked");
+  });
+
+  // Issue #516 numbers Phases per Grade: in a Plan ordered Grade 11, 12, 11, 12, 12
+  // the Grade 12 Phases are 4, 5 and 6, not their places in the whole Plan (2, 4, 5).
+  it("names Grade 12 Phases by their per-Grade number in the open messages", async () => {
+    const program = await seedProgram();
+    await seedPhase(program, 1);
+    const first12 = await seedPhase(program, 2, { gradeId: grade12Id });
+    await seedPhase(program, 3);
+    const second12 = await seedPhase(program, 4, { gradeId: grade12Id, state: "locked" });
+    const third12 = await seedPhase(program, 5, { gradeId: grade12Id, state: "locked" });
+
+    expect(await openImpact(program.programId, second12.phaseId)).toMatchObject({
+      closing: { id: first12.phaseId, number: 4 },
+    });
+
+    expect(await changeState(program, third12, "open")).toMatchObject({ ok: true });
+    expect(await changeState(program, second12, "open")).toEqual({
+      ok: false, status: 422,
+      error: "This Phase cannot be opened while Phase 6, a later Phase for this Grade, is Open",
+    });
   });
 
   it("tells the Admin how many Mentees the closing Phase leaves without Notes", async () => {

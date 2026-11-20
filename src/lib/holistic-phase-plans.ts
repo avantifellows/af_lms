@@ -4,7 +4,7 @@ import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query, withTransaction } from "./db";
 import { HOLISTIC_CLOSING_PHASE_CHANGED_ERROR } from "./holistic-phase-messages";
 import {
-  HOLISTIC_PHASES_PER_GRADE, holisticGradeFullError, withHolisticPhaseNumbers,
+  HOLISTIC_PHASES_PER_GRADE, holisticGradeFullError, holisticPhaseNumberSql, withHolisticPhaseNumbers,
 } from "./holistic-phase-number";
 
 export type HolisticPhaseQuestion = {
@@ -725,13 +725,13 @@ async function validateOpenOrder(
   phaseId: number
 ): Promise<PhasePlanResult | null> {
   const later = await client.query<{ number: number | string }>(
-    `SELECT (SELECT COUNT(*) FROM holistic_mentorship_phases numbered
-             WHERE numbered.phase_plan_id = later.phase_plan_id
-               AND numbered.position <= later.position) AS number
+    // The number the Admin sees for the later Phase: per Grade (#516).
+    `SELECT ${holisticPhaseNumberSql("later", "later_grade.number")} AS number
      FROM holistic_mentorship_phases target
      JOIN holistic_mentorship_phases later
        ON later.phase_plan_id = target.phase_plan_id AND later.grade_id = target.grade_id
       AND later.state = 'open' AND later.position > target.position
+     JOIN grade later_grade ON later_grade.id = later.grade_id
      WHERE target.id = $1
      ORDER BY later.position DESC LIMIT 1`,
     [phaseId]
@@ -838,11 +838,10 @@ export async function getHolisticPhaseOpenImpact(
   if (!target) return null;
 
   const [active] = await query<{ id: number | string; number: number | string }>(
-    `SELECT active.id,
-            (SELECT COUNT(*) FROM holistic_mentorship_phases numbered
-             WHERE numbered.phase_plan_id = active.phase_plan_id
-               AND numbered.position <= active.position) AS number
+    // The number the Admin sees for the Phase that closes: per Grade (#516).
+    `SELECT active.id, ${holisticPhaseNumberSql("active", "active_grade.number")} AS number
      FROM holistic_mentorship_phases active
+     JOIN grade active_grade ON active_grade.id = active.grade_id
      WHERE active.phase_plan_id = $1 AND active.grade_id = $2 AND active.state = 'open'
        AND active.position < $3
        AND NOT EXISTS (
