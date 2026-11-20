@@ -157,6 +157,12 @@ describe("Holistic Phase Plans", () => {
     expect(client.query.mock.calls[2][1]).toEqual([7, 1, [11, 12]]);
     expect(String(client.query.mock.calls[4][0])).not.toContain("CASE WHEN");
     expect(client.query.mock.calls[4][1]).toEqual([21, 12, "New title", "New Guidance", 2]);
+    // The later Phases of both Grades are renumbered, so their revision moves too:
+    // an Admin acting on a page that shows the old number gets "Phase changed".
+    const [renumberedSql, renumberedParams] = client.query.mock.calls[5];
+    expect(String(renumberedSql)).toContain("SET revision = later.revision + 1");
+    expect(String(renumberedSql)).toContain("later.position > $2");
+    expect(renumberedParams).toEqual([7, 1, [11, 12]]);
     expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "definition_updated", 9, actor.actorEmail]);
   });
 
@@ -218,6 +224,8 @@ describe("Holistic Phase Plans", () => {
     const laterCheck = String(client.query.mock.calls[2][0]);
     expect(laterCheck).toContain("later.position > $2");
     expect(laterCheck).toContain("later.state <> 'locked'");
+    expect(laterCheck).toContain("later.frozen_at IS NOT NULL");
+    expect(laterCheck).toContain("t.to_state = 'open'");
     expect(laterCheck).toContain("holistic_mentorship_post_session_notes");
     expect(client.query.mock.calls[2][1]).toEqual([7, 2, [11, 12]]);
     expect(client.query).toHaveBeenCalledTimes(3);
@@ -253,6 +261,7 @@ describe("Holistic Phase Plans", () => {
     const statements = client.query.mock.calls.map(([sql]) => String(sql));
     expect(statements.some((sql) => sql.includes("COUNT(*) AS count"))).toBe(false);
     expect(statements.some((sql) => sql.includes("later.position"))).toBe(false);
+    expect(statements.some((sql) => sql.includes("revision = later.revision + 1"))).toBe(false);
   });
 
   it("opens a complete Phase with more than four Questions", async () => {
@@ -330,7 +339,9 @@ describe("Holistic Phase Plans", () => {
       .toHaveLength(2);
   });
 
-  // Phase Setup's Move up within a Grade: 22 swaps with 21 across the other Grade's Phase 31.
+  // The server side of a same-Grade move: 22 swaps with 21 across the other Grade's
+  // Phase 31. The reorder code is older than issue #516; which Phases Phase Setup
+  // swaps is covered in PhasePlanSetup.test.tsx.
   it("swaps two Phases around a Phase that keeps its position", async () => {
     const row = (id: string, position: number, overrides = {}) => ({
       id, phase_plan_id: "7", position, revision: 1, state: "locked", frozen_at: null,
@@ -361,6 +372,7 @@ describe("Holistic Phase Plans", () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "5" }] })
+        .mockResolvedValueOnce({ rows: [] }) // no Grade of the prior Plan is over the limit
         .mockResolvedValueOnce({ rows: [{ id: "7" }] })
         .mockResolvedValueOnce({ rows: [{ old_id: "21", new_id: "31" }] })
         .mockResolvedValueOnce({ rows: [] }),
@@ -374,9 +386,32 @@ describe("Holistic Phase Plans", () => {
       ...actor,
     }))
       .resolves.toEqual({ ok: true, id: 7 });
-    expect(String(client.query.mock.calls[2][0])).toContain("'locked'");
-    expect(client.query.mock.calls[3][1]).toEqual([31, 21]);
-    expect(client.query.mock.calls[4][1]).toEqual([7, 31, "created", 9, actor.actorEmail]);
+    expect(client.query.mock.calls[1][1]).toEqual([5, 3]);
+    expect(String(client.query.mock.calls[3][0])).toContain("'locked'");
+    expect(client.query.mock.calls[4][1]).toEqual([31, 21]);
+    expect(client.query.mock.calls[5][1]).toEqual([7, 31, "created", 9, actor.actorEmail]);
+  });
+
+  // A Plan made before the limit: copying 4 Grade 11 Phases would show two "Phase 4".
+  it("refuses to copy a prior Plan with more than 3 Phases in a Grade, and creates nothing", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "5" }] })
+        .mockResolvedValueOnce({ rows: [{ grade: "11" }] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(createHolisticPhasePlan({
+      programId: 1,
+      academicYear: "2026-2027",
+      copyFromAcademicYear: "2025-2026",
+      ...actor,
+    })).resolves.toEqual({ ok: false, status: 422, error: "The prior Plan has more than 3 Phases in Grade 11" });
+
+    const [overLimitSql, overLimitParams] = client.query.mock.calls[1];
+    expect(String(overLimitSql)).toContain("HAVING COUNT(*) > $2");
+    expect(overLimitParams).toEqual([5, 3]);
+    expect(client.query).toHaveBeenCalledTimes(2);
   });
 
   it("audits a newly added Phase", async () => {

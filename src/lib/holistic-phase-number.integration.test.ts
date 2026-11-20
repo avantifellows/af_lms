@@ -4,8 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { holisticPhaseNumberSql, withHolisticPhaseNumbers } from "./holistic-phase-number";
 
 // Runs the SQL form of the Phase number rule on real Postgres and compares it with
-// the JS form. Opt in with a migrated, disposable local DB; the rows it inserts are
-// rolled back.
+// the JS form. Opt in with a migrated, disposable local DB. It can be empty: the test
+// inserts its own Program and any missing Grade row, and rolls everything back.
 // HOLISTIC_PHASE_NUMBER_TEST_DATABASE=dbservice_test_lms516 DATABASE_HOST=localhost \
 // DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
 // npx vitest run src/lib/holistic-phase-number.integration.test.ts
@@ -42,16 +42,30 @@ describe.skipIf(!database)("Holistic Phase number SQL against disposable Postgre
     let rows: Array<{ grade: 11 | 12; position: number; number: number }> = [];
 
     await db.withTransaction(async (client) => {
+      const product = await client.query<{ id: string }>(
+        "INSERT INTO product (name, inserted_at, updated_at) VALUES ('Issue 516 synthetic', now(), now()) RETURNING id"
+      );
+      const program = await client.query<{ id: string }>(
+        `INSERT INTO program (name, product_id, inserted_at, updated_at)
+         VALUES ('Issue 516 synthetic', $1, now(), now()) RETURNING id`,
+        [product.rows[0].id]
+      );
+      await client.query(
+        `INSERT INTO grade (number, inserted_at, updated_at)
+         SELECT needed.number, now(), now() FROM (VALUES (11), (12)) AS needed(number)
+         WHERE NOT EXISTS (SELECT 1 FROM grade WHERE grade.number = needed.number)`
+      );
       const plan = await client.query<{ id: string }>(
         `INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year, inserted_at, updated_at)
-         SELECT id, '1990-1991', now(), now() FROM program ORDER BY id LIMIT 1
-         RETURNING id`
+         VALUES ($1, '1990-1991', now(), now()) RETURNING id`,
+        [program.rows[0].id]
       );
       for (const [grade, position] of planned) {
+        // MIN(id): some disposable databases hold several rows for one Grade number.
         await client.query(
           `INSERT INTO holistic_mentorship_phases
              (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision, inserted_at, updated_at)
-           SELECT $1, grade.id, 'Issue 516 integration', $3, 'locked', '', 1, now(), now()
+           SELECT $1, MIN(grade.id), 'Issue 516 integration', $3, 'locked', '', 1, now(), now()
            FROM grade WHERE grade.number = $2`,
           [plan.rows[0].id, grade, position]
         );

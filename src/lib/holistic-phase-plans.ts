@@ -161,6 +161,23 @@ async function gradeIsFull(
 }
 
 // Moving a Phase to the other Grade renumbers every later Phase of both Grades.
+// A Plan made before the limit can hold more than 3 Phases in a Grade. Copying it
+// would give two Phases the same number, so the copy is refused.
+async function overfullGrade(client: PoolClient, phasePlanId: number): Promise<11 | 12 | null> {
+  const result = await client.query<{ grade: number | string }>(
+    `SELECT grade.number AS grade
+     FROM holistic_mentorship_phases phase
+     JOIN grade ON grade.id = phase.grade_id
+     WHERE phase.phase_plan_id = $1
+     GROUP BY grade.number
+     HAVING COUNT(*) > $2
+     ORDER BY grade.number
+     LIMIT 1`,
+    [phasePlanId, HOLISTIC_PHASES_PER_GRADE]
+  );
+  return result.rows[0] ? (Number(result.rows[0].grade) as 11 | 12) : null;
+}
+
 // An opened or used Phase keeps its number, so the move is refused when one is later.
 async function gradeChangeRenumbersOpenedPhase(
   client: PoolClient,
@@ -184,6 +201,24 @@ async function gradeChangeRenumbersOpenedPhase(
 }
 
 // Only a Grade change is checked, so a Phase can always be saved in the Grade it is in.
+// A Grade change renumbers the later Phases of the old and the new Grade. Their
+// revision moves too, as it does after a delete or a reorder, so an Admin acting
+// on a page that still shows the old number gets "Phase changed".
+async function bumpPhasesRenumberedByGradeChange(
+  client: PoolClient,
+  phase: MutablePhaseRow,
+  grade: 11 | 12,
+) {
+  await client.query(
+    `UPDATE holistic_mentorship_phases later
+     SET revision = later.revision + 1, updated_at = NOW()
+     FROM grade
+     WHERE grade.id = later.grade_id AND later.phase_plan_id = $1 AND later.position > $2
+       AND grade.number = ANY($3::int[])`,
+    [Number(phase.phase_plan_id), phase.position, [Number(phase.grade), grade]]
+  );
+}
+
 async function validateGradeChange(
   client: PoolClient,
   phase: MutablePhaseRow,
@@ -360,6 +395,7 @@ async function updatePhaseTransaction(
     [input.phaseId, input.grade, input.title.trim(), input.guidanceMarkdown, input.expectedRevision]
   );
   if (!updated.rows[0]) return { ok: false, status: 409, error: "Phase changed" };
+  if (Number(phase.grade) !== input.grade) await bumpPhasesRenumberedByGradeChange(client, phase, input.grade);
   await replaceQuestions(client, input);
   await recordPhaseMutation(
     client,
@@ -460,6 +496,10 @@ export async function createHolisticPhasePlan(params: {
       );
       if (!source.rows[0]) return { ok: false, status: 404, error: "Prior Plan not found" };
       sourcePlanId = Number(source.rows[0].id);
+      const overfull = await overfullGrade(client, sourcePlanId);
+      if (overfull) return {
+        ok: false, status: 422, error: `The prior Plan has more than ${HOLISTIC_PHASES_PER_GRADE} Phases in Grade ${overfull}`,
+      };
     }
     const inserted = await client.query<{ id: number | string }>(
       `INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year, inserted_at, updated_at)

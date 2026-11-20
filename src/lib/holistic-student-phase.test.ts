@@ -196,6 +196,45 @@ describe("Holistic Student Phase derivation", () => {
     expect(result?.selectedPhase.number).toBe(tabs[1][1]);
   });
 
+  // Each Academic Year's Plan is numbered on its own: last year's Grade 11 Phases
+  // stay 1 and 2 beside this year's Plan, which also has Grade 11 Phases.
+  it("numbers a continuing Grade 12 Mentee's prior-year tabs from the prior Plan only", async () => {
+    const phase = (id: number, year: string, phaseGrade: number, position: number) => ({
+      id, academic_year: year, grade: phaseGrade, title: `Phase row ${id}`,
+      position, revision: 1, state: "open", guidance_markdown: "Listen first.",
+    });
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade: 12, entry_grade: 11,
+      }])
+      .mockResolvedValueOnce([
+        phase(51, "2025-2026", 11, 1), phase(52, "2025-2026", 11, 2),
+        phase(1, "2026-2027", 11, 1), phase(2, "2026-2027", 12, 2),
+        phase(15, "2026-2027", 11, 3), phase(16, "2026-2027", 12, 4),
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { academic_year: "2025-2026", started_at: "2025-07-01T00:00:00Z" },
+        { academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" },
+      ])
+      .mockResolvedValue([]);
+
+    const result = await getHolisticStudentPhase({
+      programId: PROGRAM_IDS.COE,
+      studentId: 41,
+      phaseId: 16,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    expect(result?.phases.map((item) => [item.phaseId, item.number])).toEqual([[51, 1], [52, 2], [2, 4], [16, 5]]);
+  });
+
   it("shows real prior-year Grade 11 history for a continuing Grade 12 Mentee", () => {
     expect(buildHolisticApplicablePhases({
       currentGrade: 12,
