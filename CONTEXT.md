@@ -392,6 +392,28 @@ _Avoid_: Student Profile, Holistic Student Profile
 The per-Student link from the Profile Dashboard Sheet's Screener Form column, shown to whoever handles a Mentor Flag.
 _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 
+### Environments
+
+**Staging**:
+The shared pre-production environment that always runs `main` of the LMS and the DB Service on the staging database, and that other Avanti services depend on.
+_Avoid_: Preview, Staging Slot
+
+**Staging Slot**:
+One of a fixed set of named test environments that one person claims to test a branch: an LMS build, a DB Service build, and a separate database of its own on the staging database server.
+_Avoid_: Preview, PR environment, sandbox
+
+**Slot Claim**:
+A person's reservation of one Staging Slot for their branches, held until it is released; a claimed slot is never taken over without the holder being told.
+_Avoid_: Booking, lock
+
+**Slot Board**:
+The one shared view of who holds each Staging Slot and which branches it is running.
+_Avoid_: Slot dashboard, status page
+
+**Slot Reset**:
+Replacing a Staging Slot's database with a fresh copy of the Staging database.
+_Avoid_: Slot refresh, wipe
+
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
@@ -779,6 +801,13 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - Only completed **Visits** contribute to **Visit Concerns** and **Visit Highlights**
 - A new mention of an existing **Visit Concern** attaches to it rather than creating a new one, so its **Concern Resolution** history stays with it
 - A resolved **Visit Concern** reopens automatically when a **Visit** dated after its resolution mentions it again; a Visit dated on or before the resolution never reopens it
+- **Staging** runs only `main`; a branch is tested before merge only in a **Staging Slot**
+- A **Staging Slot** runs at most one LMS branch and one DB Service branch; the side nobody has claimed runs `main`
+- A new **Slot Claim** on a free **Staging Slot** always starts with a **Slot Reset**, so a new holder never inherits another branch's migrations or test data
+- A **Slot Claim** ends when its pull requests are merged or closed or the holder releases it; a long-idle claim gets a reminder, never an automatic release
+- The holder of a **Slot Claim** is the person who claimed the **Staging Slot**, who need not be the author of the pull requests it runs
+- When one side's pull request in a **Staging Slot** is merged or closed, only that side goes back to `main`; the **Slot Claim** continues, with no **Slot Reset**, while the other side's pull request is open
+- LMS flows that finish through ETL (Holistic profiles, Blended Learning drafts) write to **Staging**, not to the **Staging Slot** that started them
 
 ## Example dialogue
 
