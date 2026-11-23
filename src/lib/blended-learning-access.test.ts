@@ -312,8 +312,8 @@ describe("canBlendedLearning", () => {
     ["view_mentors", false, true, true],
     // Resources and Common Action Items: the one thing an admin edits.
     ["manage", false, true, false],
-    // The JEE form: the Mentor or an admin, never read-only.
-    ["record_jee_form", true, true, false],
+    // The JEE form (and its password): the Mentor only, never an admin.
+    ["record_jee_form", true, false, false],
     // Showing the exam-portal password is a view: everyone, read-only too
     // (scope is canAccessBlendedStudent's: a Mentor's own Mentees only).
     ["reveal_exam_password", true, true, true],

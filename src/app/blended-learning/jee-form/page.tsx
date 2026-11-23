@@ -12,10 +12,10 @@ import { JeeFormTab } from "./JeeFormTab";
 
 // The JEE Form tab: every Student in the viewer's scope (a Mentor's own
 // Mentees, a team lead's too, never their reportees'; every Mentor's for a
-// Blended Learning Admin, with a Mentor filter)
-// with their JEE Main 2027 form status, recorded in place. The Mentor and
-// Blended Learning Admins who aren't read-only record; read-only accounts
-// view. The status filter, Mentor filter and open row are URL params read
+// Blended Learning Admin, with a Mentor filter) with their JEE Main 2027 form
+// status, recorded in place. Only the Mentor (not read-only) records; Blended
+// Learning Admins and read-only accounts view, and may still reveal the
+// exam-portal password. The status filter, Mentor filter and open row are URL params read
 // by the client list (`status`, `mentor`, `student`).
 
 // The rows, or null when they can't be read (e.g. a database without the JEE

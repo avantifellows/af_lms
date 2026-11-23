@@ -46,8 +46,8 @@ import { SCREENER_QUESTIONS } from "./screenerQuestions";
 // that used the Screener says so, with the Student's one Screener Feedback
 // on the Conversation that gave it. A line under the Open Action Items shows
 // the JEE form status and links to the Student's row in the JEE Form tab,
-// where it is recorded; so does the "JEE Form Filling (Reminder)" item, which
-// is never ticked by hand.
+// where the Mentor records it (others only view it there); so does the "JEE
+// Form Filling (Reminder)" item, which is never ticked by hand.
 
 type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
 type ProfileDocHistoryEntry = Extract<HistoryEntry, { kind: "profile_doc" }>;
@@ -317,7 +317,15 @@ function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt
 }
 
 // Styled as the log page's Open Action Items panel.
-function OpenActionItems({ studentId, items }: { studentId: number; items: MenteeDetail["openActionItems"] }) {
+function OpenActionItems({
+  studentId,
+  items,
+  canRecordJee,
+}: {
+  studentId: number;
+  items: MenteeDetail["openActionItems"];
+  canRecordJee: boolean;
+}) {
   return (
     <section aria-label="Open Action Items">
       <Card elevation="sm" className="space-y-2 p-4">
@@ -329,7 +337,9 @@ function OpenActionItems({ studentId, items }: { studentId: number; items: Mente
               <span className="min-w-0 break-words">
                 {item.text}
                 <ActionItemMeta agreedOn={item.agreedOn} source={item.source} />
-                {item.jeeReminder && <JeeTabLink studentId={studentId}>Fill in JEE tab</JeeTabLink>}
+                {item.jeeReminder && (
+                  <JeeTabLink studentId={studentId}>{canRecordJee ? "Fill in JEE tab" : "View in JEE tab"}</JeeTabLink>
+                )}
               </span>
             </li>
           ))}
@@ -437,8 +447,10 @@ export default async function MenteeDetailPage({
     loadDashboardChrome(access),
     searchParams,
   ]);
-  // A supervised Mentor's Mentee is view only: no logging or draft changes.
+  // A supervised Mentor's Mentee is view only: no logging, draft changes or
+  // JEE form.
   const canLog = !mentee.viewOnly && canBlendedLearning(access, "log");
+  const canRecordJee = !mentee.viewOnly && canBlendedLearning(access, "record_jee_form");
   const jeeForm = await loadJeeForm(access, mentee.studentId);
   const back = backLink(access, mentee, backOrigin(query?.from));
 
@@ -464,12 +476,12 @@ export default async function MenteeDetailPage({
         />
       )}
       {mentee.openActionItems.length > 0 && (
-        <OpenActionItems studentId={mentee.studentId} items={mentee.openActionItems} />
+        <OpenActionItems studentId={mentee.studentId} items={mentee.openActionItems} canRecordJee={canRecordJee} />
       )}
       <JeeFormStatusLine
         studentId={mentee.studentId}
         form={jeeForm}
-        canRecord={!mentee.viewOnly && canBlendedLearning(access, "record_jee_form")}
+        canRecord={canRecordJee}
       />
       <History
         history={mentee.history}

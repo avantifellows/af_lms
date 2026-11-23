@@ -204,12 +204,12 @@ describe("JeeFormTab rows", () => {
     expect(listedNames()).toEqual(["Dev Placeholder"]);
   });
 
-  it("lets a read-only viewer open a row but not edit it", async () => {
+  it("lets a viewer (an admin or a read-only account) open a row but not edit it", async () => {
     render(<JeeFormTab rows={ROWS} canRecord={false} showMentor={false} />);
     await userEvent.click(within(rowOf("Biren Sample")).getByRole("button"));
     const biren = rowOf("Biren Sample");
     expect(within(biren).queryByRole("radio")).not.toBeInTheDocument();
-    expect(within(biren).queryByRole("button", { name: "Change status" })).not.toBeInTheDocument();
+    expect(within(biren).getByRole("button", { name: "Change status" })).toBeDisabled();
     expect(within(biren).getByText("Not uploaded")).toBeInTheDocument();
   });
 });

@@ -7,7 +7,8 @@ import { JeeStatusBadge, JeeStatusDetail, RecordedOn, jeeTabHref } from "../../j
 
 // The Mentee page's JEE form line: the current status (with the application
 // number or the Not filled reasons) and a link to this Student's row in the
-// JEE Form tab, where it is recorded.
+// JEE Form tab, where the Mentor records it ("View in JEE tab" for anyone
+// else: admins and read-only accounts only view it).
 
 // One per page, so a fixed id is enough (no hooks: a Server Component).
 const TITLE_ID = "jee-form-status-title";

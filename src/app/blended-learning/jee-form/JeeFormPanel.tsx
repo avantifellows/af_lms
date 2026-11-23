@@ -16,11 +16,13 @@ import { ConfirmationLink, JeeFormEditor } from "./JeeFormEditor";
 import { JeePasswordReveal } from "./JeePassword";
 import { RecordedOn, updateSummary } from "./jeeFormDisplay";
 
-// An open row of the JEE Form tab. A recorder (the Mentor, or a Blended
-// Learning Admin who isn't read-only) gets the Filled / Not filled form
-// straight away, prefilled from what is saved; after saving, what was saved
-// shows with "Change status". A read-only viewer sees what is saved. The
-// earlier updates are listed under either.
+// An open row of the JEE Form tab. A recorder (the Mentor, not read-only)
+// gets the Filled / Not filled form straight away, prefilled from what is
+// saved; after saving, what was saved shows with "Change status". Anyone else
+// (a Blended Learning Admin, or a read-only account) sees what is saved, view
+// only: the status button stays in place, disabled, while "Show password"
+// still works (each reveal is logged). The earlier updates are listed under
+// either.
 
 // One label/value row of a saved status.
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -175,9 +177,13 @@ function SavedView({
         </p>
       )}
       <SavedStatus studentId={studentId} form={form} />
-      {onChange && (
+      {onChange ? (
         <Button type="button" variant="secondary" size="md" onClick={onChange}>
           Change status
+        </Button>
+      ) : (
+        <Button type="button" variant="secondary" size="md" disabled title="View only">
+          {form.current ? "Change status" : "Record status"}
         </Button>
       )}
     </div>

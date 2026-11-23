@@ -23,6 +23,7 @@ const kms = mockClient(KMSClient);
 const MENTOR_A = "bl-mentor@example.org";
 const ADMIN = "bl-admin@example.org";
 const ADMIN_READ_ONLY = "bl-viewer@example.org";
+const LMS_ADMIN = "lms-admin@example.org";
 const MENTOR_READ_ONLY = "bl-mentor-read-only@example.org";
 const TEACHER = "teacher@example.org";
 
@@ -31,6 +32,7 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [MENTOR_READ_ONLY]: { role: "blended_mentor", read_only: true, user_id: 9003 },
   [ADMIN]: { role: "blended_admin", read_only: false, user_id: 11 },
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
+  [LMS_ADMIN]: { role: "admin", read_only: false, user_id: 13 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
 };
 // Active current-year Mappings: student → Mentor user id. Student 503 is unmapped.
@@ -273,13 +275,20 @@ describe("POST /api/blended-learning/students/[id]/jee-form: who may record", ()
     expect(txWrites).toEqual([]);
   });
 
-  it("lets a Blended Learning Admin record for any mapped Student, kept against the mapped Mentor", async () => {
-    signedInAs(ADMIN);
-    const res = await record("601", NOT_FILLED);
-
-    expect(res.status).toBe(201);
-    const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
-    expect(insert.params.slice(8)).toEqual([9002, 80, "2026-2027", ADMIN]);
+  it("refuses (403) Blended Learning Admins and LMS admins: only the Mentor records the form", async () => {
+    for (const email of [ADMIN, LMS_ADMIN]) {
+      signedInAs(email);
+      for (const id of ["501", "601"]) {
+        for (const fields of [FILLED, FILLED_KEEP, NOT_FILLED]) {
+          const res = await record(id, fields);
+          expect(res.status).toBe(403);
+          expect(res.body).toEqual({ error: "Forbidden" });
+        }
+      }
+    }
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(txWrites).toEqual([]);
+    expect(fetchCalls).toEqual([]);
   });
 });
 
@@ -449,15 +458,11 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     ]);
   });
 
-  it("lets a Blended Learning Admin set the password for any mapped Student", async () => {
-    signedInAs(ADMIN);
-    expect((await record("601", FILLED)).status).toBe(201);
-    expect(JSON.parse(fetchCalls[0].body!)).toMatchObject({ student_id: 601, application_password_ciphertext: CIPHERTEXT });
-  });
-
-  it("never encrypts for a read-only Mentor, another Mentor's Student or a JNV NVS-only Student", async () => {
-    signedInAs(MENTOR_READ_ONLY);
-    expect((await record("501", FILLED)).status).toBe(403);
+  it("never encrypts for an admin, a read-only Mentor, another Mentor's Student or a JNV NVS-only Student", async () => {
+    for (const email of [ADMIN, LMS_ADMIN, MENTOR_READ_ONLY]) {
+      signedInAs(email);
+      expect((await record("501", FILLED)).status).toBe(403);
+    }
     signedInAs(MENTOR_A);
     expect((await record("601", FILLED)).status).toBe(404);
 

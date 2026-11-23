@@ -285,20 +285,37 @@ describe("JeeFormPanel recording Not filled", () => {
   });
 });
 
-describe("JeeFormPanel for a read-only viewer", () => {
-  it("says Not recorded yet, with no controls", () => {
+describe("JeeFormPanel for a viewer (an admin or a read-only account)", () => {
+  it("says Not recorded yet, with no form and Record status disabled as View only", () => {
     panel(EMPTY, false);
     expect(screen.getByText("Not recorded yet.")).toBeInTheDocument();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    const record = screen.getByRole("button", { name: "Record status" });
+    expect(record).toBeDisabled();
+    expect(record).toHaveAttribute("title", "View only");
   });
 
-  it("shows Filled with the number, PDF link and Show password, without Change status", () => {
+  it("shows Filled with the number, PDF link and an enabled Show password; Change status is disabled as View only", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ password: "fake-revealed-4" }), { status: 200 }));
     panel(SAVED_FILLED, false);
     expect(screen.getByText("270310000001")).toHaveClass("font-mono");
-    expect(screen.getByRole("button", { name: "Show password" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View PDF" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Change status" })).not.toBeInTheDocument();
+    const change = screen.getByRole("button", { name: "Change status" });
+    expect(change).toBeDisabled();
+    expect(change).toHaveAttribute("title", "View only");
+    await userEvent.click(change);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replace password" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Exam portal password/)).not.toBeInTheDocument();
+
+    const show = screen.getByRole("button", { name: "Show password" });
+    expect(show).toBeEnabled();
+    await userEvent.click(show);
+    expect(await screen.findByText("fake-revealed-4")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/blended-learning/students/501/jee-form/password");
   });
 
   it("says Not saved for a Filled form without a password, with nothing to reveal", () => {

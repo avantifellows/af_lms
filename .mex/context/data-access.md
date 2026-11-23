@@ -849,8 +849,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   and `20261116090707_add_exam_password_ciphertext_and_reveals.sql` (db-service `20261116085521` +
   `20261116090707`: `application_password_ciphertext` and `lms_exam_password_reveals`).
 - **Write:** `POST /api/blended-learning/students/[id]/jee-form` (multipart) → `recordJeeForm` in
-  `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (the Mentor of the active
-  Mapping or a Blended Learning Admin; never read-only) + `canAccessBlendedStudent`. Filled:
+  `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (a Mentor mutation: only the
+  Mentor of the active Mapping, never read-only; Blended Learning Admins and LMS admins get 403 and
+  see the form view only, with "Change status" disabled as "View only" but "Show password"
+  working) + `canAccessBlendedStudent`. Filled:
   `planExamRecordWrite` picks the Student's JEE Mains 2027 `student_exam_record` (PATCH), else a
   yearless JEE Mains record holding the same number (PATCH + `exam_year`), else POST; a number
   held by any other record is a 409 (the DB Service's create upserts on student + number). The

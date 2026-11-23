@@ -649,7 +649,7 @@ describe("MenteeDetailPage", () => {
 
     it.each([
       ["a Mentor", MENTOR, "Fill in JEE tab"],
-      ["a Blended Learning Admin", BLENDED_ADMIN, "Fill in JEE tab"],
+      ["a Blended Learning Admin", BLENDED_ADMIN, "View in JEE tab"],
       ["a read-only Blended Learning Admin", READ_ONLY_ADMIN, "View in JEE tab"],
     ] as const)("shows %s Not recorded and links to the Student's row in the JEE Form tab", async (_who, access, link) => {
       signedInAs(access);
@@ -700,8 +700,11 @@ describe("MenteeDetailPage", () => {
       error.mockRestore();
     });
 
-    it("links the JEE Form Filling (Reminder) Open Action Item to the JEE Form tab", async () => {
-      signedInAs(MENTOR);
+    it.each([
+      ["a Mentor", MENTOR, "Fill in JEE tab"],
+      ["a Blended Learning Admin", BLENDED_ADMIN, "View in JEE tab"],
+    ] as const)("links the JEE Form Filling (Reminder) Open Action Item to the JEE Form tab for %s", async (_who, access, link) => {
+      signedInAs(access);
       mockGetMenteeDetail.mockResolvedValue({
         ...MENTEE,
         openActionItems: [
@@ -713,7 +716,7 @@ describe("MenteeDetailPage", () => {
       await renderPage();
 
       const [reminder, other] = within(screen.getByRole("region", { name: "Open Action Items" })).getAllByRole("listitem");
-      expect(within(reminder).getByRole("link", { name: "Fill in JEE tab" })).toHaveAttribute(
+      expect(within(reminder).getByRole("link", { name: link })).toHaveAttribute(
         "href",
         "/blended-learning/jee-form?student=501"
       );

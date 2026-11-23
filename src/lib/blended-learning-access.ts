@@ -44,7 +44,7 @@ export type BlendedLearningAccess = {
 // "view_only" for a supervised Mentor's Mentee.
 export type BlendedStudentScope = "full" | "view_only";
 
-const MUTATIONS: ReadonlySet<BlendedLearningAction> = new Set(["log", "upload", "manage_draft"]);
+const MUTATIONS: ReadonlySet<BlendedLearningAction> = new Set(["log", "upload", "manage_draft", "record_jee_form"]);
 const ADMIN_ONLY: ReadonlySet<BlendedLearningAction> = new Set(["play_recording", "view_mentors"]);
 
 // A Mentor's `user` id: user_permission.user_id, else the `user` row whose
@@ -113,20 +113,20 @@ export async function getBlendedLearningAccess(
 }
 
 // Only a Mentor who is not read-only mutates Mentee records (logs, uploads,
-// manages drafts), and only their own Mentees (canAccessBlendedStudent,
-// lockMappingInScope); a Blended Learning Admin views them. The Manage page
-// (Resources and Common Action Items) is the one thing an admin edits, and
-// only when not read-only; Mentors never. Recordings and every Mentor's cards
-// (view_mentors) are for Blended Learning Admins (including read-only ones); a
-// team lead gets only their own and their reportees' cards (isTeamLead,
-// listMentorCards). Everyone sees flags: an
+// manages drafts, records the JEE form), and only their own Mentees
+// (canAccessBlendedStudent, lockMappingInScope); a Blended Learning Admin views
+// them. The Manage page (Resources and Common Action Items) is the one thing an
+// admin edits, and only when not read-only; Mentors never. Recordings and every
+// Mentor's cards (view_mentors) are for Blended Learning Admins (including
+// read-only ones); a team lead gets only their own and their reportees' cards
+// (isTeamLead, listMentorCards). Everyone sees flags: an
 // admin every flag, a Mentor only those on their own Students
-// (blended-learning-flags). The JEE form is recorded by the Mentor or a
-// Blended Learning Admin, never by a read-only account (with it, the Mentee's
-// exam-portal password). Anyone with access may reveal that password, read-only
-// included, but only for a Student in their scope (canAccessBlendedStudent:
-// a Mentor's own Mentees, any mapped Student for an admin); each reveal is
-// logged (blended-learning-jee-password).
+// (blended-learning-flags). The JEE form, with the Mentee's exam-portal
+// password, is recorded only by their Mentor (a mutation above): a Blended
+// Learning Admin sees it but never fills it or sets the password. Anyone with
+// access may reveal that password, read-only included, but only for a Student
+// in their scope (canAccessBlendedStudent: a Mentor's own Mentees, any mapped
+// Student for an admin); each reveal is logged (blended-learning-jee-password).
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction
@@ -134,7 +134,6 @@ export function canBlendedLearning(
   if (!access) return false;
   if (MUTATIONS.has(action)) return access.kind === "mentor" && !access.readOnly;
   if (action === "manage") return access.kind === "admin" && !access.readOnly;
-  if (action === "record_jee_form") return !access.readOnly;
   if (ADMIN_ONLY.has(action)) return access.kind === "admin";
   return true;
 }

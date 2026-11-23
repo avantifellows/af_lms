@@ -33,6 +33,8 @@ const REASONS = "Why hasn't it been filled?";
 const PASSWORD_LABEL = "Exam portal password";
 const MENTOR_PASSWORD = "e2e-portal-pass-1";
 const PHONE_PASSWORD = "e2e-portal-pass-2";
+// What an admin tries to save, refused: it must reach neither KMS nor the DB Service.
+const ADMIN_PASSWORD = "e2e-admin-pass-9";
 
 const studentIds: Record<string, number> = {};
 
@@ -449,14 +451,64 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(rowToggle(page, mentee)).toHaveAttribute("aria-expanded", "true");
     await expect(open.getByText("E2E-JEE-0001").first()).toBeVisible();
     await expect(open.getByRole("radio")).toHaveCount(0);
-    await expect(open.getByRole("button", { name: "Change status" })).toHaveCount(0);
+    await expect(open.getByRole("button", { name: "Change status" })).toBeDisabled();
+    await expect(open.getByRole("button", { name: "Change status" })).toHaveAttribute("title", "View only");
     const res = await page.request.post(jeeFormUrl(mentee), { multipart: { status: "not_filled", reasons: "not_aware" } });
     expect(res.status()).toBe(403);
     // Showing the password is a view: a read-only admin may, and it is logged.
+    await page.waitForLoadState("networkidle");
     await open.getByRole("button", { name: "Show password" }).click();
     await expect(open.getByText(MENTOR_PASSWORD)).toBeVisible();
     expect((await reveals(studentIds[mentee.key])).at(-1)).toEqual({
       viewer_email: BLENDED_ADMIN_READ_ONLY.email,
+      viewer_role: "blended_admin",
+      on_jee_record: true,
+    });
+
+    await page.goto(detailPath(mentee));
+    await expect(statusLine(page).getByRole("link", { name: "View in JEE tab" })).toHaveAttribute("href", tabFor(mentee));
+  });
+
+  test("a Blended Learning Admin sees the form view only, can't save it or replace the password, but reveals it, logged", async ({ page }) => {
+    await fetch(`${STUB}/__requests`, { method: "DELETE" });
+    const studentId = studentIds[mentee.key];
+    const before = await updates(studentId);
+    await signInAs(page, BLENDED_ADMIN);
+    await page.goto(tabFor(mentee));
+    const open = row(page, mentee);
+    await expect(rowToggle(page, mentee)).toHaveAttribute("aria-expanded", "true");
+    await expect(open.getByText("E2E-JEE-0001").first()).toBeVisible();
+    // No form, no password field and no Replace: the status button stays, disabled.
+    await expect(open.getByRole("group", { name: STATUS_QUESTION })).toHaveCount(0);
+    await expect(open.getByRole("radio")).toHaveCount(0);
+    await expect(open.getByLabel(PASSWORD_LABEL)).toHaveCount(0);
+    await expect(open.getByRole("button", { name: "Replace password" })).toHaveCount(0);
+    const change = open.getByRole("button", { name: "Change status" });
+    await expect(change).toBeDisabled();
+    await expect(change).toHaveAttribute("title", "View only");
+
+    // The server refuses an admin's save too, with or without a new password.
+    for (const multipart of [
+      { status: "filled", applicationNumber: "E2E-JEE-0009", password: ADMIN_PASSWORD },
+      { status: "filled", applicationNumber: "E2E-JEE-0001" },
+      { status: "not_filled", reasons: "not_aware" },
+    ]) {
+      const res = await page.request.post(jeeFormUrl(mentee), { multipart });
+      expect(res.status()).toBe(403);
+    }
+    expect(await updates(studentId)).toEqual(before);
+    expect(await stubRequests()).toEqual([]);
+    expect(await kmsCalls()).toEqual([]);
+    expect(await jeeRecords(studentId)).toEqual([
+      expect.objectContaining({ application_number: "E2E-JEE-0001", ciphertext_saved: true }),
+    ]);
+
+    // Show password still works for an admin, and the reveal is logged.
+    await page.waitForLoadState("networkidle");
+    await open.getByRole("button", { name: "Show password" }).click();
+    await expect(open.getByText(MENTOR_PASSWORD)).toBeVisible();
+    expect((await reveals(studentId)).at(-1)).toEqual({
+      viewer_email: BLENDED_ADMIN.email,
       viewer_role: "blended_admin",
       on_jee_record: true,
     });
@@ -549,7 +601,7 @@ test.describe("Blended Learning JEE Form tab — Blended Learning Admin", () => 
   test.describe.configure({ mode: "serial" });
   const mentee = JEE_FORM_MENTEES.admin;
 
-  test("sees every Mentor's Students, filters by Mentor, and records kept against the mapped Mentor", async ({ page }) => {
+  test("sees every Mentor's Students and filters by Mentor, but can't record: only the Mentor does", async ({ page }) => {
     await signInAs(page, BLENDED_ADMIN);
     await page.goto(TAB);
     const everyone = await expectCounts(page, null);
@@ -564,6 +616,20 @@ test.describe("Blended Learning JEE Form tab — Blended Learning Admin", () => 
     await expect(page.getByRole("list", { name: "Students" }).locator(":scope > li")).toHaveCount(mentorC);
 
     await rowToggle(page, mentee).click();
+    const adminRow = row(page, mentee);
+    await expect(adminRow.getByText("Not recorded yet.")).toBeVisible();
+    await expect(adminRow.getByRole("radio")).toHaveCount(0);
+    await expect(adminRow.getByRole("button", { name: "Record status" })).toBeDisabled();
+    await expect(adminRow.getByRole("button", { name: "Record status" })).toHaveAttribute("title", "View only");
+    const refused = await page.request.post(jeeFormUrl(mentee), {
+      multipart: { status: "not_filled", reasons: "phase_two" },
+    });
+    expect(refused.status()).toBe(403);
+    expect(await updates(studentIds[mentee.key])).toEqual([]);
+
+    // The Mentee's Mentor records it, kept against the mapped Mentor.
+    await signInAs(page, BLENDED_MENTOR_C);
+    await page.goto(tabFor(mentee));
     const open = row(page, mentee);
     await open.getByRole("radio", { name: "Not filled", exact: true }).check();
     await open.getByRole("group", { name: REASONS }).getByRole("checkbox", { name: "Will attempt Phase -2 test" }).check();
@@ -577,7 +643,7 @@ test.describe("Blended Learning JEE Form tab — Blended Learning Admin", () => 
         reasons: ["phase_two"],
         details: null,
         mentor_email: BLENDED_MENTOR_C.email,
-        recorded_by_email: BLENDED_ADMIN.email,
+        recorded_by_email: BLENDED_MENTOR_C.email,
       }),
     ]);
   });
@@ -616,6 +682,6 @@ test("no request the tab made to the DB Service carried the plaintext column or 
   for (const request of await allStubRequests()) {
     const body = JSON.stringify(request.body ?? {});
     expect(body).not.toMatch(/"application_password"/);
-    for (const secret of [MENTOR_PASSWORD, PHONE_PASSWORD]) expect(body).not.toContain(secret);
+    for (const secret of [MENTOR_PASSWORD, PHONE_PASSWORD, ADMIN_PASSWORD]) expect(body).not.toContain(secret);
   }
 });

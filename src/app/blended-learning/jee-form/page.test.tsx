@@ -79,16 +79,16 @@ describe("JeeFormPage", () => {
   });
 
   it.each([
-    ["an admin", ADMIN, true],
-    ["a read-only admin", READ_ONLY_ADMIN, false],
-  ] as const)("gives %s every Mentor's Students with the Mentor filter, recording only when not read-only", async (_who, access, canRecord) => {
+    ["an admin", ADMIN],
+    ["a read-only admin", READ_ONLY_ADMIN],
+  ] as const)("gives %s every Mentor's Students with the Mentor filter, view only", async (_who, access) => {
     signedInAs(access);
 
     render(await JeeFormPage());
 
     const tabs = screen.getByRole("navigation", { name: "Admin views" });
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("aria-current", "page");
-    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord, showMentor: true });
+    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: false, showMentor: true });
   });
 
   it("says the form can't be shown when the rows can't be read, without logging what failed", async () => {

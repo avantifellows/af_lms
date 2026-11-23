@@ -6,8 +6,9 @@ import { recordJeeForm, type ConfirmationFile } from "@/lib/blended-learning-jee
 // multipart `status` (filled | not_filled), `applicationNumber`, the
 // exam-portal `password` (required while none is saved; blank keeps the saved
 // one) and an optional `confirmation` PDF when filled, or one `reasons` entry
-// per reason and optional `details` when not. The Mentor of an active Mapping
-// or a Blended Learning Admin records it; read-only accounts get 403. The
+// per reason and optional `details` when not. Only the Mentor of an active
+// Mapping records it; Blended Learning Admins and read-only accounts get 403
+// (they may still reveal the password, through ./password). The
 // password is stored only as KMS ciphertext, and the response carries only
 // whether one is saved (`passwordSaved`), never the password.
 export const POST = withBlendedLearning("record_jee_form", async (request, { access, id }) => {
