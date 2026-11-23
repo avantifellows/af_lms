@@ -75,20 +75,20 @@ describe("JeeFormPage", () => {
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("aria-current", "page");
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("href", "/blended-learning/jee-form");
     expect(mockListJeeFormRows).toHaveBeenCalledWith(MENTOR);
-    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, showMentor: false });
+    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, canReveal: true, showMentor: false });
   });
 
   it.each([
-    ["an admin", ADMIN],
-    ["a read-only admin", READ_ONLY_ADMIN],
-  ] as const)("gives %s every Mentor's Students with the Mentor filter, view only", async (_who, access) => {
+    ["an admin", ADMIN, true],
+    ["a read-only admin", READ_ONLY_ADMIN, false],
+  ] as const)("gives %s every Mentor's Students with the Mentor filter, view only (reveal: %s)", async (_who, access, canReveal) => {
     signedInAs(access);
 
     render(await JeeFormPage());
 
     const tabs = screen.getByRole("navigation", { name: "Admin views" });
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("aria-current", "page");
-    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: false, showMentor: true });
+    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: false, canReveal, showMentor: true });
   });
 
   it("says the form can't be shown when the rows can't be read, without logging what failed", async () => {

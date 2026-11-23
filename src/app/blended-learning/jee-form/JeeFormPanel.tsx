@@ -20,9 +20,9 @@ import { RecordedOn, updateSummary } from "./jeeFormDisplay";
 // gets the Filled / Not filled form straight away, prefilled from what is
 // saved; after saving, what was saved shows with "Change status". Anyone else
 // (a Blended Learning Admin, or a read-only account) sees what is saved, view
-// only: the status button stays in place, disabled, while "Show password"
-// still works (each reveal is logged). The earlier updates are listed under
-// either.
+// only: the status button stays in place, disabled. "Show password" works for
+// anyone not read-only (each reveal is logged); for a read-only account it is
+// disabled as View only. The earlier updates are listed under either.
 
 // One label/value row of a saved status.
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -61,10 +61,12 @@ function SavedFilled({
   studentId,
   update,
   passwordSaved,
+  canReveal,
 }: {
   studentId: number;
   update: JeeFormUpdate;
   passwordSaved: boolean;
+  canReveal: boolean;
 }) {
   return (
     <>
@@ -75,7 +77,7 @@ function SavedFilled({
         {passwordSaved ? (
           <span className="inline-flex flex-wrap items-center gap-x-3">
             <span>Saved</span>
-            <JeePasswordReveal studentId={studentId} />
+            <JeePasswordReveal studentId={studentId} canReveal={canReveal} />
           </span>
         ) : (
           <span className="text-text-secondary">Not saved</span>
@@ -113,14 +115,14 @@ function SavedNotFilled({ update }: { update: JeeFormUpdate }) {
   );
 }
 
-function SavedStatus({ studentId, form }: { studentId: number; form: JeeFormView }) {
+function SavedStatus({ studentId, form, canReveal }: { studentId: number; form: JeeFormView; canReveal: boolean }) {
   const { current } = form;
   if (!current) return <p className="text-sm text-text-secondary">Not recorded yet.</p>;
   return (
     <div className="space-y-3">
       <dl className="space-y-3">
         {current.status === "filled" ? (
-          <SavedFilled studentId={studentId} update={current} passwordSaved={form.passwordSaved} />
+          <SavedFilled studentId={studentId} update={current} passwordSaved={form.passwordSaved} canReveal={canReveal} />
         ) : (
           <SavedNotFilled update={current} />
         )}
@@ -161,11 +163,13 @@ function SavedView({
   studentId,
   form,
   saved,
+  canReveal,
   onChange,
 }: {
   studentId: number;
   form: JeeFormView;
   saved: boolean;
+  canReveal: boolean;
   onChange: (() => void) | null;
 }) {
   return (
@@ -176,7 +180,7 @@ function SavedView({
           Saved
         </p>
       )}
-      <SavedStatus studentId={studentId} form={form} />
+      <SavedStatus studentId={studentId} form={form} canReveal={canReveal} />
       {onChange ? (
         <Button type="button" variant="secondary" size="md" onClick={onChange}>
           Change status
@@ -194,12 +198,14 @@ export function JeeFormPanel({
   studentId,
   form,
   canRecord,
+  canReveal,
   onSaved,
   onClose,
 }: {
   studentId: number;
   form: JeeFormView;
   canRecord: boolean;
+  canReveal: boolean;
   onSaved: (form: JeeFormView) => void;
   onClose: () => void;
 }) {
@@ -228,6 +234,7 @@ export function JeeFormPanel({
           studentId={studentId}
           form={form}
           saved={saved}
+          canReveal={canReveal}
           onChange={canRecord ? () => setEditing(true) : null}
         />
       )}

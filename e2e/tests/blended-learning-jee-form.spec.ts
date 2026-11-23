@@ -444,7 +444,10 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     expect(await jeeRecords(studentIds[mentee.key])).toEqual([expect.objectContaining({ ciphertext_saved: true })]);
   });
 
-  test("a read-only admin sees the tab and opens a row, but can't record", async ({ page }) => {
+  test("a read-only admin sees the tab and opens a row, but can't record or reveal the password", async ({ page }) => {
+    await fetch(`${STUB}/__requests`, { method: "DELETE" });
+    const studentId = studentIds[mentee.key];
+    const logged = (await reveals(studentId)).length;
     await signInAs(page, BLENDED_ADMIN_READ_ONLY);
     await page.goto(tabFor(mentee));
     const open = row(page, mentee);
@@ -455,15 +458,19 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(open.getByRole("button", { name: "Change status" })).toHaveAttribute("title", "View only");
     const res = await page.request.post(jeeFormUrl(mentee), { multipart: { status: "not_filled", reasons: "not_aware" } });
     expect(res.status()).toBe(403);
-    // Showing the password is a view: a read-only admin may, and it is logged.
-    await page.waitForLoadState("networkidle");
-    await open.getByRole("button", { name: "Show password" }).click();
-    await expect(open.getByText(MENTOR_PASSWORD)).toBeVisible();
-    expect((await reveals(studentIds[mentee.key])).at(-1)).toEqual({
-      viewer_email: BLENDED_ADMIN_READ_ONLY.email,
-      viewer_role: "blended_admin",
-      on_jee_record: true,
-    });
+    // Revealing needs edit rights: the read-only admin sees the password is
+    // saved, with Show password disabled as View only...
+    await expect(open.getByText("Saved", { exact: true })).toBeVisible();
+    const show = open.getByRole("button", { name: "Show password" });
+    await expect(show).toBeDisabled();
+    await expect(show).toHaveAttribute("title", "View only");
+    // ...and the server refuses the reveal: nothing decrypted, nothing logged.
+    const reveal = await page.request.post(passwordUrl(mentee));
+    expect(reveal.status()).toBe(403);
+    expect(await reveal.text()).not.toContain(MENTOR_PASSWORD);
+    expect(await kmsCalls()).toEqual([]);
+    expect((await reveals(studentId)).length).toBe(logged);
+    expect((await reveals(studentId)).map((logRow) => logRow.viewer_email)).not.toContain(BLENDED_ADMIN_READ_ONLY.email);
 
     await page.goto(detailPath(mentee));
     await expect(statusLine(page).getByRole("link", { name: "View in JEE tab" })).toHaveAttribute("href", tabFor(mentee));

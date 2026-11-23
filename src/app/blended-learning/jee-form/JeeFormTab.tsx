@@ -150,6 +150,7 @@ function StudentRow({
   row,
   open,
   canRecord,
+  canReveal,
   showMentor,
   onToggle,
   onSaved,
@@ -157,6 +158,7 @@ function StudentRow({
   row: JeeFormRow;
   open: boolean;
   canRecord: boolean;
+  canReveal: boolean;
   showMentor: boolean;
   onToggle: () => void;
   onSaved: (form: JeeFormView) => void;
@@ -186,6 +188,7 @@ function StudentRow({
             studentId={row.studentId}
             form={row.form}
             canRecord={canRecord}
+            canReveal={canReveal}
             onSaved={onSaved}
             onClose={onToggle}
           />
@@ -217,10 +220,13 @@ function useScrollToLinkedRow(studentId: number | null) {
 export function JeeFormTab({
   rows: initialRows,
   canRecord,
+  canReveal,
   showMentor,
 }: {
   rows: JeeFormRow[];
   canRecord: boolean;
+  // Show password: anyone not read-only (reveal_exam_password).
+  canReveal: boolean;
   // Admins: every Mentor's Students, with a Mentor filter and name per row.
   showMentor: boolean;
 }) {
@@ -283,6 +289,7 @@ export function JeeFormTab({
               row={row}
               open={row.studentId === openStudent}
               canRecord={canRecord}
+              canReveal={canReveal}
               showMentor={showMentor}
               onToggle={() =>
                 writeParams(pathname, { student: row.studentId === openStudent ? null : String(row.studentId) }, "replace")

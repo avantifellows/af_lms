@@ -11,12 +11,14 @@ import { recordExamPasswordReveal } from "./student-exam-records";
 // logged to `lms_exam_password_reveals` (viewer email and role) before the
 // password is returned. A reveal that can't be logged isn't made.
 //
-// Who: anyone the Student is in Blended Learning scope for —
+// Who: an account that is not read-only (the route's reveal_exam_password
+// check, canBlendedLearning) and has the Student in Blended Learning scope —
 // canAccessBlendedStudent, i.e. a Mentor (team leads included) only for their
 // own Mentees with an active current-year Mapping, a Blended Learning Admin or
-// LMS admin for any Student with one. Read-only accounts may reveal (it's a
-// view). The Exams tab's gate (`exam-records-gate`) can't be reused: it is
-// school-scoped and gives Blended Learning roles no access.
+// LMS admin for any Student with one. Read-only accounts never reveal, as on
+// the Exams tab, where a reveal needs edit rights. That gate
+// (`exam-records-gate`) can't be reused: it is school-scoped and gives Blended
+// Learning roles no access.
 //
 // Only the ciphertext of the Student's JEE Mains 2027 record is read. The
 // legacy plaintext `application_password` column is never read here: a record

@@ -162,7 +162,9 @@ page and API denies them (`getUserPermission` returns `null` for them).
   (`manage`: Resources and Common Action Items) is for Blended Learning Admins
   who are not read-only; Mentors and read-only admins get no tab and 403.
   Playing Call Recordings and reading transcripts and the Mentors tab are for
-  Blended Learning Admins only (read-only ones included). The Flags feed shows an
+  Blended Learning Admins only (read-only ones included). Revealing the JEE form's
+  exam-portal password (`reveal_exam_password`) needs an account that is not
+  read-only. The Flags feed shows an
   admin every flag and a Mentor only the flags on their own Students. A Student is
   in scope only with an active current-year Mapping (for a Mentor, to them):
   one whose period (`started_at` up to, not including, `ended_at`) contains
@@ -206,10 +208,13 @@ role is `none`.
 
 Blended Learning roles don't use `exam_passwords`. On the Blended Learning JEE form, only the
 Mentor (not read-only) records the form and sets the password; Blended Learning Admins (and LMS
-`admin`s) see the form view only and can't fill it or set, replace or clear the password. Anyone
-with Blended Learning access may reveal the password for a Student in their scope: a Mentor
-(team leads included) only for their own active Mentees, a `blended_admin` or LMS `admin` for
-any Student with an active Mapping. Those reveals are logged to `lms_exam_password_reveals` too.
+`admin`s) see the form view only and can't fill it or set, replace or clear the password.
+Revealing the password needs edit rights, as on the Exams tab: an account that is not read-only
+may reveal it for a Student in their scope, a Mentor (team leads included) only for their own
+active Mentees, a `blended_admin` or LMS `admin` for any Student with an active Mapping.
+Read-only accounts, Mentor or admin, can't reveal it (403, nothing decrypted or logged; "Show
+password" is disabled as "View only"). Those reveals are logged to `lms_exam_password_reveals`
+too.
 
 ### NVS-Only Users
 

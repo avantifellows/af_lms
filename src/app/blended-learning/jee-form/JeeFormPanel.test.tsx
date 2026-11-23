@@ -48,8 +48,12 @@ function sentForm(): FormData {
   return init.body as FormData;
 }
 
-function panel(form: JeeFormView, canRecord = true) {
-  return render(<JeeFormPanel studentId={501} form={form} canRecord={canRecord} onSaved={onSaved} onClose={onClose} />);
+// A recorder (canRecord) is a Mentor who is not read-only, so may reveal; a
+// viewer may reveal unless read-only.
+function panel(form: JeeFormView, canRecord = true, canReveal = true) {
+  return render(
+    <JeeFormPanel studentId={501} form={form} canRecord={canRecord} canReveal={canReveal} onSaved={onSaved} onClose={onClose} />
+  );
 }
 
 beforeEach(() => {
@@ -140,7 +144,7 @@ describe("JeeFormPanel for a recorder", () => {
     expect(onSaved).toHaveBeenCalledWith(SAVED_FILLED);
 
     // The tab passes the saved form back down.
-    rerender(<JeeFormPanel studentId={501} form={SAVED_FILLED} canRecord onSaved={onSaved} onClose={onClose} />);
+    rerender(<JeeFormPanel studentId={501} form={SAVED_FILLED} canRecord canReveal onSaved={onSaved} onClose={onClose} />);
     expect(screen.getByRole("status")).toHaveTextContent("Saved");
     expect(screen.getByText("270310000001")).toHaveClass("font-mono");
     expect(screen.getByText("JEE Form Filling (Reminder)")).toHaveClass("line-through");
@@ -297,7 +301,7 @@ describe("JeeFormPanel for a viewer (an admin or a read-only account)", () => {
     expect(record).toHaveAttribute("title", "View only");
   });
 
-  it("shows Filled with the number, PDF link and an enabled Show password; Change status is disabled as View only", async () => {
+  it("shows an admin Filled with the number, PDF link and an enabled Show password; Change status is disabled as View only", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ password: "fake-revealed-4" }), { status: 200 }));
     panel(SAVED_FILLED, false);
     expect(screen.getByText("270310000001")).toHaveClass("font-mono");
@@ -316,6 +320,16 @@ describe("JeeFormPanel for a viewer (an admin or a read-only account)", () => {
     expect(await screen.findByText("fake-revealed-4")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("/api/blended-learning/students/501/jee-form/password");
+  });
+
+  it("gives a read-only account Show password disabled as View only, still saying the password is saved", async () => {
+    panel(SAVED_FILLED, false, false);
+    expect(screen.getByText("Saved", { selector: "span" })).toBeInTheDocument();
+    const show = screen.getByRole("button", { name: "Show password" });
+    expect(show).toBeDisabled();
+    expect(show).toHaveAttribute("title", "View only");
+    await userEvent.click(show);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("says Not saved for a Filled form without a password, with nothing to reveal", () => {

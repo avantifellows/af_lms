@@ -134,21 +134,28 @@ describe("POST /api/blended-learning/students/[id]/jee-form/password: who may re
     expectNothingRevealed();
   });
 
-  it("lets a read-only Mentor reveal for their own Mentee (a view), but not another Mentor's", async () => {
-    signedInAs(MENTOR_READ_ONLY);
-    expect((await reveal("501")).status).toBe(200);
-    expect((await reveal("601")).status).toBe(403);
-    expect(reveals).toEqual([[501, 77, 1, MENTOR_READ_ONLY, "blended_mentor"]]);
+  it("refuses (403) read-only accounts, Mentor or admin, even in scope: nothing decrypted or logged", async () => {
+    for (const [email, id] of [
+      [MENTOR_READ_ONLY, "501"],
+      [ADMIN_READ_ONLY, "601"],
+    ] as const) {
+      signedInAs(email);
+      const res = await reveal(id);
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ error: "Forbidden" });
+      expect(res.text).not.toContain(PASSWORD);
+    }
+    expectNothingRevealed();
+    expect(sql.some((text) => text.includes("FROM student_exam_record"))).toBe(false);
   });
 
-  it("lets Blended Learning Admins (read-only included) and LMS admins reveal for any mapped Student, each logged with their role", async () => {
-    for (const email of [ADMIN, ADMIN_READ_ONLY, LMS_ADMIN]) {
+  it("lets Blended Learning Admins and LMS admins (not read-only) reveal for any mapped Student, each logged with their role", async () => {
+    for (const email of [ADMIN, LMS_ADMIN]) {
       signedInAs(email);
       expect((await reveal("601")).status).toBe(200);
     }
     expect(reveals).toEqual([
       [601, 77, 1, ADMIN, "blended_admin"],
-      [601, 77, 1, ADMIN_READ_ONLY, "blended_admin"],
       [601, 77, 1, LMS_ADMIN, "admin"],
     ]);
 

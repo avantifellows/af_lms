@@ -16,7 +16,8 @@ import { FieldError, LABEL_CLASSES, Optional } from "../students/[id]/log/formPa
 //   once one is, it shows "Saved" with Show password and Replace password.
 // - JeePasswordReveal: "Show password". Each Show asks the server, which logs
 //   the reveal before answering (and refuses one it can't log). Hide forgets
-//   it again.
+//   it again. A read-only account can't reveal (the server refuses it too):
+//   the button stays in place, disabled as View only.
 
 type RevealState = { kind: "hidden" } | { kind: "loading" } | { kind: "shown"; password: string } | { kind: "error"; message: string };
 
@@ -34,8 +35,17 @@ async function fetchPassword(studentId: number): Promise<RevealState> {
   }
 }
 
-export function JeePasswordReveal({ studentId }: { studentId: number }) {
+export function JeePasswordReveal({ studentId, canReveal }: { studentId: number; canReveal: boolean }) {
   const [state, setState] = useState<RevealState>({ kind: "hidden" });
+
+  if (!canReveal) {
+    return (
+      <Button type="button" variant="ghost" size="sm" disabled title="View only">
+        <Eye aria-hidden="true" className="h-4 w-4" />
+        Show password
+      </Button>
+    );
+  }
 
   async function show() {
     setState({ kind: "loading" });
@@ -85,7 +95,8 @@ function SavedPassword({ studentId, onReplace }: Pick<FieldProps, "studentId" | 
         <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
         Password saved
       </span>
-      <JeePasswordReveal studentId={studentId} />
+      {/* Only a recorder (a Mentor, not read-only) edits, and may reveal. */}
+      <JeePasswordReveal studentId={studentId} canReveal />
       <Button type="button" variant="ghost" size="sm" onClick={() => onReplace(true)}>
         Replace password
       </Button>

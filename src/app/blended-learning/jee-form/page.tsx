@@ -52,6 +52,7 @@ export default async function JeeFormPage() {
           <JeeFormTab
             rows={rows}
             canRecord={canBlendedLearning(access, "record_jee_form")}
+            canReveal={canBlendedLearning(access, "reveal_exam_password")}
             showMentor={access.kind === "admin"}
           />
         ) : (

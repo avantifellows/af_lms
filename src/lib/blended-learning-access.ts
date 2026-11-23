@@ -123,10 +123,12 @@ export async function getBlendedLearningAccess(
 // admin every flag, a Mentor only those on their own Students
 // (blended-learning-flags). The JEE form, with the Mentee's exam-portal
 // password, is recorded only by their Mentor (a mutation above): a Blended
-// Learning Admin sees it but never fills it or sets the password. Anyone with
-// access may reveal that password, read-only included, but only for a Student
-// in their scope (canAccessBlendedStudent: a Mentor's own Mentees, any mapped
-// Student for an admin); each reveal is logged (blended-learning-jee-password).
+// Learning Admin sees it but never fills it or sets the password. Revealing
+// that password needs edit rights, as on the Exams tab (exam-records-gate): a
+// Mentor or admin who is not read-only may, and only for a Student in their
+// scope (canAccessBlendedStudent: a Mentor's own Mentees, any mapped Student
+// for an admin); each reveal is logged (blended-learning-jee-password).
+// Read-only accounts, Mentor or admin, never reveal it.
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction
@@ -134,6 +136,7 @@ export function canBlendedLearning(
   if (!access) return false;
   if (MUTATIONS.has(action)) return access.kind === "mentor" && !access.readOnly;
   if (action === "manage") return access.kind === "admin" && !access.readOnly;
+  if (action === "reveal_exam_password") return !access.readOnly;
   if (ADMIN_ONLY.has(action)) return access.kind === "admin";
   return true;
 }

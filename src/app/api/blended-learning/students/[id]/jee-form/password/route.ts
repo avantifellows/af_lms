@@ -5,8 +5,9 @@ import { revealJeeFormPassword } from "@/lib/blended-learning-jee-password";
 // Reveal the Mentee's JEE Main 2027 exam-portal password, logged per reveal
 // (blended-learning-jee-password). POST, not GET: it writes the log, and it
 // must never be cached or prefetched. 401 signed out, 403 without Blended
-// Learning access or out of scope (another Mentor's Mentee, no active
-// Mapping), 404 with no password saved, 500 when KMS or the log fails.
+// Learning access, for a read-only account (Mentor or admin), or out of scope
+// (another Mentor's Mentee, no active Mapping), 404 with no password saved,
+// 500 when KMS or the log fails. A refused reveal decrypts and logs nothing.
 
 const NO_STORE = { "Cache-Control": "no-store" };
 

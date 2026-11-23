@@ -852,7 +852,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (a Mentor mutation: only the
   Mentor of the active Mapping, never read-only; Blended Learning Admins and LMS admins get 403 and
   see the form view only, with "Change status" disabled as "View only" but "Show password"
-  working) + `canAccessBlendedStudent`. Filled:
+  working unless read-only) + `canAccessBlendedStudent`. Filled:
   `planExamRecordWrite` picks the Student's JEE Mains 2027 `student_exam_record` (PATCH), else a
   yearless JEE Mains record holding the same number (PATCH + `exam_year`), else POST; a number
   held by any other record is a 409 (the DB Service's create upserts on student + number). The
@@ -873,10 +873,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   from Postgres (`confirmCiphertextStored`) because an old DB Service drops the unknown key with a
   2xx. A KMS failure is a 502 before any write. Page data carries only `JeeFormView.passwordSaved`
   (ciphertext IS NOT NULL on the 2027 record), never the password or the ciphertext.
-- **Reveal:** `POST /api/blended-learning/students/[id]/jee-form/password` (`reveal_exam_password`,
-  `Cache-Control: no-store`) → `revealJeeFormPassword` in `src/lib/blended-learning-jee-password.ts`:
-  `canAccessBlendedStudent` (403 otherwise: a Mentor, team leads included, only their own Mentees;
-  admins any mapped Student; read-only accounts too), not JNV NVS-only (403), the 2027 record's
+- **Reveal:** `POST /api/blended-learning/students/[id]/jee-form/password` (`reveal_exam_password`:
+  not read-only, Mentor or admin, as the Exams tab needs edit rights; a read-only account gets 403
+  before anything is decrypted or logged, and `JeePasswordReveal` renders "Show password" disabled
+  as "View only" from the tab's `canReveal`; `Cache-Control: no-store`) → `revealJeeFormPassword` in
+  `src/lib/blended-learning-jee-password.ts`: `canAccessBlendedStudent` (403 otherwise: a Mentor,
+  team leads included, only their own Mentees; admins any mapped Student), not JNV NVS-only (403), the 2027 record's
   ciphertext (404 without one), `decryptExamPassword`, then Aman's `recordExamPasswordReveal` (viewer
   email + BL role) before the password is returned; a failed log is a 500 and no reveal. The Exams
   tab's `exam-records-gate` can't be used here (it denies Blended roles). UI: `jee-form/JeePassword.tsx`.
