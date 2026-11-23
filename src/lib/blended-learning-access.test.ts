@@ -3,14 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./db", () => ({ query: vi.fn() }));
 
 import { query } from "./db";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
+import type { PoolClient } from "pg";
 import {
   activeBlendedMappingSql,
+  blendedStudentScope,
   canAccessBlendedStudent,
   canBlendedLearning,
+  canViewBlendedStudent,
   currentBlendedMappingRowSql,
   getBlendedLearningAccess,
   lockMappingInScope,
   notBlendedDropoutSql,
+  supervisedMentor,
+  viewableMentorUserIds,
   type BlendedLearningAccess,
   type BlendedLearningAction,
 } from "./blended-learning-access";
@@ -28,9 +34,34 @@ type Row = {
   user_id: number | null;
 };
 
-// Fixture tables: one live user_permission row and the `user` table.
-function givenTables(permission: Row | null, users: { id: number; email: string }[] = []) {
+type Supervision = {
+  supervisor_user_id: number;
+  mentor_user_id: number;
+  academic_year: string;
+  ended_at?: string | null;
+};
+
+// Fixture tables: one live user_permission row, the `user` table, the
+// Supervisions (running unless `ended_at` is set) and the `user` ids that
+// hold a live blended_mentor permission (by default every supervised Mentor).
+// The Supervisions read applies the statement's own predicates: the year and
+// running filter, and the live-permission check when the SQL has it.
+function givenTables(
+  permission: Row | null,
+  users: { id: number; email: string }[] = [],
+  supervisions: Supervision[] = [],
+  liveMentorUserIds: number[] = supervisions.map((row) => row.mentor_user_id)
+) {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      const runningOnly = sql.includes("supervision.ended_at IS NULL");
+      const liveOnly = sql.includes("FROM user_permission live_permission") && params?.[2] === "blended_mentor";
+      return supervisions
+        .filter((row) => row.supervisor_user_id === params?.[0] && row.academic_year === params?.[1])
+        .filter((row) => !runningOnly || row.ended_at == null)
+        .filter((row) => !liveOnly || liveMentorUserIds.includes(row.mentor_user_id))
+        .map((row) => ({ mentor_user_id: String(row.mentor_user_id) }));
+    }
     if (sql.includes("FROM user_permission")) return permission ? [{
       school_codes: null,
       regions: null,
@@ -59,7 +90,73 @@ describe("getBlendedLearningAccess", () => {
       readOnly: false,
       actorEmail: "faizan@avantifellows.org",
       mentorUserId: 9001,
+      supervisedMentorUserIds: [],
     });
+  });
+
+  it("gives a supervisor the Mentors of their active current-year Supervisions only", async () => {
+    givenTables(
+      { email: "lead@test.local", level: 1, role: "blended_mentor", read_only: false, user_id: 9001 },
+      [],
+      [
+        { supervisor_user_id: 9001, mentor_user_id: 9004, academic_year: CURRENT_ACADEMIC_YEAR },
+        { supervisor_user_id: 9001, mentor_user_id: 9002, academic_year: CURRENT_ACADEMIC_YEAR },
+        { supervisor_user_id: 9001, mentor_user_id: 9003, academic_year: "2025-2026" },
+        { supervisor_user_id: 9005, mentor_user_id: 9006, academic_year: CURRENT_ACADEMIC_YEAR },
+      ],
+    );
+
+    expect(await getBlendedLearningAccess("lead@test.local")).toMatchObject({
+      kind: "mentor",
+      mentorUserId: 9001,
+      supervisedMentorUserIds: [9004, 9002],
+    });
+    const [sql] = mockQuery.mock.calls.find(([text]) => text.includes("blended_learning_mentor_supervisions"))!;
+    expect(sql).toContain("supervision.ended_at IS NULL");
+    // A Supervision has no Student, so the Mapping's dropout filter is not on it.
+    expect(sql).not.toContain(DROPOUT_PREDICATE);
+    expect(sql).not.toContain("supervision.student_id");
+  });
+
+  it("grants nothing through an ended Supervision", async () => {
+    givenTables(
+      { email: "lead@test.local", level: 1, role: "blended_mentor", read_only: false, user_id: 9001 },
+      [],
+      [
+        { supervisor_user_id: 9001, mentor_user_id: 9002, academic_year: CURRENT_ACADEMIC_YEAR, ended_at: "2026-11-15T00:00:00Z" },
+        { supervisor_user_id: 9001, mentor_user_id: 9004, academic_year: CURRENT_ACADEMIC_YEAR, ended_at: null },
+      ],
+    );
+
+    const access = await getBlendedLearningAccess("lead@test.local");
+    expect(access).toMatchObject({ supervisedMentorUserIds: [9004] });
+    expect(supervisedMentor(access!, 9002)).toBeNull();
+    expect(viewableMentorUserIds(access!)).toEqual([9001, 9004]);
+  });
+
+  it("drops a reportee who no longer holds a live blended_mentor permission", async () => {
+    givenTables(
+      { email: "lead@test.local", level: 1, role: "blended_mentor", read_only: false, user_id: 9001 },
+      [],
+      [
+        { supervisor_user_id: 9001, mentor_user_id: 9002, academic_year: CURRENT_ACADEMIC_YEAR },
+        { supervisor_user_id: 9001, mentor_user_id: 9004, academic_year: CURRENT_ACADEMIC_YEAR },
+      ],
+      [9004],
+    );
+
+    const access = await getBlendedLearningAccess("lead@test.local");
+    expect(access).toMatchObject({ supervisedMentorUserIds: [9004] });
+    expect(viewableMentorUserIds(access!)).toEqual([9001, 9004]);
+  });
+
+  it("reads no Supervisions for a Mentor with no user id, or for an admin", async () => {
+    givenTables({ email: "new.mentor@test.local", level: 1, role: "blended_mentor", read_only: false, user_id: null });
+    expect(await getBlendedLearningAccess("new.mentor@test.local")).toMatchObject({ supervisedMentorUserIds: [] });
+
+    givenTables({ email: "bl.admin@test.local", level: 1, role: "blended_admin", read_only: false, user_id: 9001 });
+    expect(await getBlendedLearningAccess("bl.admin@test.local")).not.toHaveProperty("supervisedMentorUserIds");
+    expect(mockQuery.mock.calls.some(([sql]) => sql.includes("blended_learning_mentor_supervisions"))).toBe(false);
   });
 
   it("resolves a Mentor without a linked user_id through the user row matching their email, ignoring case", async () => {
@@ -283,5 +380,100 @@ describe("lockMappingInScope", () => {
   it("is null when the scoped read finds no Mapping, as for a dropout", async () => {
     const clientQuery = vi.fn().mockResolvedValue({ rows: [] });
     expect(await lockMappingInScope({ query: clientQuery } as never, mentor, 504)).toBeNull();
+  });
+});
+
+// A team-lead Mentor (9001) who supervises Mentor 9002. Students: 501 is the
+// supervisor's own, 502 is 9002's (a reportee's), 503 is 9003's (not a
+// reportee's), 504 has no active Mapping.
+describe("the supervisor access matrix", () => {
+  const supervisor: BlendedLearningAccess = {
+    kind: "mentor", role: "blended_mentor", readOnly: false,
+    actorEmail: "lead@test.local", mentorUserId: 9001, supervisedMentorUserIds: [9002],
+  };
+  const reportee: BlendedLearningAccess = {
+    kind: "mentor", role: "blended_mentor", readOnly: false,
+    actorEmail: "reportee@test.local", mentorUserId: 9002, supervisedMentorUserIds: [],
+  };
+  const admin: BlendedLearningAccess = {
+    kind: "admin", role: "blended_admin", readOnly: true, actorEmail: "viewer@test.local",
+  };
+  const MAPPINGS: Record<number, number> = { 501: 9001, 502: 9002, 503: 9003 };
+
+  beforeEach(() => {
+    mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (!sql.includes("blended_learning_mentor_mentee_mappings")) return [];
+      const mentor = MAPPINGS[Number(params?.[0])];
+      return mentor ? [{ mentor_user_id: String(mentor) }] : [];
+    });
+  });
+
+  // Rows: Student → [scope, can view, can write (full scope)].
+  const table: [string, number, "full" | "view_only" | null][] = [
+    ["their own Mentee", 501, "full"],
+    ["a reportee's Mentee, view only", 502, "view_only"],
+    ["a Mentee of a Mentor they don't supervise: nothing", 503, null],
+    ["an unmapped Student: nothing", 504, null],
+  ];
+
+  it.each(table)("a supervisor reaches %s", async (_case, studentId, scope) => {
+    expect(await blendedStudentScope(supervisor, studentId)).toBe(scope);
+    expect(await canViewBlendedStudent(supervisor, studentId)).toBe(scope !== null);
+    expect(await canAccessBlendedStudent(supervisor, studentId)).toBe(scope === "full");
+  });
+
+  it("reads the Mapping without dropouts, so a reportee's dropout is out of the supervisor's scope", async () => {
+    // 505 is a reportee's Mentee marked a dropout: the scoped read finds no Mapping.
+    expect(await blendedStudentScope(supervisor, 505)).toBeNull();
+    expect(await canViewBlendedStudent(supervisor, 505)).toBe(false);
+    const [sql, params] = mockQuery.mock.calls.at(-1)!;
+    expect(sql).toContain(DROPOUT_PREDICATE);
+    expect(params).toEqual([505, CURRENT_ACADEMIC_YEAR]);
+  });
+
+  it("gives the reportee full scope on their own Mentee and none on their supervisor's", async () => {
+    expect(await blendedStudentScope(reportee, 502)).toBe("full");
+    expect(await blendedStudentScope(reportee, 501)).toBeNull();
+  });
+
+  it("keeps a Blended Learning Admin's full reach on every mapped Student", async () => {
+    for (const studentId of [501, 502, 503]) expect(await blendedStudentScope(admin, studentId)).toBe("full");
+    expect(await blendedStudentScope(admin, 504)).toBeNull();
+  });
+
+  it("never locks a reportee's Mentee's Mapping for a supervisor's write", async () => {
+    const client = {
+      query: vi.fn(async (_sql: string, params: unknown[]) => ({
+        rows: MAPPINGS[Number(params[0])]
+          ? [{ mentor_user_id: String(MAPPINGS[Number(params[0])]), program_id: "80", academic_year: CURRENT_ACADEMIC_YEAR }]
+          : [],
+      })),
+    } as unknown as PoolClient;
+
+    expect(await lockMappingInScope(client, supervisor, 502)).toBeNull();
+    expect(await lockMappingInScope(client, supervisor, 503)).toBeNull();
+    expect(await lockMappingInScope(client, supervisor, 501)).toMatchObject({ mentor_user_id: "9001" });
+    expect(await lockMappingInScope(client, reportee, 502)).toMatchObject({ mentor_user_id: "9002" });
+  });
+
+  it("leaves a supervisor's actions a Mentor's: no recordings, Mentor cards or Manage", () => {
+    for (const action of ["play_recording", "view_mentors", "manage"] as const) {
+      expect(canBlendedLearning(supervisor, action)).toBe(false);
+    }
+  });
+
+  it("lists the Mentors whose Students each viewer sees", () => {
+    expect(viewableMentorUserIds(supervisor)).toEqual([9001, 9002]);
+    expect(viewableMentorUserIds(reportee)).toEqual([9002]);
+    expect(viewableMentorUserIds({ ...supervisor, mentorUserId: null })).toEqual([]);
+    expect(viewableMentorUserIds(admin)).toBeNull();
+  });
+
+  it("accepts only a supervised Mentor as the Mentor to view", () => {
+    expect(supervisedMentor(supervisor, 9002)).toBe(9002);
+    expect(supervisedMentor(supervisor, 9001)).toBeNull();
+    expect(supervisedMentor(supervisor, 9003)).toBeNull();
+    expect(supervisedMentor(supervisor, null)).toBeNull();
+    expect(supervisedMentor(admin, 9002)).toBeNull();
   });
 });

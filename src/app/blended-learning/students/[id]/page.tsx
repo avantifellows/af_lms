@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { ClipboardList, FileText } from "lucide-react";
 
 import { Badge, Button, Card } from "@/components/ui";
-import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning, isTeamLead, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
 import { describeSession, formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
@@ -20,6 +20,8 @@ import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../BlendedPageShell";
 import { ExternalLink } from "../../ExternalLink";
+import { myStudentsHref } from "../../SectionTabs";
+import { ViewOnlyNotice } from "../../ViewOnlyNotice";
 import { ACTION_ITEM_ROW_CLASSES, ActionItemMeta, OwnerPill } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
@@ -34,7 +36,8 @@ import { SCREENER_QUESTIONS } from "./screenerQuestions";
 // history, where the Profile Doc's latest entry sits at its date. Notes and
 // photos load on demand from their API routes.
 // Admins and read-only Mentors see the same page, view only: the log button
-// and the draft's controls stay in place, disabled. Open Action Items are
+// and the draft's controls stay in place, disabled. A team lead on a
+// reportee's Mentee gets none of them: the View only notice says why. Open Action Items are
 // ticked done from the log page. Only Blended Learning Admins (read-only too)
 // can play a saved Call Recording or read its transcript. A Conversation
 // that used the Screener says so, with the Student's one Screener Feedback
@@ -102,7 +105,8 @@ function ProfileLinks({ mentee }: { mentee: MenteeDetail }) {
 }
 
 // The page heading: name, profile line, contact and links, with the way to
-// log beside it (below it on a phone); disabled for a view-only viewer.
+// log beside it (below it on a phone); disabled for an admin or a read-only
+// Mentor, and left out for a team lead on a reportee's Mentee (viewOnly).
 function Profile({ mentee, canLog }: { mentee: MenteeDetail; canLog: boolean }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
@@ -120,9 +124,11 @@ function Profile({ mentee, canLog }: { mentee: MenteeDetail; canLog: boolean }) 
           Log conversation
         </Link>
       ) : (
-        <Button type="button" disabled title="View only" className="px-5">
-          Log conversation
-        </Button>
+        !mentee.viewOnly && (
+          <Button type="button" disabled title="View only" className="px-5">
+            Log conversation
+          </Button>
+        )
       )}
     </div>
   );
@@ -384,10 +390,13 @@ function backOrigin(from: string | string[] | undefined): BackOrigin | null {
 }
 
 // Back to the Flags tab when they came from it; otherwise a Mentor goes back
-// to their own list, an admin to the Student's Mentor's list.
+// to their own list (a team lead to their My Students tab), and a team lead
+// on a reportee's Mentee and an admin to the Student's Mentor's list.
 function backLink(access: BlendedLearningAccess, mentee: MenteeDetail, from: BackOrigin | null) {
   if (from === "flags") return { href: "/blended-learning?tab=flags", label: "Back to flags" };
-  if (access.kind === "mentor") return { href: "/blended-learning", label: "Back to students" };
+  if (access.kind === "mentor" && !mentee.viewOnly) {
+    return { href: myStudentsHref(isTeamLead(access)), label: "Back to students" };
+  }
   return {
     href: `/blended-learning/mentors/${mentee.mentor.userId}`,
     label: `Back to ${mentee.mentor.firstName}'s students`,
@@ -409,7 +418,8 @@ export default async function MenteeDetailPage({
     loadDashboardChrome(access),
     searchParams,
   ]);
-  const canLog = canBlendedLearning(access, "log");
+  // A supervised Mentor's Mentee is view only: no logging or draft changes.
+  const canLog = !mentee.viewOnly && canBlendedLearning(access, "log");
   const back = backLink(access, mentee, backOrigin(query?.from));
 
   return (
@@ -420,6 +430,7 @@ export default async function MenteeDetailPage({
       >
         <span aria-hidden="true">←</span> {back.label}
       </Link>
+      {mentee.viewOnly && <ViewOnlyNotice mentorName={mentee.mentor.firstName} students="this student" />}
       <Profile mentee={mentee} canLog={canLog} />
       {mentee.openDraft && (
         <DraftStatus
@@ -427,8 +438,9 @@ export default async function MenteeDetailPage({
           draftId={mentee.openDraft.id}
           initialState={mentee.openDraft.state}
           initialRetryOffered={draftStatus?.retryOffered ?? false}
-          canManage={canBlendedLearning(access, "manage_draft")}
+          canManage={!mentee.viewOnly && canBlendedLearning(access, "manage_draft")}
           reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
+          hideActions={mentee.viewOnly}
         />
       )}
       {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}

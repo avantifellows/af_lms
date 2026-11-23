@@ -15,12 +15,15 @@ const mockQuery = vi.mocked(query);
 const MENTOR_A = "faizan@avantifellows.org";
 const ADMIN_READ_ONLY = "shalinijha@avantifellows.org";
 const TEACHER = "teacher@avantifellows.org";
+// A team-lead Mentor who supervises the Mentor of Student 601.
+const SUPERVISOR = "supervisor@test.local";
 
 // Fixture tables, keyed the way the SQL reads them.
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
   [MENTOR_A]: { role: "blended_mentor", read_only: false, user_id: 9001 },
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [SUPERVISOR]: { role: "blended_mentor", read_only: false, user_id: 9003 },
 };
 // Active current-year Mappings: student → Mentor user id.
 const MAPPINGS: Record<number, number> = { 501: 9001, 502: 9001, 503: 9001, 504: 9001, 505: 9001, 506: 9001, 601: 9002 };
@@ -43,7 +46,8 @@ const DRAFTS: Record<number, { student_id: number; state: string; request_state:
 beforeEach(() => {
   vi.clearAllMocks();
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
-    if (sql.includes("FROM user_permission")) {
+    // The permission read (the Supervisions read also checks user_permission).
+    if (sql.includes("FROM user_permission") && !sql.includes("FROM blended_learning_mentor_supervisions")) {
       const email = String(params?.[0]).toLowerCase();
       const row = PERMISSIONS[email];
       return row ? [{ email, level: 1, school_codes: null, regions: null, program_ids: [], ...row }] : [];
@@ -51,6 +55,9 @@ beforeEach(() => {
     if (sql.includes("FROM blended_learning_mentor_mentee_mappings")) {
       const mentor = MAPPINGS[Number(params?.[0])];
       return mentor ? [{ mentor_user_id: mentor }] : [];
+    }
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      return Number(params?.[0]) === 9003 ? [{ mentor_user_id: 9002 }] : [];
     }
     if (sql.includes("FROM blended_learning_conversation_drafts")) {
       const id = Number(params?.[0]);
@@ -91,6 +98,12 @@ describe("GET /api/blended-learning/drafts/[id]", () => {
   it("lets a read-only Blended Learning Admin see the state, but never offers them a retry", async () => {
     signedInAs(ADMIN_READ_ONLY);
     expect(await status("61")).toEqual({ status: 200, body: { id: 61, state: "transcribing", retryOffered: false } });
+  });
+
+  it("lets a supervisor see a supervised Mentor's Mentee's draft state, but never offers them a retry", async () => {
+    signedInAs(SUPERVISOR);
+    expect(await status("61")).toEqual({ status: 200, body: { id: 61, state: "transcribing", retryOffered: false } });
+    expect((await status("41")).status).toBe(404);
   });
 
   it("returns 401 when signed out", async () => {

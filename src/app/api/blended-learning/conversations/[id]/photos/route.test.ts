@@ -19,6 +19,8 @@ const MENTOR_A = "faizan@avantifellows.org";
 const MENTOR_B = "lokesh@avantifellows.org";
 const ADMIN_READ_ONLY = "viewer@avantifellows.org";
 const TEACHER = "teacher@avantifellows.org";
+// A team lead (user 9003) who supervises Mentor A (9001).
+const TEAM_LEAD = "lead@test.local";
 
 // Fixture tables, keyed the way the SQL reads them.
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
@@ -26,6 +28,7 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [MENTOR_B]: { role: "blended_mentor", read_only: false, user_id: 9002 },
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [TEAM_LEAD]: { role: "blended_mentor", read_only: false, user_id: 9003 },
 };
 // Active current-year Mappings: student → Mentor user id. Student 503 is unmapped.
 const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002 };
@@ -47,6 +50,9 @@ const PHOTOS: Record<number, { id: number; s3_key: string; content_type: string;
 
 function givenTables() {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      return params?.[0] === 9003 ? [{ mentor_user_id: 9001 }] : [];
+    }
     if (sql.includes("FROM user_permission")) {
       const email = String(params?.[0]).toLowerCase();
       const row = PERMISSIONS[email];
@@ -126,6 +132,22 @@ describe("GET /api/blended-learning/conversations/[id]/photos", () => {
 
   it("returns 404 for another Mentor's Mentee without signing anything", async () => {
     signedInAs(MENTOR_A);
+    expect((await getPhotos("81")).status).toBe(404);
+    expect(mockPresign).not.toHaveBeenCalled();
+  });
+
+  it("lets a team lead view their reportee's Mentee's photos (a read), and no other Mentor's", async () => {
+    signedInAs(TEAM_LEAD);
+    expect(await getPhotos("71")).toEqual({
+      status: 200,
+      body: {
+        photos: [
+          { id: 701, url: "https://s3.test/lms-documents/blended-learning/photos/501/a.png?X-Amz-Expires=300" },
+          { id: 702, url: "https://s3.test/lms-documents/blended-learning/photos/501/b.jpg?X-Amz-Expires=300" },
+        ],
+      },
+    });
+    mockPresign.mockClear();
     expect((await getPhotos("81")).status).toBe(404);
     expect(mockPresign).not.toHaveBeenCalled();
   });

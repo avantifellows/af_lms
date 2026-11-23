@@ -666,6 +666,36 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   latest. Owner pills are a fixed `w-16` column (`ACTION_ITEM_ROW_CLASSES` in
   `ActionItemMeta.tsx`) so item text lines up whoever owns it.
 
+## Blended Learning Supervisions (2026-11-12)
+
+- `blended_learning_mentor_supervisions` (db-service `20261112120442`, LMS-owned, mirrored in
+  `e2e/fixtures/migrations/20261112120442_add_blended_learning_supervisions.sql`, pg_dump-identical):
+  `supervisor_user_id`, `mentor_user_id` (both `user` FKs, `<>` each other), `academic_year`,
+  `started_at`, then the Mapping table's audit and lifecycle columns and CHECKs. One running row per
+  (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
+  `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings.
+- Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
+  `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
+  filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an
+  array of Mentor ids). Only Supervisions whose reportee still holds a live (not revoked)
+  `blended_mentor` permission count (`liveBlendedMentorSql`, resolved by `permissionUserIdSql`), so a
+  departed Mentor's Students drop out of the team lead's view. Written only by the Manage page's
+  **Team leads** section (since 2026-11-18; the operator loader script was removed 2026-11-19):
+  `src/lib/blended-learning-team-leads.ts`, `POST /api/blended-learning/team-leads` and
+  `POST /api/blended-learning/team-leads/[id]/end`, both `manage`, with `assignment_source`/`end_source`
+  `af_lms_manage_ui` and the admin's email in `assigned_by_email`/`ended_by_email` (`end_reason`
+  `supervision_ended`). Add: both people must hold a live `blended_mentor` permission (Mappings alone
+  do not count), checked inside the insert's transaction with their permission rows locked
+  `FOR SHARE`, then `INSERT … ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; self-supervision is a
+  422, a running pair a 409. End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND ended_at IS
+  NULL`, a 404 when nothing matched (so a pair ended and re-added meanwhile keeps its new row).
+- Flags tab Mentor filter: for a team lead ("My students" or a reportee) it matches the Student's
+  current active Mapping's Mentor (dropouts left out), not who logged the flagged Conversation; an
+  admin's filter still matches the Conversation's Mentor.
+- e2e: `BLENDED_SUPERVISOR` (one own Mentee, `SUPERVISOR_MENTEE`) supervises Mentor B and has an
+  ended Supervision of Mentor A; `e2e/tests/blended-learning-supervisor.spec.ts` asserts on them.
+  The Manage spec makes Mentor D lead Mentor C inside one test and ends it before finishing.
+
 ## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
 
 - **Tables:** db-service `20261027120000_create_blended_learning_resources_and_common_action_items`

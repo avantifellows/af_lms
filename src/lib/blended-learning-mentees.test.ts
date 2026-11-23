@@ -29,11 +29,11 @@ function row(studentId: number, mentorUserId: number, name: string) {
 }
 
 // Fixture: active current-year Mapping rows; the mock narrows them by the
-// bound Mentor id the way the WHERE clause does.
+// bound Mentor ids the way the WHERE clause does.
 function givenMappedMentees(rows: ReturnType<typeof row>[]) {
   mockQuery.mockImplementation(async (_sql: string, params?: unknown[]) => {
-    const mentor = params?.[1];
-    return rows.filter((r) => mentor == null || r.mentor_user_id === Number(mentor));
+    const mentors = params?.[1] as number[] | null;
+    return rows.filter((r) => mentors == null || mentors.includes(r.mentor_user_id));
   });
 }
 

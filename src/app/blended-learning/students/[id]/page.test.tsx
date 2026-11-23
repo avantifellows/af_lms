@@ -72,6 +72,7 @@ const MENTEE: MenteeDetail = {
   history: [],
   openActionItems: [],
   mentor: { userId: 9001, firstName: "Faizan" },
+  viewOnly: false,
 };
 
 type Conversation = Extract<MenteeDetail["history"][number], { kind: "conversation" }>;
@@ -197,6 +198,7 @@ describe("MenteeDetailPage", () => {
       initialRetryOffered: true,
       canManage: true,
       reviewHref: "/blended-learning/students/501/log",
+      hideActions: false,
     });
   });
 
@@ -224,6 +226,56 @@ describe("MenteeDetailPage", () => {
       "/blended-learning/mentors/9001"
     );
     expect(screen.queryByRole("link", { name: "Back to students" })).not.toBeInTheDocument();
+  });
+
+  describe("a supervisor on a supervised Mentor's Mentee", () => {
+    const SUPERVISOR = { ...MENTOR, actorEmail: "lead@test.local", supervisedMentorUserIds: [9002] };
+    const SUPERVISED: MenteeDetail = {
+      ...MENTEE,
+      studentId: 502,
+      openDraft: { id: 42, state: "failed" },
+      mentor: { userId: 9002, firstName: "Reportee" },
+      viewOnly: true,
+    };
+
+    beforeEach(() => {
+      signedInAs(SUPERVISOR);
+      mockGetMenteeDetail.mockResolvedValue(SUPERVISED);
+      mockGetDraftStatus.mockResolvedValue({ id: 42, state: "failed", retryOffered: false });
+    });
+
+    it("shows the page view only: no way to log, review or manage the draft, not even disabled", async () => {
+      await renderPage("502");
+
+      expect(screen.getByRole("heading", { level: 1, name: "Ira Sharma" })).toBeInTheDocument();
+      expect(screen.getByRole("note")).toHaveTextContent("View only. Reportee mentors this student");
+      expect(screen.queryByRole("link", { name: "Log conversation" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Log conversation" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Log the first one to start this student's history.")).not.toBeInTheDocument();
+      expect(mockDraftStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ canManage: false, reviewHref: null, initialRetryOffered: false, hideActions: true })
+      );
+    });
+
+    it("sends them back to the supervised Mentor's list, or to Flags when they came from it", async () => {
+      await renderPage("502");
+      expect(screen.getByRole("link", { name: "Back to Reportee's students" })).toHaveAttribute(
+        "href",
+        "/blended-learning/mentors/9002"
+      );
+
+      await renderPage("502", "flags");
+      expect(screen.getByRole("link", { name: "Back to flags" })).toHaveAttribute("href", "/blended-learning?tab=flags");
+    });
+  });
+
+  it("sends a team lead back to their My Students tab from their own Mentee", async () => {
+    signedInAs({ ...MENTOR, actorEmail: "lead@test.local", supervisedMentorUserIds: [9002] });
+
+    await renderPage();
+
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning?tab=students");
   });
 
   it("sends an admin who came from the Flags tab back to it", async () => {
@@ -275,6 +327,7 @@ describe("MenteeDetailPage", () => {
       initialRetryOffered: false,
       canManage: false,
       reviewHref: null,
+      hideActions: false,
     });
     // The Mentor's layout, view only: Log conversation stays in place, disabled.
     expect(screen.queryByRole("link", { name: "Log conversation" })).not.toBeInTheDocument();

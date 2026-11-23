@@ -1,4 +1,4 @@
-import { canBlendedLearning } from "@/lib/blended-learning-access";
+import { canBlendedLearning, isTeamLead } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage } from "@/lib/blended-learning-guard";
 import { countNewFlags } from "@/lib/blended-learning-flags";
 import { listResources } from "@/lib/blended-learning-resources";
@@ -28,6 +28,7 @@ export default async function ResourcesPage() {
           current="resources"
           newFlags={newFlags}
           canManage={canBlendedLearning(access, "manage")}
+          teamLead={isTeamLead(access)}
         />
         <MentorResources resources={resources} />
       </div>
