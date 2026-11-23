@@ -38,6 +38,20 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 - Pool is a singleton (10 conns, 15s `statement_timeout`, 5s connect timeout). **Always `$1` placeholders.** This module is server-only — never import it (transitively) into a client component.
 - DB naming: Ecto — `inserted_at`/`updated_at`, snake_case, server TZ UTC. Derive IST dates in SQL: `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`.
 
+**Documents are read from Postgres, written through the DB Service.** `lms_student_documents` is
+read directly by `listDocumentTypesForStudents` (`src/lib/student-documents.ts`) for the Enrollment
+tab's Data completeness table (#468): one `SELECT DISTINCT student_id, document_type ... WHERE
+student_id = ANY($1::bigint[]) AND deleted_at IS NULL` for the whole School, behind
+`GET /api/schools/[code]/document-status`. The older consent summary still asks the DB Service once
+per Student in capped batches, which is why it could never answer "who is missing which of the seven
+types". Uploads and deletes stay on the DB Service.
+
+**One visible-School predicate.** `findVisibleSchool` (`src/lib/school-lookup.ts`) resolves a School
+by UDISE or code as the School page does — the historical JNV set plus any School linked to an active
+centre. A route that filters on `af_school_category = 'JNV'` alone 404s for the centre Schools whose
+page opens fine, which is what left `% Docs` on "—" for them (#338). Both School-scoped document
+routes share it.
+
 ## 2. DB Service (Elixir/Phoenix) — proxied writes
 External HTTP API. **Student, batch, quiz-session, and document writes go here**, never direct to Postgres.
 ```ts
@@ -191,6 +205,65 @@ privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 
 for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
 itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
 missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+
+## Holistic answer length (#508)
+
+Post-Session answers and Follow-up answers share one limit, `HOLISTIC_ANSWER_MAX_LENGTH`
+(10,000) in the client-safe `src/lib/holistic-answer-limit.ts`. The Student Phase `PATCH`
+route and `normalizeHolisticFollowUpAnswers` both reject longer answers with it, and the
+Student Phase workspace shows an "N / 10,000" counter at 9,000 characters or more in every
+editable answer box (draft, author's Edit, Add Follow-up Note). Read-only views show no
+counter. Use this constant for any new answer-length check (e.g. Dictation, #500).
+
+## Holistic Dictation usage records (#500, slice #509)
+
+- **Table ownership:** `holistic_mentorship_dictation_usage_records` comes from db-service #858
+  (migration `20261110151931_create_holistic_mentorship_dictation_usage_records`, plus
+  `20261116113700_add_translation_to_holistic_dictation_usage_records`, a second migration because
+  the first is already applied on staging); LMS inserts and updates it directly through `query()`
+  (ADR 0005). Content-free: no Student, Phase, Question, text, translation or audio column, so it is
+  outside Holistic privacy erasure. The second migration adds `detected_language` (Scribe's code,
+  lower-cased, NULL when missing or not 1–16 characters) and `translation`
+  (`not_run | skipped | ok | failed`, checked by the table). **Deploy order:** the LMS writes both
+  columns on every clip, so apply `20261116113700` before deploying this LMS code (ADR 0013).
+- **Write path** (`transcribeHolisticDictation` in `src/lib/holistic-dictation.ts`): limit check →
+  insert `outcome='failed'`, `characters_returned=0`, `translation='not_run'`, `completed_at` NULL →
+  ElevenLabs call → translation into English through OpenRouter unless already English (ADR 0013) →
+  update to `ok` / `nothing_heard` / `failed` with `characters_returned` (length of the English text
+  returned), `detected_language`, `translation` (`not_run` when Scribe failed or heard nothing,
+  `skipped` when already English, `ok` translated, `failed` translation failed, which also makes
+  the outcome `failed`), `completed_at`, and
+  `audio_seconds = min(305, ceil(max(duration_ms/1000, last word end)))`. The route refuses a clip over
+  305,000 ms (422) or 10 MB (413); 305 s is `HOLISTIC_DICTATION_MAX_CLIP_SECONDS` in
+  `src/lib/holistic-dictation-limits.ts` (five minutes plus 5 s of timer slop, owner decision
+  2026-11-13), and db-service #858 checks `audio_seconds BETWEEN 1 AND 305`. A request killed
+  mid-call leaves the `failed`, uncompleted row, which still counts. The browser's cancel
+  (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
+  is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
+  still counts), so do not wire `request.signal` into `transcribeSpeech` or `translateToEnglish`
+  without a new decision. Scribe and translation share one deadline, with a shorter cap for Scribe
+  and for each translation attempt and one retry only when enough time is left (the numbers are in
+  ADR 0013 and the constants in `src/lib/holistic-dictation.ts`).
+  The route refuses an empty (0-byte) clip with 422 "Attach one audio clip" before this path, so
+  it writes no row and makes no provider call.
+- **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be
+  Asia/Kolkata (the local test DBs are), so the insert writes `$now::timestamptz AT TIME ZONE 'UTC'`
+  and `completed_at = now() AT TIME ZONE 'UTC'` explicitly; never rely on the `now()` default here.
+- **Daily limit:** remaining = 1,800 − SUM(`audio_seconds`) of this Mentor's rows whose
+  `inserted_at` is in the current Asia/Kolkata day (converted to a UTC window), floored at 0
+  (`getHolisticDictationRemainingSeconds`). A clip is refused (429 `daily_limit`) when used +
+  `ceil(duration_ms/1000)` > 1,805; the 429 body carries `remainingSeconds` (the real time left from
+  that same used-seconds read, floored at 0) and no usage row is written. The check and insert are not atomic; racing tabs can overshoot
+  by one clip each (accepted).
+- **Write scope before the call:** `checkHolisticDictationScope` runs `loadHolisticMentorWriteScope`
+  (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the
+  provider calls, so no row lock is held while ElevenLabs or OpenRouter works.
+- **Opt-in integration test:** `src/lib/holistic-dictation.integration.test.ts` with
+  `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt,
+  a five-minute clip and the 305 s cap against the table's check constraint, the
+  `detected_language` / `translation` values for skipped, translated, failed and nothing-heard
+  clips, and the `translation` check constraint). The disposable DB needs both db-service #858
+  migrations, including `20261116113700`; ElevenLabs and OpenRouter are faked at `fetch`.
 
 ## Holistic Follow-up Notes (#377)
 
