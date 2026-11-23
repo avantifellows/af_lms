@@ -273,6 +273,41 @@ describe("Holistic Student Phase API", () => {
     });
   });
 
+  describe("answer length", () => {
+    const url = "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1";
+    const draft = (answer: string) => PATCH(new Request(url, {
+      method: "PATCH",
+      body: JSON.stringify({
+        action: "draft",
+        expected_revision: 2,
+        answers: [{ question_id: 91, answer }],
+        challenge_categories: [],
+      }),
+    }) as never, context);
+
+    beforeEach(() => {
+      mockAccess.mockResolvedValue({ ok: true, actorUserId: 9, permission: { role: "teacher" }, school: { id: 4 } });
+      mockSave.mockResolvedValue({ ok: true, changed: true, revision: 3 });
+    });
+
+    it("rejects an answer of 10,001 characters without saving", async () => {
+      const response = await draft("a".repeat(10_001));
+
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toEqual({ error: "Invalid Notes" });
+      expect(mockSave).not.toHaveBeenCalled();
+    });
+
+    it("saves an answer of exactly 10,000 characters", async () => {
+      const response = await draft("a".repeat(10_000));
+
+      expect(response.status).toBe(200);
+      expect(mockSave).toHaveBeenCalledWith(expect.objectContaining({
+        answers: [{ questionId: 91, answer: "a".repeat(10_000) }],
+      }));
+    });
+  });
+
   describe("Challenge Categories", () => {
     const url = "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1";
     const finalTokens = { expected_mapping_id: 300, expected_phase_revision: 5, confirmed: true };
