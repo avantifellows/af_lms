@@ -164,7 +164,9 @@ page and API denies them (`getUserPermission` returns `null` for them).
   Playing Call Recordings and reading transcripts and the Mentors tab are for
   Blended Learning Admins only (read-only ones included). The Flags feed shows an
   admin every flag and a Mentor only the flags on their own Students. A Student is
-  in scope only with an active current-year Mapping (for a Mentor, to them).
+  in scope only with an active current-year Mapping (for a Mentor, to them):
+  not ended and already started, so a Mapping the import sheet dates in the
+  future grants nothing until its `started_at`. Supervisions work the same way.
 - Full detail: `.mex/context/permissions.md` ("Blended Learning roles").
 
 ### Alumni Manager (alumni only, ADR 0008)

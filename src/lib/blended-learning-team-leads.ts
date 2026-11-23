@@ -79,9 +79,11 @@ type LinkRow = {
   started_on: string;
 };
 
-// The running current-year Supervisions, by team lead then reportee, each
-// with whether the lead and the reportee are still live Mentors, so the page
-// can say why one has no effect.
+// The running (not ended) current-year Supervisions, by team lead then
+// reportee, each with whether the lead and the reportee are still live
+// Mentors, so the page can say why one has no effect. A future-dated one
+// (import sheet only) is listed too, as it holds the pair's slot and can be
+// ended; the access check skips it until it starts.
 export async function listTeamLeadLinks(access: BlendedLearningAccess): Promise<TeamLeadLink[]> {
   if (!canBlendedLearning(access, "manage")) return [];
   const rows = await query<LinkRow>(

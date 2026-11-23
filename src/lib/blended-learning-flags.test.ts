@@ -124,7 +124,7 @@ describe("countNewFlags", () => {
 
 // A Mentor's Flags tab: only flags on Students with an active current-year
 // Mapping to them, in every read, so another Mentor's flags never leave the DB.
-const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = ANY\(\$(\d)::bigint\[\]\)\s+AND own\.academic_year = \$(\d) AND own\.ended_at IS NULL AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = own\.student_id AND dropout_student\.status = 'dropout'\)\)/;
+const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = ANY\(\$(\d)::bigint\[\]\)\s+AND own\.academic_year = \$(\d) AND own\.ended_at IS NULL AND own\.started_at <= \(now\(\) AT TIME ZONE 'UTC'\) AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = own\.student_id AND dropout_student\.status = 'dropout'\)\)/;
 
 describe("a Mentor's flags", () => {
   it("narrows the feed to the Mentor's own Students and ignores a Mentor filter", async () => {

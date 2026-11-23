@@ -51,6 +51,9 @@ describe("listTeamLeadLinks", () => {
     ]);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toContain("supervision.academic_year = $1 AND supervision.ended_at IS NULL");
+    // A future-dated link (import sheet only) grants nothing yet but holds the
+    // pair's slot, so it is still listed and can be ended.
+    expect(sql).not.toContain("started_at <=");
     expect(sql).toContain("AT TIME ZONE 'Asia/Kolkata'");
     expect(params).toEqual(["2026-2027", "blended_mentor"]);
   });
@@ -115,6 +118,8 @@ function givenSupervisions(table: SupervisionRow[]) {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (!sql.startsWith("UPDATE blended_learning_mentor_supervisions")) return [];
     expect(sql).toContain("WHERE id = $1 AND academic_year = $2 AND ended_at IS NULL");
+    // A link that has not started yet can still be ended (at its started_at).
+    expect(sql).not.toContain("started_at <=");
     const hit = table.filter((row) => row.id === params?.[0] && row.academic_year === params?.[1] && row.ended_at === null);
     for (const row of hit) row.ended_at = "2026-11-19T00:00:00Z";
     return hit.map((row) => ({ id: row.id }));

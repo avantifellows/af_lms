@@ -138,28 +138,38 @@ export function notBlendedDropoutSql(studentIdSql: string): string {
             WHERE dropout_student.id = ${studentIdSql} AND dropout_student.status = 'dropout')`;
 }
 
-// Mapping rows as stored: active (`ended_at IS NULL`) for CURRENT_ACADEMIC_YEAR,
-// whatever the Student's status. Only operator data loads (the links import)
-// use it; everything Mentors and admins see goes through
-// activeBlendedMappingSql.
+// Mapping rows as stored: not ended (`ended_at IS NULL`) for
+// CURRENT_ACADEMIC_YEAR, whatever the Student's status and even when they
+// start later. Only operator data loads (the links import) use it; everything
+// Mentors and admins see goes through activeBlendedMappingSql.
 export function currentBlendedMappingRowSql(alias: string, yearParam: string): string {
   return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL`;
 }
 
-// The Mapping source: active current-year Mappings of Students not marked a
-// dropout. A dropout leaves Blended Learning everywhere (list, Mentor cards,
-// Flags, Common Action Items, their page) while the Mapping row stays, so they
-// come back if their status changes back. `yearParam` is the placeholder
-// bound to CURRENT_ACADEMIC_YEAR.
-export function activeBlendedMappingSql(alias: string, yearParam: string): string {
-  return `${currentBlendedMappingRowSql(alias, yearParam)} AND ${notBlendedDropoutSql(`${alias}.student_id`)}`;
+// The Mapping or Supervision row (`alias`) has started: its `started_at` (a
+// UTC timestamp without time zone) is not after now. The import sheet may
+// future-date a row; it grants nothing until then, though it still fills the
+// one-running-row slot (the partial unique index is on `ended_at IS NULL`
+// alone), so writes that must match that index leave this out.
+function startedBlendedRowSql(alias: string): string {
+  return `${alias}.started_at <= (now() AT TIME ZONE 'UTC')`;
 }
 
-// Active Supervisions (`ended_at IS NULL`) for CURRENT_ACADEMIC_YEAR. A
-// Supervision has the Mapping's lifecycle columns but no Student, so the
-// dropout filter applies to the supervised Mentor's Mappings instead.
+// The Mapping source: active (not ended and already started) current-year
+// Mappings of Students not marked a dropout. A dropout leaves Blended
+// Learning everywhere (list, Mentor cards, Flags, Common Action Items, their
+// page) while the Mapping row stays, so they come back if their status
+// changes back. `yearParam` is the placeholder bound to CURRENT_ACADEMIC_YEAR.
+export function activeBlendedMappingSql(alias: string, yearParam: string): string {
+  return `${currentBlendedMappingRowSql(alias, yearParam)} AND ${startedBlendedRowSql(alias)} AND ${notBlendedDropoutSql(`${alias}.student_id`)}`;
+}
+
+// Active Supervisions (not ended and already started) for
+// CURRENT_ACADEMIC_YEAR. A Supervision has the Mapping's lifecycle columns but
+// no Student, so the dropout filter applies to the supervised Mentor's
+// Mappings instead.
 function activeBlendedSupervisionSql(alias: string, yearParam: string): string {
-  return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL`;
+  return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL AND ${startedBlendedRowSql(alias)}`;
 }
 
 // The Mentors whose Students the viewer sees: a Mentor's own and supervised

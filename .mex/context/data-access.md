@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-18
+last_updated: 2026-11-23
 ---
 
 # Data Access
@@ -361,7 +361,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `20261022120000`–`20261022120700`). af_lms reads and writes them directly over SQL (ADR 0005)
   through `query()`/`withTransaction`, never through DB Service HTTP.
 - **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`
-  whose Student is not marked a dropout (`student.status = 'dropout'`; NULL or any other
+  and `started_at <= (now() AT TIME ZONE 'UTC')` (columns are UTC `timestamp`; a Mapping the
+  db-service import sheet dates in the future grants nothing until then, though it already holds
+  the partial unique index's one running slot) whose Student is not marked a dropout (`student.status = 'dropout'`; NULL or any other
   status stays in), written once as `activeBlendedMappingSql(alias, yearParam)` in
   `src/lib/blended-learning-access.ts` (`notBlendedDropoutSql(studentIdSql)` is the dropout
   half). Every Blended Learning scope uses it: `canAccessBlendedStudent` (so a dropout's page,
@@ -371,7 +373,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   Item targets (count, preview, Mentor "(N students)", push and push again never reach a
   dropout; a pasted dropout ID is listed as "found but with no active mentor"). Mapping rows
   are never changed, so a Student whose status changes back reappears. Only the links import
-  reads the raw rows (`currentBlendedMappingRowSql`), so a dropout's links stay loaded.
+  reads the raw rows (`currentBlendedMappingRowSql`: not ended, started or not), so a dropout's
+  and a future-dated Mapping's links stay loaded.
   Already-materialised Common Action Items on a dropout keep counting in the item's Open/Done.
 - **Read model:** `listMentees({ access, mentorUserId?, studentId?, today })` in
   `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
@@ -629,8 +632,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.
 - **Links load script (#455):** `blended_learning_student_links` is filled outside the app by the
   operator script `npm run blended:import-links` (`runBlendedLinksImport` in
-  `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the active Mapping
-  source (`activeBlendedMappingSql`), the existing links (`student_id = ANY($1::bigint[])`), and
+  `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the raw
+  not-ended Mapping rows (`currentBlendedMappingRowSql`), the existing links (`student_id = ANY($1::bigint[])`), and
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
@@ -673,7 +676,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `supervisor_user_id`, `mentor_user_id` (both `user` FKs, `<>` each other), `academic_year`,
   `started_at`, then the Mapping table's audit and lifecycle columns and CHECKs. One running row per
   (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
-  `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings.
+  `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings
+  (not ended and already started). The Manage list and End still use `ended_at IS NULL` alone,
+  matching the index, so a future-dated link is listed and can be ended (at its `started_at`).
 - Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
   `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
   filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an

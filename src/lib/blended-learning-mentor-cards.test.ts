@@ -104,7 +104,7 @@ describe("listMentorCards", () => {
     expect(mockQuery.mock.calls[0][1]).toEqual(["2026-2027", null, null]);
     // A dropout counts on no card, though their Mapping is still active.
     expect(mockQuery.mock.calls[0][0]).toContain(
-      "mapping.ended_at IS NULL AND NOT EXISTS (SELECT 1 FROM student dropout_student"
+      "mapping.ended_at IS NULL AND mapping.started_at <= (now() AT TIME ZONE 'UTC') AND NOT EXISTS (SELECT 1 FROM student dropout_student"
     );
   });
 

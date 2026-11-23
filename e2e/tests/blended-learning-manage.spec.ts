@@ -528,7 +528,7 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
       pool.query(
         `INSERT INTO blended_learning_mentor_mentee_mappings
            (student_id, mentor_user_id, program_id, academic_year, started_at, assignment_source)
-         VALUES ($1, $2, $3, $4, now(), 'e2e_fixture')`,
+         VALUES ($1, $2, $3, $4, date_trunc('second', now() AT TIME ZONE 'UTC'), 'e2e_fixture')`,
         [studentIds[mappedLater.key], mentorDUserId, mappedLater.programId, CURRENT_ACADEMIC_YEAR]
       )
     );
