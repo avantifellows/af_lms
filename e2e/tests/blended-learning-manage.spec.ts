@@ -274,6 +274,60 @@ test.describe("Blended Learning Manage — Team leads", () => {
       );
     }
   });
+
+  test("a pair whose reportee is no longer a Mentor stays listed with a note, and the admin can end it", async ({ page, browser }) => {
+    const revokeC = (revoked: boolean) =>
+      withPool((pool) =>
+        pool.query(
+          `UPDATE user_permission SET revoked_at = ${revoked ? "now()" : "NULL"}
+           WHERE LOWER(email) = LOWER($1) AND role = 'blended_mentor'`,
+          [BLENDED_MENTOR_C.email]
+        )
+      );
+    await withPool((pool) =>
+      pool.query(
+        `INSERT INTO blended_learning_mentor_supervisions
+           (supervisor_user_id, mentor_user_id, academic_year, started_at, assigned_by_email, assignment_source)
+         SELECT $1, permission.user_id, $2, date_trunc('second', now() AT TIME ZONE 'UTC'), $3, 'e2e_fixture'
+         FROM user_permission permission WHERE LOWER(permission.email) = LOWER($4) AND permission.role = 'blended_mentor'`,
+        [mentorDUserId, CURRENT_ACADEMIC_YEAR, BLENDED_ADMIN.email, BLENDED_MENTOR_C.email]
+      )
+    );
+    const leadContext = await browser.newContext();
+    try {
+      await revokeC(true);
+      await signInAs(page, BLENDED_ADMIN);
+      await openManage(page);
+      const row = teamLeadRow(page);
+      await expect(row).toContainText(`${BLENDED_MENTOR_C.name} is no longer a mentor, so this link has no effect.`);
+
+      // The access check already skips it: the lead lands on their own list.
+      const lead = await leadContext.newPage();
+      await signInAs(lead, BLENDED_MENTOR_D);
+      await lead.goto("/blended-learning");
+      await expect(lead.getByRole("heading", { level: 1, name: "My Students" })).toBeAttached();
+
+      await row.getByRole("button", { name: `End ${BLENDED_MENTOR_D.name} → ${BLENDED_MENTOR_C.name}` }).click();
+      const dialog = page.getByRole("dialog", { name: "End this team lead?" });
+      await expect(dialog).toContainText("Ending it changes no one's access.");
+      await dialog.getByRole("button", { name: "End" }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(teamLeadRow(page)).toHaveCount(0);
+      expect(await latestSupervision()).toMatchObject({ ended_by_email: BLENDED_ADMIN.email, end_reason: "supervision_ended" });
+    } finally {
+      await leadContext.close();
+      await revokeC(false);
+      await withPool((pool) =>
+        pool.query(
+          `UPDATE blended_learning_mentor_supervisions
+           SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
+               end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
+           WHERE ended_at IS NULL AND supervisor_user_id = $1`,
+          [mentorDUserId]
+        )
+      );
+    }
+  });
 });
 
 test.describe("Blended Learning Manage — Resources", () => {

@@ -67,8 +67,9 @@ export function permissionUserIdSql(alias: string): string {
 
 // The `user` id (`userIdSql`) still holds a live (not revoked) permission with
 // the role bound to `roleParam` (BLENDED_MENTOR_ROLE): a Mentor who has left or
-// been revoked is no longer one, whatever Mappings or Supervisions remain.
-function liveBlendedMentorSql(userIdSql: string, roleParam: string): string {
+// been revoked is no longer one, whatever Mappings or Supervisions remain. The
+// Manage page's Team leads use it too, to flag a Supervision this makes inert.
+export function liveBlendedMentorSql(userIdSql: string, roleParam: string): string {
   return `EXISTS (SELECT 1 FROM user_permission live_permission
             WHERE live_permission.role = ${roleParam} AND live_permission.revoked_at IS NULL
               AND ${permissionUserIdSql("live_permission")} = ${userIdSql})`;

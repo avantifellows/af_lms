@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, Plus, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 
@@ -41,6 +41,16 @@ function labeller(shared: Set<string>): Label {
 
 function linkLabel(link: TeamLeadLink, label: Label): string {
   return `${label(link.teamLead)} → ${label(link.reportee)}`;
+}
+
+// Why a link has no effect, or null when it does: the access check skips a
+// Supervision whose lead or reportee is no longer a live Mentor, so the admin
+// is told and can end it.
+function inertNote(link: TeamLeadLink, label: Label): string | null {
+  const gone = [link.teamLead, link.reportee].filter((person) => !person.isMentor).map(label);
+  if (gone.length === 0) return null;
+  const who = gone.length === 1 ? `${gone[0]} is no longer a mentor` : `${gone.join(" and ")} are no longer mentors`;
+  return `${who}, so this link has no effect.`;
 }
 
 function MentorSelect({
@@ -140,6 +150,7 @@ function LinkRow({
   busy: boolean;
   onEnd: () => void;
 }) {
+  const note = inertNote(link, personLabel);
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
@@ -152,6 +163,12 @@ function LinkRow({
         <p className="text-xs text-text-muted">
           Since <span className="font-mono">{formatCalendarDate(link.startedOn)}</span>
         </p>
+        {note && (
+          <p className="mt-1 flex items-start gap-1.5 text-xs text-warning-text">
+            <TriangleAlert aria-hidden="true" className="mt-px h-3.5 w-3.5 shrink-0" />
+            <span>{note}</span>
+          </p>
+        )}
       </div>
       <Button type="button" variant="secondary" className="shrink-0" aria-label={`End ${linkLabel(link, personLabel)}`} disabled={busy} onClick={onEnd}>
         End
@@ -229,11 +246,17 @@ export function TeamLeadsManager({ links, mentors }: { links: TeamLeadLink[]; me
         onConfirm={end.confirm}
         onCancel={end.cancel}
       >
-        <p>
-          <span className="font-bold text-text-primary">{ending && personLabel(ending.teamLead)}</span> will no longer see{" "}
-          <span className="font-bold text-text-primary">{ending && personLabel(ending.reportee)}</span>&apos;s students. The record
-          is kept.
-        </p>
+        {ending && inertNote(ending, personLabel) ? (
+          <p>
+            {inertNote(ending, personLabel)} Ending it changes no one&apos;s access. The record is kept.
+          </p>
+        ) : (
+          <p>
+            <span className="font-bold text-text-primary">{ending && personLabel(ending.teamLead)}</span> will no longer
+            see <span className="font-bold text-text-primary">{ending && personLabel(ending.reportee)}</span>&apos;s
+            students. The record is kept.
+          </p>
+        )}
       </ConfirmDialog>
     </section>
   );

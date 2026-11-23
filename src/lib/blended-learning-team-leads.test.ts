@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
 import { query, withTransaction } from "./db";
-import type { BlendedLearningAccess } from "./blended-learning-access";
+import { liveBlendedMentorSql, type BlendedLearningAccess } from "./blended-learning-access";
 import {
   createTeamLeadLink,
   endTeamLeadLink,
@@ -36,22 +36,48 @@ describe("listTeamLeadLinks", () => {
     mockQuery.mockResolvedValue([
       {
         id: "4", supervisor_user_id: "9003", supervisor_name: "Synthetic Lead", supervisor_email: "lead@test.local",
-        mentor_user_id: 9001, mentor_name: "Synthetic Reportee", mentor_email: "reportee@test.local", started_on: "2026-11-12",
+        mentor_user_id: 9001, mentor_name: "Synthetic Reportee", mentor_email: "reportee@test.local",
+        supervisor_is_mentor: true, mentor_is_mentor: true, started_on: "2026-11-12",
       },
     ]);
 
     expect(await listTeamLeadLinks(ADMIN)).toEqual([
       {
         id: 4,
-        teamLead: { userId: 9003, name: "Synthetic Lead", email: "lead@test.local" },
-        reportee: { userId: 9001, name: "Synthetic Reportee", email: "reportee@test.local" },
+        teamLead: { userId: 9003, name: "Synthetic Lead", email: "lead@test.local", isMentor: true },
+        reportee: { userId: 9001, name: "Synthetic Reportee", email: "reportee@test.local", isMentor: true },
         startedOn: "2026-11-12",
       },
     ]);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toContain("supervision.academic_year = $1 AND supervision.ended_at IS NULL");
     expect(sql).toContain("AT TIME ZONE 'Asia/Kolkata'");
-    expect(params).toEqual(["2026-2027"]);
+    expect(params).toEqual(["2026-2027", "blended_mentor"]);
+  });
+
+  it("keeps a pair whose lead or reportee is no longer a live Mentor, flagged by the access check's own rule", async () => {
+    mockQuery.mockResolvedValue([
+      {
+        id: 7, supervisor_user_id: 9003, supervisor_name: "Synthetic Lead", supervisor_email: null,
+        mentor_user_id: 9004, mentor_name: "Synthetic Departed", mentor_email: null,
+        supervisor_is_mentor: true, mentor_is_mentor: false, started_on: "2026-11-12",
+      },
+      {
+        id: 8, supervisor_user_id: 9005, supervisor_name: "Synthetic Former Lead", supervisor_email: null,
+        mentor_user_id: 9006, mentor_name: "Synthetic Also Gone", mentor_email: null,
+        supervisor_is_mentor: false, mentor_is_mentor: false, started_on: "2026-11-13",
+      },
+    ]);
+
+    const links = await listTeamLeadLinks(ADMIN);
+    expect(links.map((link) => [link.id, link.teamLead.isMentor, link.reportee.isMentor])).toEqual([
+      [7, true, false],
+      [8, false, false],
+    ]);
+    const [sql] = mockQuery.mock.calls[0];
+    expect(sql).toContain(`${liveBlendedMentorSql("supervision.supervisor_user_id", "$2")} AS supervisor_is_mentor`);
+    expect(sql).toContain(`${liveBlendedMentorSql("supervision.mentor_user_id", "$2")} AS mentor_is_mentor`);
+    expect(sql).toContain("live_permission.revoked_at IS NULL");
   });
 
   it.each([

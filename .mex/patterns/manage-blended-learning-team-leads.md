@@ -12,7 +12,7 @@ edges:
     condition: for what a Supervision grants (view only) and where the access policy checks it
   - target: context/data-access.md
     condition: for the Supervision table and the Mapping source it mirrors
-last_updated: 2026-11-19
+last_updated: 2026-11-23
 ---
 
 # Manage Blended Learning Team Leads
@@ -50,6 +50,9 @@ code, tests, runbooks or PR text.
   sees an empty list: fix the permission row's `user_id`, not the Supervision.
 - A reportee whose `blended_mentor` permission is revoked drops out of their team lead's access
   at once (`supervisedMentorIds` requires a live permission), even before the Supervision is ended.
+  The row stays in Manage → Team leads with a note ("<Name> is no longer a mentor, so this link
+  has no effect"; the same for a revoked team lead, or both) so the admin can End it. The note
+  uses the access check's own rule (`liveBlendedMentorSql`), so the two cannot disagree.
 - A `blended_admin` already sees everyone and is not offered as a team lead.
 - Supervisions are per academic year (`CURRENT_ACADEMIC_YEAR`); add them again for a new year.
 

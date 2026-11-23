@@ -10,7 +10,12 @@ import { TeamLeadsManager } from "./TeamLeadsManager";
 const LEAD = { userId: 78, name: "Synthetic Lead", email: "lead@test.local" };
 const REPORTEE = { userId: 77, name: "Synthetic Reportee", email: "reportee@test.local" };
 const OTHER = { userId: 79, name: "Synthetic Other", email: "other@test.local" };
-const LINK = { id: 4, teamLead: LEAD, reportee: REPORTEE, startedOn: "2026-11-12" };
+const LINK = {
+  id: 4,
+  teamLead: { ...LEAD, isMentor: true },
+  reportee: { ...REPORTEE, isMentor: true },
+  startedOn: "2026-11-12",
+};
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -37,6 +42,41 @@ describe("TeamLeadsManager", () => {
 
     rerender(<TeamLeadsManager links={[]} mentors={[LEAD, REPORTEE]} />);
     expect(screen.getByText("No team leads yet.")).toBeInTheDocument();
+  });
+
+  it("says nothing extra about a link whose two people are both still Mentors", () => {
+    render(<TeamLeadsManager links={[LINK]} mentors={[LEAD, REPORTEE]} />);
+    expect(screen.queryByText(/no longer a mentor/)).not.toBeInTheDocument();
+  });
+
+  it("notes a link whose reportee, lead, or both are no longer Mentors, and still ends it", async () => {
+    const user = userEvent.setup();
+    const reporteeGone = { ...LINK, reportee: { ...REPORTEE, isMentor: false } };
+    const leadGone = { ...LINK, id: 5, teamLead: { ...LEAD, isMentor: false }, reportee: { ...OTHER, isMentor: true } };
+    const bothGone = {
+      id: 6,
+      teamLead: { ...OTHER, isMentor: false },
+      reportee: { userId: 83, name: "Synthetic Departed", email: null, isMentor: false },
+      startedOn: "2026-11-13",
+    };
+    render(<TeamLeadsManager links={[reporteeGone, leadGone, bothGone]} mentors={[LEAD, REPORTEE, OTHER]} />);
+
+    const rows = within(screen.getByRole("list", { name: "Team leads" })).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Synthetic Reportee is no longer a mentor, so this link has no effect.");
+    expect(rows[1]).toHaveTextContent("Synthetic Lead is no longer a mentor, so this link has no effect.");
+    expect(rows[2]).toHaveTextContent(
+      "Synthetic Other and Synthetic Departed are no longer mentors, so this link has no effect."
+    );
+
+    await user.click(within(rows[0]).getByRole("button", { name: "End Synthetic Lead → Synthetic Reportee" }));
+    const dialog = screen.getByRole("dialog", { name: "End this team lead?" });
+    expect(dialog).toHaveTextContent(
+      "Synthetic Reportee is no longer a mentor, so this link has no effect. Ending it changes no one's access."
+    );
+    respond(204);
+    await user.click(within(dialog).getByRole("button", { name: "End" }));
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/blended-learning/team-leads/4/end", expect.objectContaining({ method: "POST" }));
+    expect(mockRefresh).toHaveBeenCalled();
   });
 
   it("adds a team lead and the Mentor they lead, then re-reads the page", async () => {
@@ -95,7 +135,7 @@ describe("TeamLeadsManager", () => {
     const user = userEvent.setup();
     const twinA = { userId: 80, name: "Synthetic Twin", email: "twin.a@test.local" };
     const twinB = { userId: 81, name: "Synthetic Twin", email: "twin.b@test.local" };
-    const link = { id: 5, teamLead: LEAD, reportee: twinA, startedOn: "2026-11-12" };
+    const link = { id: 5, teamLead: { ...LEAD, isMentor: true }, reportee: { ...twinA, isMentor: true }, startedOn: "2026-11-12" };
     render(<TeamLeadsManager links={[link]} mentors={[LEAD, twinA, twinB]} />);
 
     const form = screen.getByRole("form", { name: "Add a team lead" });
@@ -115,8 +155,13 @@ describe("TeamLeadsManager", () => {
   });
 
   it("counts a same-name Mentor who is only in a saved link (no longer an option)", () => {
-    const departed = { userId: 82, name: "Synthetic Reportee", email: "departed@test.local" };
-    render(<TeamLeadsManager links={[{ id: 6, teamLead: LEAD, reportee: departed, startedOn: "2026-11-12" }]} mentors={[LEAD, REPORTEE]} />);
+    const departed = { userId: 82, name: "Synthetic Reportee", email: "departed@test.local", isMentor: false };
+    render(
+      <TeamLeadsManager
+        links={[{ id: 6, teamLead: { ...LEAD, isMentor: true }, reportee: departed, startedOn: "2026-11-12" }]}
+        mentors={[LEAD, REPORTEE]}
+      />
+    );
 
     expect(within(screen.getByRole("list", { name: "Team leads" })).getByRole("listitem")).toHaveTextContent(
       "Synthetic Reportee (departed@test.local)"

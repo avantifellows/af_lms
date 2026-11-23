@@ -1,7 +1,12 @@
 import type { PoolClient } from "pg";
 
 import { query, withTransaction } from "./db";
-import { canBlendedLearning, permissionUserIdSql, type BlendedLearningAccess } from "./blended-learning-access";
+import {
+  canBlendedLearning,
+  liveBlendedMentorSql,
+  permissionUserIdSql,
+  type BlendedLearningAccess,
+} from "./blended-learning-access";
 import type { FieldErrors } from "./blended-learning-manage-input";
 import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 
@@ -15,7 +20,11 @@ import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 // `email` (the `user` row's) is shown on the Manage page (admins only) only
 // to tell apart Mentors who share a display name.
 export type TeamLeadPerson = { userId: number; name: string; email: string | null };
-export type TeamLeadLink = { id: number; teamLead: TeamLeadPerson; reportee: TeamLeadPerson; startedOn: string };
+// `isMentor`: still a live Blended Learning Mentor (liveBlendedMentorSql). A
+// Supervision with either side no longer one stays listed (so it can be
+// ended) but has no effect: the access check skips it.
+export type TeamLeadLinkPerson = TeamLeadPerson & { isMentor: boolean };
+export type TeamLeadLink = { id: number; teamLead: TeamLeadLinkPerson; reportee: TeamLeadLinkPerson; startedOn: string };
 
 export type TeamLeadResult =
   | { ok: true }
@@ -65,28 +74,44 @@ type LinkRow = {
   mentor_user_id: number | string;
   mentor_name: string;
   mentor_email: string | null;
+  supervisor_is_mentor: boolean;
+  mentor_is_mentor: boolean;
   started_on: string;
 };
 
-// The running current-year Supervisions, by team lead then reportee.
+// The running current-year Supervisions, by team lead then reportee, each
+// with whether the lead and the reportee are still live Mentors, so the page
+// can say why one has no effect.
 export async function listTeamLeadLinks(access: BlendedLearningAccess): Promise<TeamLeadLink[]> {
   if (!canBlendedLearning(access, "manage")) return [];
   const rows = await query<LinkRow>(
     `SELECT supervision.id, supervision.supervisor_user_id, ${NAME_SQL("lead")} AS supervisor_name,
             lead.email AS supervisor_email,
             supervision.mentor_user_id, ${NAME_SQL("reportee")} AS mentor_name, reportee.email AS mentor_email,
+            ${liveBlendedMentorSql("supervision.supervisor_user_id", "$2")} AS supervisor_is_mentor,
+            ${liveBlendedMentorSql("supervision.mentor_user_id", "$2")} AS mentor_is_mentor,
             ((supervision.started_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS started_on
      FROM blended_learning_mentor_supervisions supervision
      JOIN "user" lead ON lead.id = supervision.supervisor_user_id
      JOIN "user" reportee ON reportee.id = supervision.mentor_user_id
      WHERE supervision.academic_year = $1 AND supervision.ended_at IS NULL
      ORDER BY supervisor_name, mentor_name, supervision.id`,
-    [CURRENT_ACADEMIC_YEAR]
+    [CURRENT_ACADEMIC_YEAR, BLENDED_MENTOR_ROLE]
   );
   return rows.map((row) => ({
     id: Number(row.id),
-    teamLead: { userId: Number(row.supervisor_user_id), name: row.supervisor_name, email: row.supervisor_email },
-    reportee: { userId: Number(row.mentor_user_id), name: row.mentor_name, email: row.mentor_email },
+    teamLead: {
+      userId: Number(row.supervisor_user_id),
+      name: row.supervisor_name,
+      email: row.supervisor_email,
+      isMentor: row.supervisor_is_mentor === true,
+    },
+    reportee: {
+      userId: Number(row.mentor_user_id),
+      name: row.mentor_name,
+      email: row.mentor_email,
+      isMentor: row.mentor_is_mentor === true,
+    },
     startedOn: row.started_on,
   }));
 }
