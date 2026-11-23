@@ -28,17 +28,21 @@ function row(studentId: number, mentorUserId: number, name: string) {
   };
 }
 
-// Fixture: not-ended current-year Mapping rows, of which `startsLater` (by
-// Student) are future-dated; the mock narrows them by the bound Mentor ids
-// and, when the SQL asks for started Mappings, drops those, as the WHERE
-// clause does.
-function givenMappedMentees(rows: ReturnType<typeof row>[], startsLater: number[] = []) {
+// The Mapping source's "period contains now" predicate.
+const CONTAINS_NOW =
+  "mapping.started_at <= (now() AT TIME ZONE 'UTC') AND (mapping.ended_at IS NULL OR mapping.ended_at > (now() AT TIME ZONE 'UTC'))";
+
+// Fixture: current-year Mapping rows, of which `startsLater` are dated to
+// start in the future (rows that end in the future still contain now); the
+// mock narrows them by the bound Mentor ids and, when the SQL has the period
+// predicate, drops those, as the WHERE clause does.
+function givenMappedMentees(rows: ReturnType<typeof row>[], startsLater: ReturnType<typeof row>[] = []) {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     const mentors = params?.[1] as number[] | null;
-    const startedOnly = sql.includes("mapping.started_at <= (now() AT TIME ZONE 'UTC')");
+    const currentOnly = sql.includes(CONTAINS_NOW);
     return rows
       .filter((r) => mentors == null || mentors.includes(r.mentor_user_id))
-      .filter((r) => !startedOnly || !startsLater.includes(r.student_id));
+      .filter((r) => !currentOnly || !startsLater.includes(r));
   });
 }
 
@@ -74,19 +78,32 @@ describe("listMentees", () => {
     await listMentees({ access: ADMIN, today: "2026-10-22" });
 
     expect(mockQuery.mock.calls[0][0]).toMatch(
-      /WHERE mapping\.academic_year = \$1 AND mapping\.ended_at IS NULL AND mapping\.started_at <= \(now\(\) AT TIME ZONE 'UTC'\) AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/
+      /WHERE mapping\.academic_year = \$1 AND mapping\.started_at <= \(now\(\) AT TIME ZONE 'UTC'\) AND \(mapping\.ended_at IS NULL OR mapping\.ended_at > \(now\(\) AT TIME ZONE 'UTC'\)\) AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/
     );
   });
 
   it("leaves out a Mentee whose Mapping starts later, for the Mentor and an admin", async () => {
     const later = row(502, 9001, "Uma Later");
-    givenMappedMentees([FAIZANS, later], [later.student_id]);
+    givenMappedMentees([FAIZANS, later], [later]);
 
     const own = await listMentees({ access: MENTOR, today: "2026-10-22" });
     expect([...own.talkToFirst, ...own.everyoneElse].map((m) => m.name)).toEqual(["Ira Attempt"]);
 
     const all = await listMentees({ access: ADMIN, today: "2026-10-22" });
     expect([...all.talkToFirst, ...all.everyoneElse].map((m) => m.name)).toEqual(["Ira Attempt"]);
+  });
+
+  it("lists a reassigned Mentee under the old Mentor until the new Mapping starts", async () => {
+    // db-service ends the old Mapping at the new one's (future) started_at.
+    const oldMapping = row(503, 9001, "Rhea Handover");
+    const newMapping = row(503, 9002, "Rhea Handover");
+    givenMappedMentees([oldMapping, newMapping], [newMapping]);
+
+    const own = await listMentees({ access: MENTOR, today: "2026-10-22" });
+    expect([...own.talkToFirst, ...own.everyoneElse].map((m) => m.name)).toEqual(["Rhea Handover"]);
+
+    const theirs = await listMentees({ access: ADMIN, mentorUserId: 9002, today: "2026-10-22" });
+    expect([...theirs.talkToFirst, ...theirs.everyoneElse]).toEqual([]);
   });
 
   it("gives a Mentor with no Mentor user id an empty list without reading", async () => {

@@ -360,10 +360,14 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `20260921120000` + its ensure migration; the other eight: PR #804,
   `20261022120000`–`20261022120700`). af_lms reads and writes them directly over SQL (ADR 0005)
   through `query()`/`withTransaction`, never through DB Service HTTP.
-- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`
-  and `started_at <= (now() AT TIME ZONE 'UTC')` (columns are UTC `timestamp`; a Mapping the
-  db-service import sheet dates in the future grants nothing until then, though it already holds
-  the partial unique index's one running slot) whose Student is not marked a dropout (`student.status = 'dropout'`; NULL or any other
+- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR`, i.e. whose period contains now:
+  `started_at <= (now() AT TIME ZONE 'UTC') AND (ended_at IS NULL OR ended_at > (now() AT TIME ZONE 'UTC'))`
+  (columns are UTC `timestamp`; half-open, so a zero-length row contains nothing). A Mapping the
+  db-service import sheet dates in the future grants nothing until it starts, though it already
+  holds the partial unique index's one running slot; on a reassignment db-service ends the old
+  Mapping at the new one's `started_at`, so the old Mentor keeps the Student until then. A
+  db-service exclusion constraint (added alongside this change) keeps one Student's periods in a year from overlapping, so at
+  most one row is active at any instant. Only Students not marked a dropout count (`student.status = 'dropout'`; NULL or any other
   status stays in), written once as `activeBlendedMappingSql(alias, yearParam)` in
   `src/lib/blended-learning-access.ts` (`notBlendedDropoutSql(studentIdSql)` is the dropout
   half). Every Blended Learning scope uses it: `canAccessBlendedStudent` (so a dropout's page,
@@ -677,8 +681,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `started_at`, then the Mapping table's audit and lifecycle columns and CHECKs. One running row per
   (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
   `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings
-  (not ended and already started). The Manage list and End still use `ended_at IS NULL` alone,
-  matching the index, so a future-dated link is listed and can be ended (at its `started_at`).
+  (period contains now). The Manage list and End still use `ended_at IS NULL` alone, matching
+  the index, so a future-dated link is listed and can be ended (at its `started_at`); a link
+  given a future `ended_at` outside the app is off the list but grants until then.
 - Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
   `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
   filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an
@@ -692,7 +697,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `supervision_ended`). Add: both people must hold a live `blended_mentor` permission (Mappings alone
   do not count), checked inside the insert's transaction with their permission rows locked
   `FOR SHARE`, then `INSERT … ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; self-supervision is a
-  422, a running pair a 409. End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND ended_at IS
+  422, a running pair a 409 (also when a racing add for the pair wins and this insert hits db-service's
+  `blm_supervisions_no_overlapping_periods` exclusion constraint, `23P01`; other errors still throw). End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND ended_at IS
   NULL`, a 404 when nothing matched (so a pair ended and re-added meanwhile keeps its new row).
 - Flags tab Mentor filter: for a team lead ("My students" or a reportee) it matches the Student's
   current active Mapping's Mentor (dropouts left out), not who logged the flagged Conversation; an

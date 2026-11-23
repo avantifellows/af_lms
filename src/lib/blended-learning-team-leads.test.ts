@@ -180,6 +180,31 @@ describe("writes", () => {
     expect(params).toEqual(["blended_mentor", [4242, 9002]]);
   });
 
+  it("is a 409 when the pair already runs a Supervision (ON CONFLICT inserts nothing)", async () => {
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockResolvedValueOnce({ rows: [] });
+    expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).toEqual({
+      ok: false, status: 409, error: "This team lead already leads this mentor.",
+    });
+  });
+
+  it("is the same 409 when a racing add for the pair wins and this insert breaks the no-overlap constraint", async () => {
+    const overlap = Object.assign(new Error("conflicting key value violates exclusion constraint"), {
+      code: "23P01", constraint: "blm_supervisions_no_overlapping_periods",
+    });
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockRejectedValueOnce(overlap);
+    // The real withTransaction rolls back and rethrows; the mock rethrows too.
+    expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).toEqual({
+      ok: false, status: 409, error: "This team lead already leads this mentor.",
+    });
+    expect(clientQuery.mock.calls[1][0]).toContain("INSERT INTO blended_learning_mentor_supervisions");
+  });
+
+  it("still throws any other insert error", async () => {
+    const unique = Object.assign(new Error("duplicate key value"), { code: "23505" });
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockRejectedValueOnce(unique);
+    await expect(createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).rejects.toBe(unique);
+  });
+
   it("checks both people and inserts in the same transaction", async () => {
     clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockResolvedValueOnce({ rows: [{ id: 7 }] });
     expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).toEqual({ ok: true });

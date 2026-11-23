@@ -26,10 +26,21 @@ const mockQuery = vi.mocked(query);
 
 // What the scope SQL adds to leave dropouts out.
 const DROPOUT_PREDICATE = "dropout_student.status = 'dropout'";
-// What it adds, per alias, to leave out rows that start later (UTC now).
-const startedPredicate = (alias: string) => `${alias}.started_at <= (now() AT TIME ZONE 'UTC')`;
-// A started_at the import sheet could future-date a row to.
+// What it adds, per alias, to keep only rows whose period [started_at,
+// ended_at) contains now (UTC).
+const periodPredicate = (alias: string) =>
+  `${alias}.started_at <= (now() AT TIME ZONE 'UTC') AND (${alias}.ended_at IS NULL OR ${alias}.ended_at > (now() AT TIME ZONE 'UTC'))`;
+// The fixtures' "now", a time before it (the default started_at) and one
+// after it: a future started_at from the import sheet, or a future ended_at
+// from a reassignment that hands over at the new Mapping's start.
+const NOW = "2026-11-23T00:00:00Z";
+const EARLIER = "2026-06-01T00:00:00Z";
 const LATER = "2099-01-01T00:00:00Z";
+type Period = { started_at?: string; ended_at?: string | null };
+// The fixture row's period contains NOW (ISO strings compare in time order).
+function containsNow({ started_at = EARLIER, ended_at = null }: Period): boolean {
+  return started_at <= NOW && (ended_at == null || ended_at > NOW);
+}
 
 type Row = {
   email: string;
@@ -48,11 +59,11 @@ type Supervision = {
 };
 
 // Fixture tables: one live user_permission row, the `user` table, the
-// Supervisions (running unless `ended_at` is set, started unless `started_at`
-// is LATER) and the `user` ids that hold a live blended_mentor permission (by
-// default every supervised Mentor). The Supervisions read applies the
-// statement's own predicates: the year, running and started filters, and the
-// live-permission check when the SQL has it.
+// Supervisions (started EARLIER and not ended unless set) and the `user` ids
+// that hold a live blended_mentor permission (by default every supervised
+// Mentor). The Supervisions read applies the statement's own predicates: the
+// year, the period containing NOW, and the live-permission check when the SQL
+// has them.
 function givenTables(
   permission: Row | null,
   users: { id: number; email: string }[] = [],
@@ -61,13 +72,11 @@ function givenTables(
 ) {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (sql.includes("FROM blended_learning_mentor_supervisions")) {
-      const runningOnly = sql.includes("supervision.ended_at IS NULL");
-      const startedOnly = sql.includes(startedPredicate("supervision"));
+      const currentOnly = sql.includes(periodPredicate("supervision"));
       const liveOnly = sql.includes("FROM user_permission live_permission") && params?.[2] === "blended_mentor";
       return supervisions
         .filter((row) => row.supervisor_user_id === params?.[0] && row.academic_year === params?.[1])
-        .filter((row) => !runningOnly || row.ended_at == null)
-        .filter((row) => !startedOnly || row.started_at !== LATER)
+        .filter((row) => !currentOnly || containsNow(row))
         .filter((row) => !liveOnly || liveMentorUserIds.includes(row.mentor_user_id))
         .map((row) => ({ mentor_user_id: String(row.mentor_user_id) }));
     }
@@ -121,7 +130,7 @@ describe("getBlendedLearningAccess", () => {
       supervisedMentorUserIds: [9004, 9002],
     });
     const [sql] = mockQuery.mock.calls.find(([text]) => text.includes("blended_learning_mentor_supervisions"))!;
-    expect(sql).toContain("supervision.ended_at IS NULL");
+    expect(sql).toContain(periodPredicate("supervision"));
     // A Supervision has no Student, so the Mapping's dropout filter is not on it.
     expect(sql).not.toContain(DROPOUT_PREDICATE);
     expect(sql).not.toContain("supervision.student_id");
@@ -157,8 +166,22 @@ describe("getBlendedLearningAccess", () => {
     expect(access).toMatchObject({ supervisedMentorUserIds: [9004] });
     expect(supervisedMentor(access!, 9002)).toBeNull();
     expect(viewableMentorUserIds(access!)).toEqual([9001, 9004]);
-    const [sql] = mockQuery.mock.calls.find(([text]) => text.includes("blended_learning_mentor_supervisions"))!;
-    expect(sql).toContain(startedPredicate("supervision"));
+  });
+
+  it("keeps a Supervision ended in the future in force until its end", async () => {
+    givenTables(
+      { email: "lead@test.local", level: 1, role: "blended_mentor", read_only: false, user_id: 9001 },
+      [],
+      [
+        { supervisor_user_id: 9001, mentor_user_id: 9002, academic_year: CURRENT_ACADEMIC_YEAR, ended_at: LATER },
+        { supervisor_user_id: 9001, mentor_user_id: 9004, academic_year: CURRENT_ACADEMIC_YEAR, started_at: EARLIER, ended_at: EARLIER },
+      ],
+    );
+
+    const access = await getBlendedLearningAccess("lead@test.local");
+    // 9004's row is zero-length (ended_at = started_at): it contains no instant.
+    expect(access).toMatchObject({ supervisedMentorUserIds: [9002] });
+    expect(isTeamLead(access!)).toBe(true);
   });
 
   it("does not make a Mentor a team lead through a Supervision that starts later", async () => {
@@ -318,20 +341,20 @@ describe("canAccessBlendedStudent", () => {
     actorEmail: "shalinijha@avantifellows.org",
   };
 
-  // Fixture: the not-ended current-year Mapping per Student, each Student's
-  // status (omitted: NULL) and when the Mapping starts (omitted: already). The
-  // SQL's dropout and started predicates are applied when present.
+  // Fixture: current-year Mapping rows per Student, each Student's status
+  // (omitted: NULL) and the row's period (omitted: started EARLIER, not
+  // ended). The SQL's dropout and period predicates are applied when present.
   function givenActiveMappings(
-    mappings: { student_id: number; mentor_user_id: number; status?: string | null; started_at?: string }[]
+    mappings: ({ student_id: number; mentor_user_id: number; status?: string | null } & Period)[]
   ) {
     mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
       if (!sql.includes("blended_learning_mentor_mentee_mappings")) return [];
       const dropoutsHidden = sql.includes(DROPOUT_PREDICATE);
-      const startedOnly = sql.includes(startedPredicate("mapping"));
+      const currentOnly = sql.includes(periodPredicate("mapping"));
       return mappings
         .filter((m) => m.student_id === Number(params?.[0]))
         .filter((m) => !dropoutsHidden || m.status !== "dropout")
-        .filter((m) => !startedOnly || m.started_at !== LATER)
+        .filter((m) => !currentOnly || containsNow(m))
         .map(({ mentor_user_id }) => ({ mentor_user_id }));
     });
   }
@@ -370,6 +393,30 @@ describe("canAccessBlendedStudent", () => {
     expect(await canAccessBlendedStudent(readOnlyAdmin, 507)).toBe(false);
   });
 
+  it("keeps a reassigned Student with the old Mentor until the new Mapping starts", async () => {
+    // db-service ends the old Mapping at the new one's started_at, here later.
+    givenActiveMappings([
+      { student_id: 508, mentor_user_id: 9001, ended_at: LATER },
+      { student_id: 508, mentor_user_id: 9002, started_at: LATER },
+    ]);
+    const newMentor: BlendedLearningAccess = { ...mentor, actorEmail: "new.mentor@test.local", mentorUserId: 9002 };
+    expect(await canAccessBlendedStudent(mentor, 508)).toBe(true);
+    expect(await canAccessBlendedStudent(newMentor, 508)).toBe(false);
+    expect(await canViewBlendedStudent(newMentor, 508)).toBe(false);
+    expect(await canAccessBlendedStudent(readOnlyAdmin, 508)).toBe(true);
+  });
+
+  it("refuses everyone a Student whose only Mapping ended, or ended as it started", async () => {
+    givenActiveMappings([
+      { student_id: 509, mentor_user_id: 9001, ended_at: EARLIER },
+      { student_id: 510, mentor_user_id: 9001, started_at: EARLIER, ended_at: EARLIER },
+    ]);
+    for (const studentId of [509, 510]) {
+      expect(await canAccessBlendedStudent(mentor, studentId)).toBe(false);
+      expect(await canAccessBlendedStudent(readOnlyAdmin, studentId)).toBe(false);
+    }
+  });
+
   it("still lets everyone reach a Student with no status or another status", async () => {
     givenActiveMappings([
       { student_id: 505, mentor_user_id: 9001, status: null },
@@ -392,11 +439,13 @@ describe("canAccessBlendedStudent", () => {
 });
 
 describe("the Mapping source SQL", () => {
-  it("is an active current-year Mapping, already started, whose Student is not marked a dropout", () => {
+  it("is a current-year Mapping whose period contains now and whose Student is not marked a dropout", () => {
     const sql = activeBlendedMappingSql("mapping", "$2");
-    expect(sql).toContain("mapping.academic_year = $2 AND mapping.ended_at IS NULL");
-    expect(sql).toContain(startedPredicate("mapping"));
+    expect(sql).toContain(`mapping.academic_year = $2 AND ${periodPredicate("mapping")}`);
     expect(sql).toContain(notBlendedDropoutSql("mapping.student_id"));
+    // Half-open: a row ends at ended_at, so a zero-length row contains nothing.
+    expect(sql).toContain("mapping.ended_at > (now() AT TIME ZONE 'UTC')");
+    expect(sql).not.toContain("ended_at >=");
   });
 
   it("leaves out only status 'dropout', so a NULL status stays in", () => {
@@ -425,7 +474,7 @@ describe("lockMappingInScope", () => {
     expect(await lockMappingInScope({ query: clientQuery } as never, mentor, 501)).toEqual(mapping);
     const [sql, params] = clientQuery.mock.calls[0];
     expect(sql).toContain(DROPOUT_PREDICATE);
-    expect(sql).toContain(startedPredicate("mapping"));
+    expect(sql).toContain(periodPredicate("mapping"));
     expect(sql).toMatch(/FOR SHARE$/);
     expect(params).toEqual([501, "2026-2027"]);
   });

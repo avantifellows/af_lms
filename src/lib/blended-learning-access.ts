@@ -139,37 +139,42 @@ export function notBlendedDropoutSql(studentIdSql: string): string {
 }
 
 // Mapping rows as stored: not ended (`ended_at IS NULL`) for
-// CURRENT_ACADEMIC_YEAR, whatever the Student's status and even when they
-// start later. Only operator data loads (the links import) use it; everything
-// Mentors and admins see goes through activeBlendedMappingSql.
+// CURRENT_ACADEMIC_YEAR, whatever the Student's status and whether or not
+// their period has started. Only operator data loads (the links import) use
+// it; everything Mentors and admins see goes through activeBlendedMappingSql.
 export function currentBlendedMappingRowSql(alias: string, yearParam: string): string {
   return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL`;
 }
 
-// The Mapping or Supervision row (`alias`) has started: its `started_at` (a
-// UTC timestamp without time zone) is not after now. The import sheet may
-// future-date a row; it grants nothing until then, though it still fills the
-// one-running-row slot (the partial unique index is on `ended_at IS NULL`
-// alone), so writes that must match that index leave this out.
-function startedBlendedRowSql(alias: string): string {
-  return `${alias}.started_at <= (now() AT TIME ZONE 'UTC')`;
+// The Mapping or Supervision row's (`alias`) period [started_at, ended_at)
+// contains now. Both are UTC timestamps without time zone. The import sheet
+// may date a row in the future, and a reassignment ends the old row at the
+// new row's started_at, so a row can be not-yet-started or ended-in-the-future:
+// the old Mentor keeps the Student until the handover, the new one gets them
+// from then on. A zero-length row (ended_at = started_at) contains nothing.
+// db-service's exclusion constraint keeps one Student's (or one supervision
+// pair's) periods in a year from overlapping, so at most one row contains any
+// instant. Slot and write guards (the partial unique index on
+// `ended_at IS NULL`, the team-lead insert and End, the Manage list) leave
+// this out: a future row still holds the slot and can still be ended.
+function containsNowBlendedRowSql(alias: string): string {
+  return `${alias}.started_at <= (now() AT TIME ZONE 'UTC') AND (${alias}.ended_at IS NULL OR ${alias}.ended_at > (now() AT TIME ZONE 'UTC'))`;
 }
 
-// The Mapping source: active (not ended and already started) current-year
-// Mappings of Students not marked a dropout. A dropout leaves Blended
-// Learning everywhere (list, Mentor cards, Flags, Common Action Items, their
-// page) while the Mapping row stays, so they come back if their status
-// changes back. `yearParam` is the placeholder bound to CURRENT_ACADEMIC_YEAR.
+// The Mapping source: active current-year Mappings (period contains now) of
+// Students not marked a dropout. A dropout leaves Blended Learning everywhere
+// (list, Mentor cards, Flags, Common Action Items, their page) while the
+// Mapping row stays, so they come back if their status changes back.
+// `yearParam` is the placeholder bound to CURRENT_ACADEMIC_YEAR.
 export function activeBlendedMappingSql(alias: string, yearParam: string): string {
-  return `${currentBlendedMappingRowSql(alias, yearParam)} AND ${startedBlendedRowSql(alias)} AND ${notBlendedDropoutSql(`${alias}.student_id`)}`;
+  return `${alias}.academic_year = ${yearParam} AND ${containsNowBlendedRowSql(alias)} AND ${notBlendedDropoutSql(`${alias}.student_id`)}`;
 }
 
-// Active Supervisions (not ended and already started) for
-// CURRENT_ACADEMIC_YEAR. A Supervision has the Mapping's lifecycle columns but
-// no Student, so the dropout filter applies to the supervised Mentor's
-// Mappings instead.
+// Active Supervisions (period contains now) for CURRENT_ACADEMIC_YEAR. A
+// Supervision has the Mapping's lifecycle columns but no Student, so the
+// dropout filter applies to the supervised Mentor's Mappings instead.
 function activeBlendedSupervisionSql(alias: string, yearParam: string): string {
-  return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL AND ${startedBlendedRowSql(alias)}`;
+  return `${alias}.academic_year = ${yearParam} AND ${containsNowBlendedRowSql(alias)}`;
 }
 
 // The Mentors whose Students the viewer sees: a Mentor's own and supervised

@@ -179,16 +179,32 @@ async function insertSupervision(client: PoolClient, pair: Pair, actorEmail: str
   return result.rows.length;
 }
 
+// Postgres exclusion_violation: db-service's
+// blm_supervisions_no_overlapping_periods keeps a pair's [started_at,
+// ended_at) periods in a year from overlapping. Two adds for the same pair
+// racing can hit it instead of the ON CONFLICT (the loser's period overlaps
+// the winner's), so it means the same as 0 rows inserted: the pair already runs.
+function isOverlappingPeriod(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "23P01";
+}
+
 // Starts a team lead's Supervision of a Mentor; a 409 when it already runs.
 export async function createTeamLeadLink(access: BlendedLearningAccess, raw: unknown): Promise<TeamLeadResult> {
   if (!canBlendedLearning(access, "manage")) return FORBIDDEN;
   const parsed = parsePair(raw);
   if (!parsed.ok) return invalid(parsed.fieldErrors);
-  // Field errors when either is not a live Mentor, else the rows inserted.
-  const outcome = await withTransaction(async (client) => {
-    const people = await notMentors(client, parsed.pair);
-    return people ?? (await insertSupervision(client, parsed.pair, access.actorEmail));
-  });
+  // Field errors when either is not a live Mentor, else the rows inserted. An
+  // overlapping period is caught outside the transaction, so it rolls back.
+  let outcome: FieldErrors | number;
+  try {
+    outcome = await withTransaction(async (client) => {
+      const people = await notMentors(client, parsed.pair);
+      return people ?? (await insertSupervision(client, parsed.pair, access.actorEmail));
+    });
+  } catch (error) {
+    if (!isOverlappingPeriod(error)) throw error;
+    outcome = 0;
+  }
   if (typeof outcome !== "number") return invalid(outcome);
   if (outcome === 0) return { ok: false, status: 409, error: "This team lead already leads this mentor." };
   return { ok: true };

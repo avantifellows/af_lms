@@ -289,7 +289,7 @@ test.describe("Blended Learning supervisor view", () => {
         [conversationId, lataId, comment, BLENDED_SUPERVISOR.email]
       );
       const ended = await pool.query<{ id: string }>(
-        `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = now(), end_source = 'e2e_fixture', end_reason = 'reassigned'
+        `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = date_trunc('second', now() AT TIME ZONE 'UTC'), end_source = 'e2e_fixture', end_reason = 'reassigned'
          WHERE student_id = $1 AND mentor_user_id = $2 AND academic_year = $3 AND ended_at IS NULL
          RETURNING id`,
         [lataId, leadId, CURRENT_ACADEMIC_YEAR]

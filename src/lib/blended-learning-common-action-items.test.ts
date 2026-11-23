@@ -25,9 +25,9 @@ const MENTOR: BlendedLearningAccess = {
   kind: "mentor", role: "blended_mentor", readOnly: false, actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 const YEAR = "2026-2027";
-// The Mapping source's started and dropout predicates, on the targeted Mapping.
+// The Mapping source's period and dropout predicates, on the targeted Mapping.
 const DROPOUTS_LEFT_OUT =
-  /mapping\.ended_at IS NULL AND mapping\.started_at <= \(now\(\) AT TIME ZONE 'UTC'\) AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/;
+  /mapping\.started_at <= \(now\(\) AT TIME ZONE 'UTC'\) AND \(mapping\.ended_at IS NULL OR mapping\.ended_at > \(now\(\) AT TIME ZONE 'UTC'\)\) AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/;
 
 function result(rows: Record<string, unknown>[] = [], rowCount = rows.length) {
   return { rows, rowCount };
@@ -72,7 +72,7 @@ describe("previewCommonTarget", () => {
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [sql, bound] = mockQuery.mock.calls[0];
     expect(bound).toEqual(params);
-    expect(sql).toMatch(/academic_year = \$5 AND mapping\.ended_at IS NULL/);
+    expect(sql).toMatch(/academic_year = \$5 AND mapping\.started_at <= /);
     expect(sql).toMatch(DROPOUTS_LEFT_OUT);
     expect(sql).toMatch(/er\.group_type = 'grade' AND er\.is_current IS TRUE/);
     expect(sql).toMatch(/st\.student_id = ANY\(\$4::text\[\]\)/);
