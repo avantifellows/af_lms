@@ -289,7 +289,7 @@ test.describe("Blended Learning supervisor view", () => {
         [conversationId, lataId, comment, BLENDED_SUPERVISOR.email]
       );
       const ended = await pool.query<{ id: string }>(
-        `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = date_trunc('second', now() AT TIME ZONE 'UTC'), end_source = 'e2e_fixture', end_reason = 'reassigned'
+        `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = date_trunc('second', now() AT TIME ZONE 'UTC'), ended_by_email = 'e2e-fixture@example.com', end_source = 'e2e_fixture', end_reason = 'reassigned'
          WHERE student_id = $1 AND mentor_user_id = $2 AND academic_year = $3 AND ended_at IS NULL
          RETURNING id`,
         [lataId, leadId, CURRENT_ACADEMIC_YEAR]
@@ -319,7 +319,7 @@ test.describe("Blended Learning supervisor view", () => {
           await client.query("BEGIN");
           await client.query(`DELETE FROM blended_learning_mentor_mentee_mappings WHERE id = $1`, [added.movedMapping]);
           await client.query(
-            `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = NULL, end_source = NULL, end_reason = NULL WHERE id = $1`,
+            `UPDATE blended_learning_mentor_mentee_mappings SET ended_at = NULL, ended_by_email = NULL, end_source = NULL, end_reason = NULL WHERE id = $1`,
             [added.endedMapping]
           );
           await client.query(`DELETE FROM blended_learning_mentor_flags WHERE conversation_id = $1`, [added.conversationId]);

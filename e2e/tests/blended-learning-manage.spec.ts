@@ -267,7 +267,7 @@ test.describe("Blended Learning Manage — Team leads", () => {
         pool.query(
           `UPDATE blended_learning_mentor_supervisions
            SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
-               end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
+               ended_by_email = 'e2e-cleanup@example.com', end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
            WHERE ended_at IS NULL AND supervisor_user_id = $1`,
           [mentorDUserId]
         )
@@ -321,7 +321,7 @@ test.describe("Blended Learning Manage — Team leads", () => {
         pool.query(
           `UPDATE blended_learning_mentor_supervisions
            SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
-               end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
+               ended_by_email = 'e2e-cleanup@example.com', end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
            WHERE ended_at IS NULL AND supervisor_user_id = $1`,
           [mentorDUserId]
         )

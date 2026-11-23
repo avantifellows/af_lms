@@ -354,9 +354,10 @@ async function seedMapping(
   await client.query(
     `INSERT INTO blended_learning_mentor_mentee_mappings
        (student_id, mentor_user_id, program_id, academic_year, started_at, assignment_source,
-        ended_at, end_source, end_reason)
+        ended_at, ended_by_email, end_source, end_reason)
      VALUES ($1, $2, $3, $4, now() - make_interval(days => $5), 'e2e_fixture',
        CASE WHEN $6::int IS NULL THEN NULL ELSE now() - make_interval(days => $6::int) END,
+       CASE WHEN $6::int IS NULL THEN NULL ELSE 'e2e-fixture@example.com' END,
        CASE WHEN $6::int IS NULL THEN NULL ELSE 'e2e_fixture' END,
        CASE WHEN $6::int IS NULL THEN NULL ELSE 'reassigned' END)`,
     [
@@ -847,10 +848,10 @@ async function seedSupervisions(
   await client.query(
     `INSERT INTO blended_learning_mentor_supervisions
        (supervisor_user_id, mentor_user_id, academic_year, started_at, assignment_source,
-        ended_at, end_source, end_reason)
+        ended_at, ended_by_email, end_source, end_reason)
      VALUES
-       ($1, $2, $4, now() - interval '30 days', 'e2e_fixture', NULL, NULL, NULL),
-       ($1, $3, $4, now() - interval '60 days', 'e2e_fixture', now() - interval '31 days', 'e2e_fixture', 'team_changed')`,
+       ($1, $2, $4, now() - interval '30 days', 'e2e_fixture', NULL, NULL, NULL, NULL),
+       ($1, $3, $4, now() - interval '60 days', 'e2e_fixture', now() - interval '31 days', 'e2e-fixture@example.com', 'e2e_fixture', 'team_changed')`,
     [people.supervisor, people.mentorB, people.mentorA, CURRENT_ACADEMIC_YEAR]
   );
 }
