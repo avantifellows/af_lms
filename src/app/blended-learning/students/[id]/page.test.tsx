@@ -198,6 +198,7 @@ describe("MenteeDetailPage", () => {
       initialRetryOffered: true,
       canManage: true,
       reviewHref: "/blended-learning/students/501/log",
+      hideActions: false,
     });
   });
 
@@ -243,15 +244,16 @@ describe("MenteeDetailPage", () => {
       mockGetDraftStatus.mockResolvedValue({ id: 42, state: "failed", retryOffered: false });
     });
 
-    it("shows the page view only: no way to log, review or manage the draft", async () => {
+    it("shows the page view only: no way to log, review or manage the draft, not even disabled", async () => {
       await renderPage("502");
 
       expect(screen.getByRole("heading", { level: 1, name: "Ira Sharma" })).toBeInTheDocument();
       expect(screen.getByRole("note")).toHaveTextContent("View only. Reportee mentors this student");
       expect(screen.queryByRole("link", { name: "Log conversation" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Log conversation" })).not.toBeInTheDocument();
       expect(screen.queryByText("Log the first one to start this student's history.")).not.toBeInTheDocument();
       expect(mockDraftStatus).toHaveBeenCalledWith(
-        expect.objectContaining({ canManage: false, reviewHref: null, initialRetryOffered: false })
+        expect.objectContaining({ canManage: false, reviewHref: null, initialRetryOffered: false, hideActions: true })
       );
     });
 
@@ -325,6 +327,7 @@ describe("MenteeDetailPage", () => {
       initialRetryOffered: false,
       canManage: false,
       reviewHref: null,
+      hideActions: false,
     });
     // The Mentor's layout, view only: Log conversation stays in place, disabled.
     expect(screen.queryByRole("link", { name: "Log conversation" })).not.toBeInTheDocument();

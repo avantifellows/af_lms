@@ -231,6 +231,18 @@ describe("DraftStatus retry and discard", () => {
     expect(screen.getByRole("button", { name: "Discard" })).toHaveAttribute("title", "View only");
   });
 
+  it("shows the state but no controls at all with hideActions (a team lead on a reportee's Mentee)", () => {
+    const { unmount } = render(<DraftStatus draftId={43} initialState="failed" initialRetryOffered hideActions />);
+    expect(screen.getByText("Drafting failed")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    unmount();
+
+    render(<DraftStatus draftId={44} initialState="ready" hideActions />);
+    expect(screen.getByText("Draft ready to review")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review draft" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review draft" })).not.toBeInTheDocument();
+  });
+
   it("shows the server's unreadable refusal and a lost connection as errors", async () => {
     render(<DraftStatus draftId={43} initialState="failed" initialRetryOffered canManage />);
 

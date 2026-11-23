@@ -181,7 +181,9 @@ test.describe("Blended Learning supervisor view", () => {
     await expect(page.getByRole("heading", { level: 1, name: fullName(tara) })).toBeVisible();
     await expect(page.getByRole("note")).toContainText("View only.");
     await expect(page.getByText(FEED_FLAGS.taraMaths.comment)).toBeVisible();
+    // No way to log at all: not a link, and not a greyed-out button either.
     await expect(page.getByRole("link", { name: "Log conversation" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Log conversation" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^Back to .*'s students$/ })).toHaveAttribute(
       "href",
       `/blended-learning/mentors/${mentorBId}`
@@ -189,6 +191,34 @@ test.describe("Blended Learning supervisor view", () => {
 
     await page.goto(`/blended-learning/students/${taraId}/log`);
     await expect(page).toHaveURL(new RegExp(`/blended-learning/students/${taraId}$`));
+  });
+
+  test("a supervised Mentor's Mentee's open draft shows its state but no Retry, Discard or Review", async ({ page }) => {
+    const taraId = await studentId(tara);
+    const draftId = await withPool(async (pool) => {
+      const result = await pool.query<{ id: string }>(
+        `INSERT INTO blended_learning_conversation_drafts
+           (student_id, program_id, academic_year, mentor_user_id, created_by_email, state,
+            call_recording_s3_key, recording_content_type)
+         SELECT mapping.student_id, mapping.program_id, mapping.academic_year, mapping.mentor_user_id, $3, 'failed',
+                'lms-documents/blended-learning/recordings/e2e-supervisor-draft.mp3', 'audio/mpeg'
+         FROM blended_learning_mentor_mentee_mappings mapping
+         WHERE mapping.student_id = $1 AND mapping.academic_year = $2 AND mapping.ended_at IS NULL
+         LIMIT 1
+         RETURNING id`,
+        [taraId, CURRENT_ACADEMIC_YEAR, BLENDED_MENTOR_B.email]
+      );
+      return Number(result.rows[0].id);
+    });
+    try {
+      await page.goto(`/blended-learning/students/${taraId}`);
+      const draft = page.getByRole("region", { name: "Conversation Draft" });
+      await expect(draft).toContainText("Drafting failed");
+      await expect(draft.getByRole("button")).toHaveCount(0);
+      await expect(draft.getByRole("link")).toHaveCount(0);
+    } finally {
+      await withPool((pool) => pool.query(`DELETE FROM blended_learning_conversation_drafts WHERE id = $1`, [draftId]));
+    }
   });
 
   test("their own Mentee's page goes back to My Students", async ({ page }) => {

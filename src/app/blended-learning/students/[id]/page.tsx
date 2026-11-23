@@ -36,7 +36,8 @@ import { SCREENER_QUESTIONS } from "./screenerQuestions";
 // history, where the Profile Doc's latest entry sits at its date. Notes and
 // photos load on demand from their API routes.
 // Admins and read-only Mentors see the same page, view only: the log button
-// and the draft's controls stay in place, disabled. Open Action Items are
+// and the draft's controls stay in place, disabled. A team lead on a
+// reportee's Mentee gets none of them: the View only notice says why. Open Action Items are
 // ticked done from the log page. Only Blended Learning Admins (read-only too)
 // can play a saved Call Recording or read its transcript. A Conversation
 // that used the Screener says so, with the Student's one Screener Feedback
@@ -104,7 +105,8 @@ function ProfileLinks({ mentee }: { mentee: MenteeDetail }) {
 }
 
 // The page heading: name, profile line, contact and links, with the way to
-// log beside it (below it on a phone); disabled for a view-only viewer.
+// log beside it (below it on a phone); disabled for an admin or a read-only
+// Mentor, and left out for a team lead on a reportee's Mentee (viewOnly).
 function Profile({ mentee, canLog }: { mentee: MenteeDetail; canLog: boolean }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
@@ -122,9 +124,11 @@ function Profile({ mentee, canLog }: { mentee: MenteeDetail; canLog: boolean }) 
           Log conversation
         </Link>
       ) : (
-        <Button type="button" disabled title="View only" className="px-5">
-          Log conversation
-        </Button>
+        !mentee.viewOnly && (
+          <Button type="button" disabled title="View only" className="px-5">
+            Log conversation
+          </Button>
+        )
       )}
     </div>
   );
@@ -436,6 +440,7 @@ export default async function MenteeDetailPage({
           initialRetryOffered={draftStatus?.retryOffered ?? false}
           canManage={!mentee.viewOnly && canBlendedLearning(access, "manage_draft")}
           reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
+          hideActions={mentee.viewOnly}
         />
       )}
       {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}

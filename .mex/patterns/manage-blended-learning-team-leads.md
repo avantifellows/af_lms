@@ -59,7 +59,8 @@ code, tests, runbooks or PR text.
 ## Verify
 - [ ] The new row shows in Manage → Team leads with today's date.
 - [ ] The team lead lands on Team cards with the reportee's card; the reportee's list says
-      "View only." and has no "New log for" buttons.
+      "View only." and has no "New log for" buttons; a reportee's Student page has no "Log
+      conversation" button and no draft Review/Retry/Discard (not even greyed out).
 
 ## Update Scaffold
 - [ ] Note bulk changes (date, environment, pair count, never names) in `.mex/ROUTER.md` if they
