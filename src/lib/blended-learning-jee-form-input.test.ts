@@ -32,41 +32,80 @@ describe("validateJeeForm", () => {
   });
 
   it("takes a trimmed application number for Filled and ignores the Not filled fields", () => {
-    expect(validateJeeForm({ status: "filled", applicationNumber: " 2703 ", reasons: ["other"], details: "x" })).toEqual({
+    expect(
+      validateJeeForm({ status: "filled", applicationNumber: " 2703 ", sessions: [1], reasons: ["other"], details: "x" })
+    ).toEqual({
       ok: true,
-      input: { status: "filled", applicationNumber: "2703", password: null },
+      input: { status: "filled", applicationNumber: "2703", password: null, sessions: [1] },
     });
-    expect(validateJeeForm({ status: "filled", applicationNumber: " " })).toEqual({
+    expect(validateJeeForm({ status: "filled", applicationNumber: " ", sessions: [1] })).toEqual({
       ok: false,
       fieldErrors: { applicationNumber: "Enter the application number." },
     });
-    expect(validateJeeForm({ status: "filled", applicationNumber: "1".repeat(256) }).ok).toBe(false);
-    expect(validateJeeForm({ status: "filled", applicationNumber: "1".repeat(255) }).ok).toBe(true);
+    expect(validateJeeForm({ status: "filled", applicationNumber: "1".repeat(256), sessions: [1] }).ok).toBe(false);
+    expect(validateJeeForm({ status: "filled", applicationNumber: "1".repeat(255), sessions: [1] }).ok).toBe(true);
   });
 
   it("needs the exam portal password for Filled while none is saved, and keeps a saved one when left blank", () => {
-    const filled = { status: "filled", applicationNumber: "2703" };
+    const filled = { status: "filled", applicationNumber: "2703", sessions: [1, 2] };
     expect(validateJeeForm({ ...filled, password: "  " }, { requirePassword: true })).toEqual({
       ok: false,
       fieldErrors: { password: "Enter the exam portal password." },
     });
     // Both missing fields are named at once.
-    expect(validateJeeForm({ status: "filled", applicationNumber: "" }, { requirePassword: true })).toEqual({
+    expect(validateJeeForm({ status: "filled", applicationNumber: "", sessions: [1] }, { requirePassword: true })).toEqual({
       ok: false,
       fieldErrors: { applicationNumber: "Enter the application number.", password: "Enter the exam portal password." },
     });
     expect(validateJeeForm({ ...filled, password: " fake-secret-1 " }, { requirePassword: true })).toEqual({
       ok: true,
-      input: { status: "filled", applicationNumber: "2703", password: "fake-secret-1" },
+      input: { status: "filled", applicationNumber: "2703", password: "fake-secret-1", sessions: [1, 2] },
     });
     expect(validateJeeForm({ ...filled, password: "" })).toEqual({
       ok: true,
-      input: { status: "filled", applicationNumber: "2703", password: null },
+      input: { status: "filled", applicationNumber: "2703", password: null, sessions: [1, 2] },
+    });
+  });
+
+  it("needs at least one session for Filled, as numbers (the tab) or text (multipart), deduped and sorted", () => {
+    const filled = { status: "filled", applicationNumber: "2703" };
+    const required = "Choose the session the student applied for: Session 1, Session 2 or both.";
+    for (const sessions of [undefined, null, []]) {
+      expect(validateJeeForm({ ...filled, sessions })).toEqual({ ok: false, fieldErrors: { sessions: required } });
+    }
+    // Named with the other missing fields at once.
+    expect(validateJeeForm({ status: "filled", applicationNumber: "" })).toEqual({
+      ok: false,
+      fieldErrors: { applicationNumber: "Enter the application number.", sessions: required },
+    });
+    expect(validateJeeForm({ ...filled, sessions: ["2", "1", "2"] })).toEqual({
+      ok: true,
+      input: { status: "filled", applicationNumber: "2703", password: null, sessions: [1, 2] },
+    });
+    expect(validateJeeForm({ ...filled, sessions: [2] })).toMatchObject({ ok: true, input: { sessions: [2] } });
+  });
+
+  it("refuses a session the Exams tab doesn't allow for JEE Mains", () => {
+    const filled = { status: "filled", applicationNumber: "2703" };
+    const allowed = "Sessions applied for JEE Mains must be Session 1 or Session 2";
+    for (const sessions of [[3], ["0"], [1, "x"], ["1.5"], [true], [null]]) {
+      expect(validateJeeForm({ ...filled, sessions })).toEqual({ ok: false, fieldErrors: { sessions: allowed } });
+    }
+    expect(validateJeeForm({ ...filled, sessions: "1" })).toEqual({
+      ok: false,
+      fieldErrors: { sessions: "Sessions applied for JEE Mains is not valid" },
+    });
+  });
+
+  it("ignores sessions for Not filled", () => {
+    expect(validateJeeForm({ status: "not_filled", reasons: ["not_aware"], sessions: [9] })).toEqual({
+      ok: true,
+      input: { status: "not_filled", reasons: ["not_aware"], details: null },
     });
   });
 
   it("refuses a password that isn't text or is over 255 characters, and ignores it for Not filled", () => {
-    const filled = { status: "filled", applicationNumber: "2703" };
+    const filled = { status: "filled", applicationNumber: "2703", sessions: [1, 2] };
     expect(validateJeeForm({ ...filled, password: 42 })).toEqual({
       ok: false,
       fieldErrors: { password: "The password must be text." },

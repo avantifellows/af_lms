@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui";
 import { formatCalendarDate } from "@/lib/blended-learning-format";
+import { formatSessionsApplied } from "@/lib/competitive-exams";
 import {
   jeeFormReasonLabel,
   type JeeFormUpdate,
@@ -61,17 +62,26 @@ function SavedFilled({
   studentId,
   update,
   passwordSaved,
+  sessionsApplied,
   canReveal,
 }: {
   studentId: number;
   update: JeeFormUpdate;
   passwordSaved: boolean;
+  sessionsApplied: number[];
   canReveal: boolean;
 }) {
   return (
     <>
       <Row label="Application number">
         <span className="font-mono">{update.applicationNumber}</span>
+      </Row>
+      <Row label="Sessions applied">
+        {sessionsApplied.length > 0 ? (
+          formatSessionsApplied(sessionsApplied)
+        ) : (
+          <span className="text-text-secondary">Not recorded</span>
+        )}
       </Row>
       <Row label="Exam portal password">
         {passwordSaved ? (
@@ -122,7 +132,13 @@ function SavedStatus({ studentId, form, canReveal }: { studentId: number; form: 
     <div className="space-y-3">
       <dl className="space-y-3">
         {current.status === "filled" ? (
-          <SavedFilled studentId={studentId} update={current} passwordSaved={form.passwordSaved} canReveal={canReveal} />
+          <SavedFilled
+            studentId={studentId}
+            update={current}
+            passwordSaved={form.passwordSaved}
+            sessionsApplied={form.sessionsApplied}
+            canReveal={canReveal}
+          />
         ) : (
           <SavedNotFilled update={current} />
         )}
@@ -225,6 +241,7 @@ export function JeeFormPanel({
           studentId={studentId}
           current={form.current}
           passwordSaved={form.passwordSaved}
+          sessionsApplied={form.sessionsApplied}
           openReminder={form.reminderItems.find((item) => item.status === "open")?.text ?? null}
           onCancel={onClose}
           onSaved={handleSaved}

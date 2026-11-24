@@ -146,7 +146,7 @@ function RowSummary({ row, showMentor }: { row: JeeFormRow; showMentor: boolean 
         <JeeStatusBadge current={current} />
       </span>
       <span className="flex min-w-0 flex-col gap-0.5 text-sm">
-        <JeeStatusDetail current={current} />
+        <JeeStatusDetail current={current} sessionsApplied={row.viewOnly ? [] : row.form.sessionsApplied} />
         <RecordedOn current={current} />
       </span>
     </span>

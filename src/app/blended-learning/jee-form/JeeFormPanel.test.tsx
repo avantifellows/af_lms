@@ -7,7 +7,13 @@ import type { JeeFormUpdate, JeeFormView } from "@/lib/blended-learning-jee-form
 import { JeeFormPanel } from "./JeeFormPanel";
 
 const REMINDER_OPEN = { id: 81, text: "JEE Form Filling (Reminder)", status: "open" as const };
-const EMPTY: JeeFormView = { current: null, earlier: [], reminderItems: [REMINDER_OPEN], passwordSaved: false };
+const EMPTY: JeeFormView = {
+  current: null,
+  earlier: [],
+  reminderItems: [REMINDER_OPEN],
+  passwordSaved: false,
+  sessionsApplied: [],
+};
 const FILLED: JeeFormUpdate = {
   id: 3,
   status: "filled",
@@ -33,6 +39,7 @@ const SAVED_FILLED: JeeFormView = {
   earlier: [NOT_FILLED],
   reminderItems: [{ ...REMINDER_OPEN, status: "done" }],
   passwordSaved: true,
+  sessionsApplied: [1, 2],
 };
 // A fake exam-portal password, as a Mentor would type it.
 const TYPED = "fake-portal-pass-1";
@@ -90,7 +97,7 @@ describe("JeeFormPanel for a recorder", () => {
   });
 
   it("is prefilled from what is saved, and Cancel closes the row", async () => {
-    panel({ current: NOT_FILLED, earlier: [], reminderItems: [], passwordSaved: false });
+    panel({ current: NOT_FILLED, earlier: [], reminderItems: [], passwordSaved: false, sessionsApplied: [] });
 
     expect(screen.getByRole("radio", { name: "Not filled" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Other" })).toBeChecked();
@@ -114,6 +121,9 @@ describe("JeeFormPanel for a recorder", () => {
 
     expect(screen.getByText("Enter the application number.")).toBeInTheDocument();
     expect(screen.getByText("Enter the exam portal password.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Choose the session the student applied for: Session 1, Session 2 or both.")
+    ).toBeInTheDocument();
 
     // A number alone is still not enough: no partial details now, password later.
     await userEvent.type(screen.getByLabelText("Application number"), "270310000001");
@@ -136,13 +146,16 @@ describe("JeeFormPanel for a recorder", () => {
     expect(screen.getByText(/Saving ticks the student's “JEE Form Filling \(Reminder\)” action item/)).toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText("Application number"), "270310000001");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 2" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
     await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
     const pdf = new File(["%PDF-"], "confirmation.pdf", { type: "application/pdf" });
     await userEvent.upload(screen.getByLabelText(/Confirmation page/), pdf);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const body = sentForm();
-    expect([...body.keys()].sort()).toEqual(["applicationNumber", "confirmation", "password", "status"]);
+    expect([...new Set(body.keys())].sort()).toEqual(["applicationNumber", "confirmation", "password", "sessions", "status"]);
+    expect(body.getAll("sessions")).toEqual(["1", "2"]);
     expect(body.get("status")).toBe("filled");
     expect(body.get("password")).toBe(TYPED);
     expect(body.get("applicationNumber")).toBe("270310000001");
@@ -153,6 +166,7 @@ describe("JeeFormPanel for a recorder", () => {
     rerender(<JeeFormPanel studentId={501} form={SAVED_FILLED} canRecord canReveal onSaved={onSaved} onClose={onClose} />);
     expect(screen.getByRole("status")).toHaveTextContent("Saved");
     expect(screen.getByText("270310000001")).toHaveClass("font-mono");
+    expect(screen.getByText("Sessions applied").nextElementSibling).toHaveTextContent("Session 1, Session 2");
     expect(screen.getByText("JEE Form Filling (Reminder)")).toHaveClass("line-through");
     expect(screen.getByText("Done")).toBeInTheDocument();
     expect(screen.getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
@@ -191,6 +205,7 @@ describe("JeeFormPanel for a recorder", () => {
     panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
     await userEvent.type(screen.getByLabelText("Application number"), "2703");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
     await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -204,10 +219,81 @@ describe("JeeFormPanel for a recorder", () => {
     panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
     await userEvent.type(screen.getByLabelText("Application number"), "2703");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
     await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't save. Check your connection and try again.");
+  });
+});
+
+describe("JeeFormPanel sessions applied", () => {
+  it("asks for Session 1 / Session 2 only when Filled, and needs at least one before posting", async () => {
+    panel(EMPTY);
+    expect(screen.queryByRole("group", { name: "Sessions applied" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
+    expect(screen.queryByRole("group", { name: "Sessions applied" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Session 1" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    const sessions = screen.getByRole("group", { name: "Sessions applied" });
+    expect(within(sessions).getAllByRole("checkbox").map((box) => box.closest("label")?.textContent)).toEqual([
+      "Session 1",
+      "Session 2",
+    ]);
+    expect(within(sessions).getByRole("checkbox", { name: "Session 1" })).not.toBeChecked();
+
+    await userEvent.type(screen.getByLabelText("Application number"), "270310000001");
+    await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      screen.getByText("Choose the session the student applied for: Session 1, Session 2 or both.")
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Ticking one clears the message; it is posted once per session.
+    await userEvent.click(within(sessions).getByRole("checkbox", { name: "Session 2" }));
+    expect(screen.queryByText(/Choose the session the student applied for/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().getAll("sessions")).toEqual(["2"]);
+  });
+
+  it("is pre-filled from the exam record's saved sessions, even before Filled is recorded", async () => {
+    panel({ ...EMPTY, sessionsApplied: [2] });
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    expect(screen.getByRole("checkbox", { name: "Session 1" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Session 2" })).toBeChecked();
+  });
+
+  it("posts the saved sessions on a re-save, and what is unticked is left out", async () => {
+    panel(SAVED_FILLED);
+    expect(screen.getByRole("checkbox", { name: "Session 1" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Session 2" })).toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().getAll("sessions")).toEqual(["2"]);
+  });
+
+  it("sends no sessions with Not filled, even when some were ticked under Filled", async () => {
+    panel(SAVED_FILLED);
+    await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Not aware about the exam" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().has("sessions")).toBe(false);
+  });
+
+  it("shows the saved sessions read-only for Filled, or Not recorded when the record has none", () => {
+    const { unmount } = panel(SAVED_FILLED, false);
+    expect(screen.getByText("Sessions applied").nextElementSibling).toHaveTextContent("Session 1, Session 2");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    unmount();
+    panel({ ...SAVED_FILLED, sessionsApplied: [] }, false);
+    expect(screen.getByText("Sessions applied").nextElementSibling).toHaveTextContent("Not recorded");
+  });
+
+  it("shows no sessions for Not filled", () => {
+    panel({ ...SAVED_FILLED, current: NOT_FILLED }, false);
+    expect(screen.queryByText("Sessions applied")).not.toBeInTheDocument();
   });
 });
 
@@ -350,7 +436,7 @@ describe("JeeFormPanel for a viewer (an admin or a read-only account)", () => {
   });
 
   it("shows Not filled with its reasons, details and flag, and earlier updates", async () => {
-    panel({ current: NOT_FILLED, earlier: [FILLED], reminderItems: [], passwordSaved: false }, false);
+    panel({ current: NOT_FILLED, earlier: [FILLED], reminderItems: [], passwordSaved: false, sessionsApplied: [] }, false);
 
     expect(within(screen.getByRole("list", { name: "Reasons" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
       "Certificate is not available",

@@ -47,7 +47,12 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-function canonicalizeSessions(
+/**
+ * A registration's sittings, deduped and sorted. Absent or empty → null; any
+ * value the exam doesn't run (`examSessionsFor`) is refused. The Blended
+ * Learning JEE form validates its sessions with this too.
+ */
+export function canonicalizeSessions(
   value: unknown,
   examName: string,
 ): { ok: true; sessions: number[] | null } | { ok: false; error: string } {

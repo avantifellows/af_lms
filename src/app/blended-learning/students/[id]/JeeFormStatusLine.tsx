@@ -10,7 +10,8 @@ import { JeeStatusBadge, JeeStatusDetail, RecordedOn, jeeTabHref } from "../../j
 // JEE Form tab, where the Mentor records it ("View in JEE tab" for anyone
 // else: admins and read-only accounts only view it). A team lead on a
 // supervised Mentor's Mentee gets the status only (JeeStatusOnlyView: Filled
-// or Not filled with its reasons, and the date), never the application number.
+// or Not filled with its reasons, and the date), never the application number
+// or the sessions applied.
 
 // One per page, so a fixed id is enough (no hooks: a Server Component).
 const TITLE_ID = "jee-form-status-title";
@@ -50,7 +51,7 @@ export function JeeFormStatusLine({
             {JEE_FORM_EXAM.label} form
           </h2>
           {form ? <JeeStatusBadge current={current} /> : <span className="text-text-secondary">Can&apos;t be shown right now</span>}
-          <JeeStatusDetail current={current} />
+          <JeeStatusDetail current={current} sessionsApplied={form && "sessionsApplied" in form ? form.sessionsApplied : []} />
           <RecordedOn current={current} />
         </div>
         <JeeTabLink studentId={studentId}>{linkLabel(form, canRecord)}</JeeTabLink>

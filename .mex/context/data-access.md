@@ -903,6 +903,24 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   "Reminder" line shows Done. A typed password can't be compared with the saved ciphertext, so it
   always counts as a change (201, a new update that keeps the PDF). A failed DB Service/S3 call is
   a 502 and withdraws the stored PDF.
+- **Sessions applied (2026-11-24):** Filled also takes one multipart `sessions` entry per JEE Main
+  session applied for (Session 1 / Session 2 checkboxes in `JeeFormEditor`, worded as the Exams
+  tab's "Sessions applied"; at least one, 422 `fieldErrors.sessions` in the browser and on the
+  server). `validateJeeForm` parses them (text or numbers) through the Exams tab's exported
+  `canonicalizeSessions` (`exam-records-payload.ts`: deduped, sorted, only
+  `examSessionsFor("JEE Mains")` = [1, 2]); Not filled ignores them and never touches the record.
+  They live only on the JEE Mains 2027 `student_exam_record.sessions_applied` (no column on
+  `blended_learning_jee_form_updates`, no migration; history entries carry none): the plan's
+  POST/PATCH always sends `sessions_applied` (`createExamRecordWithoutPlaintext` /
+  `patchExamRecordWithoutPlaintext` name the key), and `planExamRecordWrite` patches the 2027 record
+  when the number or the sessions differ (compared sorted, once each). A Filled re-save whose
+  sessions differ from the record's before the save (`savedSessions`; null without a 2027 record)
+  counts as a change, like a typed password: the record is patched and a new update recorded (201,
+  keeps the PDF, ticks). Number, sessions and password all unchanged: no DB Service write (200,
+  still ticks). Read: `listSavedRecords` returns them as `JeeFormView.sessionsApplied` (sorted, []
+  without), which pre-fills the checkboxes and shows read-only for Filled in `JeeFormPanel`
+  ("Sessions applied: Session 1, Session 2"), the tab's row summary and the Mentee page's status
+  line (`JeeStatusDetail`: "Sessions 1, 2"). Status-only (team lead) views never carry them.
 - **Exam-portal password (write-only):** Filled also takes `password`. It is required (422
   `fieldErrors.password`, also checked in the browser through `validateJeeForm(…, { requirePassword })`)
   while the record being written has no `application_password_ciphertext`; once one is saved, a
@@ -934,7 +952,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   read-back only tests it IS NULL; a record holding only legacy plaintext counts as no password, so
   the form asks again), and the only value ever written to it is null, with a new ciphertext;
   `createExamRecordWithoutPlaintext` / `patchExamRecordWithoutPlaintext` in
-  `src/lib/db-service-exam-records.ts` send named fields only (number, year, ciphertext, and the
+  `src/lib/db-service-exam-records.ts` send named fields only (number, year, sessions, ciphertext, and the
   legacy key only as the literal null) and never
   read the DB Service's response body (it contains the legacy password); failures log the status
   only. Nothing logs a password or ciphertext (error names only). E2E encrypts against a fake KMS in
@@ -943,7 +961,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Current number from the exam record:** for a Filled current status, the tab's rows, the
   Student's form (the POST's `form`, `getJeeForm`) and the Mentee page's status line show the
   application number of the Student's JEE Mains 2027 `student_exam_record` (`listSavedRecords`, one
-  grouped read with `passwordSaved`; named columns only, never `application_password`), so an Exams
+  read with `passwordSaved` and `sessionsApplied`: `DISTINCT ON` the Student, the first record with a
+  non-blank number, `bool_or` over a window for the ciphertext; named columns only, never
+  `application_password`), so an Exams
   tab edit shows here. Without a 2027 record, or one with a blank number, they show the number the
   update recorded (not "—": Filled was recorded with that number, and blanking it would hide it).
   Not filled shows no number. Earlier updates (history) keep the number recorded at the time; the

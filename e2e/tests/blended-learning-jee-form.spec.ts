@@ -31,6 +31,8 @@ const STATUS_LINE = "JEE Main 2027 form";
 const STATUS_QUESTION = "Has the student filled the form?";
 const REASONS = "Why hasn't it been filled?";
 const PASSWORD_LABEL = "Exam portal password";
+const SESSIONS = "Sessions applied";
+const SESSIONS_REQUIRED = "Choose the session the student applied for: Session 1, Session 2 or both.";
 const MENTOR_PASSWORD = "e2e-portal-pass-1";
 const PHONE_PASSWORD = "e2e-portal-pass-2";
 // What an admin tries to save, refused: it must reach neither KMS nor the DB Service.
@@ -189,7 +191,7 @@ async function updates(studentId: number) {
   });
 }
 
-// The Student's JEE Mains records. Of the legacy plaintext password only
+// The Student's JEE Mains records (with their sessions applied). Of the legacy plaintext password only
 // whether it is empty, of the ciphertext only whether there is one.
 async function jeeRecords(studentId: number) {
   return withPool(async (pool) => {
@@ -197,10 +199,11 @@ async function jeeRecords(studentId: number) {
       id: string;
       exam_year: number | null;
       application_number: string;
+      sessions_applied: number[] | null;
       legacy_cleared: boolean;
       ciphertext_saved: boolean;
     }>(
-      `SELECT ser.id, ser.exam_year, ser.application_number,
+      `SELECT ser.id, ser.exam_year, ser.application_number, ser.sessions_applied,
               ser.application_password IS NULL AS legacy_cleared,
               ser.application_password_ciphertext IS NOT NULL AS ciphertext_saved
        FROM student_exam_record ser JOIN exam ON exam.id = ser.exam_id
@@ -360,7 +363,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(row(page, mentee)).toBeInViewport();
   });
 
-  test("Filled needs the number and the password, records them through the DB Service (the password as ciphertext) and ticks the reminder", async ({ page }) => {
+  test("Filled needs the number, the sessions and the password, records them through the DB Service (the password as ciphertext) and ticks the reminder", async ({ page }) => {
     await fetch(`${STUB}/__requests`, { method: "DELETE" });
     await signInAs(page, BLENDED_MENTOR_C);
     await page.goto(tabFor(mentee));
@@ -369,27 +372,57 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(open.getByText(/Saving ticks the student's “JEE Form Filling \(Reminder\)” action item/)).toBeVisible();
     await expect(open.getByLabel(/Confirmation page/)).toHaveAttribute("type", "file");
     await expect(open.getByLabel(PASSWORD_LABEL)).toHaveAttribute("type", "password");
+    // Session 1 / Session 2, as on the Exams tab, none ticked yet (the record has none).
+    const sessions = open.getByRole("group", { name: SESSIONS });
+    await expect(sessions.getByRole("checkbox")).toHaveCount(2);
+    await expect(sessions.getByRole("checkbox", { name: "Session 1" })).not.toBeChecked();
+    await expect(sessions.getByRole("checkbox", { name: "Session 2" })).not.toBeChecked();
     await open.getByRole("button", { name: "Save" }).click();
     await expect(open.getByText("Enter the application number.")).toBeVisible();
     await expect(open.getByText("Enter the exam portal password.")).toBeVisible();
+    await expect(open.getByText(SESSIONS_REQUIRED)).toBeVisible();
     await open.getByLabel("Application number").fill("E2E-JEE-0001");
     await open.getByRole("button", { name: "Save" }).click();
     // No number now and password later: the form isn't sent without it.
     await expect(open.getByText("Enter the exam portal password.")).toBeVisible();
     expect(await stubRequests()).toEqual([]);
-    // Nor does the server take one.
-    const partial = await page.request.post(jeeFormUrl(mentee), {
+    // Nor does the server take one, or one without a session (checked first:
+    // whether a password is saved is known only once the Student is in scope).
+    const noSession = await page.request.post(jeeFormUrl(mentee), {
       multipart: { status: "filled", applicationNumber: "E2E-JEE-0001" },
+    });
+    expect(noSession.status()).toBe(422);
+    expect((await noSession.json()).fieldErrors).toEqual({ sessions: SESSIONS_REQUIRED });
+    const partial = await page.request.post(jeeFormUrl(mentee), {
+      multipart: { status: "filled", applicationNumber: "E2E-JEE-0001", sessions: "1" },
     });
     expect(partial.status()).toBe(422);
     expect((await partial.json()).fieldErrors).toEqual({ password: "Enter the exam portal password." });
+    const badSession = await page.request.post(jeeFormUrl(mentee), {
+      multipart: { status: "filled", applicationNumber: "E2E-JEE-0001", sessions: "3", password: MENTOR_PASSWORD },
+    });
+    expect(badSession.status()).toBe(422);
+    expect((await badSession.json()).fieldErrors).toEqual({
+      sessions: "Sessions applied for JEE Mains must be Session 1 or Session 2",
+    });
+    expect(await stubRequests()).toEqual([]);
 
     await open.getByLabel(PASSWORD_LABEL).fill(MENTOR_PASSWORD);
+    await open.getByRole("button", { name: "Save" }).click();
+    // Still no session ticked: not sent.
+    await expect(open.getByText(SESSIONS_REQUIRED)).toBeVisible();
+    expect(await stubRequests()).toEqual([]);
+    await sessions.getByRole("checkbox", { name: "Session 2" }).check();
+    await expect(open.getByText(SESSIONS_REQUIRED)).toHaveCount(0);
+    await sessions.getByRole("checkbox", { name: "Session 1" }).check();
     await open.getByRole("button", { name: "Save" }).click();
 
     await expect(open.getByRole("status")).toHaveText("Saved");
     await expect(rowToggle(page, mentee)).toContainText("Filled");
     await expect(rowToggle(page, mentee)).toContainText("E2E-JEE-0001");
+    await expect(rowToggle(page, mentee)).toContainText("Sessions 1, 2");
+    await expect(open.getByText(SESSIONS, { exact: true })).toBeVisible();
+    await expect(open.getByText("Session 1, Session 2")).toBeVisible();
     await expect(open.getByText("Not uploaded")).toBeVisible();
     await expect(open.getByText(JEE_REMINDER_TEXT)).toHaveClass(/line-through/);
     await expect(open.getByText("Done")).toBeVisible();
@@ -407,6 +440,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
         exam_id: expect.any(Number),
         exam_year: 2027,
         application_number: "E2E-JEE-0001",
+        sessions_applied: [1, 2],
         application_password: null,
         application_password_ciphertext: expect.any(String),
       },
@@ -415,7 +449,14 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     expect(await kmsCalls()).toEqual(["TrentService.Encrypt"]);
     // The legacy plaintext column stays empty; only the ciphertext is stored.
     expect(await jeeRecords(studentId)).toEqual([
-      { id: expect.any(String), exam_year: 2027, application_number: "E2E-JEE-0001", legacy_cleared: true, ciphertext_saved: true },
+      {
+        id: expect.any(String),
+        exam_year: 2027,
+        application_number: "E2E-JEE-0001",
+        sessions_applied: [1, 2],
+        legacy_cleared: true,
+        ciphertext_saved: true,
+      },
     ]);
     // Page data says only that one is saved.
     await expect(open.getByText("Exam portal password")).toBeVisible();
@@ -429,6 +470,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await page.goto(detailPath(mentee));
     await expect(statusLine(page)).toContainText("Filled");
     await expect(statusLine(page)).toContainText("E2E-JEE-0001");
+    await expect(statusLine(page)).toContainText("Sessions 1, 2");
     await expect(page.getByRole("region", { name: "Open Action Items" }).getByText(JEE_REMINDER_TEXT)).toHaveCount(0);
   });
 
@@ -487,6 +529,55 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     } finally {
       await setJeeRecordNumber(studentId, "E2E-JEE-0001");
     }
+  });
+
+  test("pre-fills the saved sessions; changing only them writes the exam record and records an update", async ({ page }) => {
+    await fetch(`${STUB}/__requests`, { method: "DELETE" });
+    const studentId = studentIds[mentee.key];
+    const before = await updates(studentId);
+    const [record] = await jeeRecords(studentId);
+    await signInAs(page, BLENDED_MENTOR_C);
+    await page.goto(tabFor(mentee));
+    const open = row(page, mentee);
+    const sessions = open.getByRole("group", { name: SESSIONS });
+    await expect(sessions.getByRole("checkbox", { name: "Session 1" })).toBeChecked();
+    await expect(sessions.getByRole("checkbox", { name: "Session 2" })).toBeChecked();
+
+    await page.waitForLoadState("networkidle");
+    await sessions.getByRole("checkbox", { name: "Session 1" }).uncheck();
+    const response = page.waitForResponse((res) => res.url().endsWith(jeeFormUrl(mentee)));
+    await open.getByRole("button", { name: "Save" }).click();
+    expect((await response).status()).toBe(201);
+    await expect(open.getByRole("status")).toHaveText("Saved");
+    await expect(open.getByText("Session 2", { exact: true })).toBeVisible();
+    await expect(rowToggle(page, mentee)).toContainText("Session 2");
+
+    // Only the number and the sessions go out; no password key, nothing encrypted.
+    expect(await stubRequests()).toEqual([
+      {
+        method: "PATCH",
+        path: `/api/student-exam-record/${record.id}`,
+        body: { application_number: "E2E-JEE-0001", sessions_applied: [2] },
+      },
+    ]);
+    expect(await kmsCalls()).toEqual([]);
+    expect(await jeeRecords(studentId)).toEqual([{ ...record, sessions_applied: [2] }]);
+    // A new Filled update (the sessions themselves live only on the exam record).
+    expect(await updates(studentId)).toEqual([...before, expect.objectContaining({ status: "filled", application_number: "E2E-JEE-0001" })]);
+    expect((await reminder(studentId))[0].status).toBe("done");
+
+    // Not filled leaves the record's sessions alone.
+    const notFilled = await page.request.post(jeeFormUrl(mentee), {
+      multipart: { status: "not_filled", reasons: "not_aware", sessions: "1" },
+    });
+    expect(notFilled.status()).toBe(201);
+    expect(await jeeRecords(studentId)).toEqual([{ ...record, sessions_applied: [2] }]);
+    // Back to Filled (Session 1 now), for the specs that follow.
+    const refilled = await page.request.post(jeeFormUrl(mentee), {
+      multipart: { status: "filled", applicationNumber: "E2E-JEE-0001", sessions: "1" },
+    });
+    expect(refilled.status()).toBe(201);
+    expect(await jeeRecords(studentId)).toEqual([{ ...record, sessions_applied: [1] }]);
   });
 
   test("a read-only admin sees the tab and opens a row, but can't record or reveal the password", async ({ page }) => {
@@ -576,7 +667,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await expect(row(page, mentee)).toHaveCount(0);
     const res = await page.request.post(jeeFormUrl(mentee), { multipart: { status: "not_filled", reasons: "not_aware" } });
     expect(res.status()).toBe(404);
-    expect((await updates(studentIds[mentee.key])).length).toBe(2);
+    expect((await updates(studentIds[mentee.key])).length).toBe(5);
     // Nor reveal their password: not found, as the save is, and nothing logged.
     const logged = (await reveals(studentIds[mentee.key])).length;
     const reveal = await page.request.post(passwordUrl(mentee));
@@ -603,7 +694,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
       await holder.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
       const holderPid = (await holder.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
       const saving = page.request.post(jeeFormUrl(mentee), {
-        multipart: { status: "filled", applicationNumber: "E2E-JEE-0002", password: RACED_PASSWORD },
+        multipart: { status: "filled", applicationNumber: "E2E-JEE-0002", sessions: "1", password: RACED_PASSWORD },
       });
       // The save is waiting on the lock this connection holds.
       await expect
@@ -684,6 +775,10 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
     await open.getByLabel("Application number").fill(JEE_EXISTING_RECORD.applicationNumber);
     // A legacy plaintext password doesn't count as saved: the form asks again.
     await open.getByLabel(PASSWORD_LABEL).fill(PHONE_PASSWORD);
+    // The session checkboxes are comfortable tap targets too.
+    const session2 = open.getByRole("group", { name: SESSIONS }).getByText("Session 2", { exact: true });
+    expect((await session2.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await session2.click();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     const response = page.waitForResponse((res) => res.url().endsWith(jeeFormUrl(mentee)));
     await open.getByRole("button", { name: "Save" }).click();
@@ -703,6 +798,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
         body: {
           application_number: JEE_EXISTING_RECORD.applicationNumber,
           exam_year: 2027,
+          sessions_applied: [2],
           application_password: null,
           application_password_ciphertext: expect.any(String),
         },
@@ -715,6 +811,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
         id: existing.id,
         exam_year: 2027,
         application_number: JEE_EXISTING_RECORD.applicationNumber,
+        sessions_applied: [2],
         legacy_cleared: true,
         ciphertext_saved: true,
       },

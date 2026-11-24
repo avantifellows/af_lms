@@ -130,7 +130,7 @@ function jeeFormUrl(mentee: Mentee) {
 
 async function recordFilled(page: Page, mentee: Mentee, applicationNumber: string) {
   const res = await page.request.post(jeeFormUrl(mentee), {
-    multipart: { status: "filled", applicationNumber, password: PASSWORD },
+    multipart: { status: "filled", applicationNumber, sessions: "1", password: PASSWORD },
   });
   expect(res.status()).toBe(201);
 }

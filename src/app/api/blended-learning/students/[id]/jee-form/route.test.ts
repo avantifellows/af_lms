@@ -59,6 +59,7 @@ type ExamRecord = {
   exam_name: string;
   exam_year: number | null;
   application_number: string;
+  sessions_applied?: number[] | null;
   has_password?: boolean;
 };
 type Update = {
@@ -91,8 +92,9 @@ let dbServiceStoresCiphertext: boolean;
 // The legacy plaintext the (fake) record holds, and whether the DB Service
 // clears it when sent `application_password: null`.
 let legacyPlaintext: string | null;
-// The number the (fake) DB Service last wrote to the JEE record, if any.
+// The number and sessions the (fake) DB Service last wrote to the JEE record, if any.
 let writtenNumber: string | null;
+let writtenSessions: number[] | null;
 let dbServiceClearsLegacy: boolean;
 
 function matchesPermission(sqlText: string, params?: unknown[]) {
@@ -121,8 +123,16 @@ async function fakeQuery(text: string, params?: unknown[]) {
     const [studentId] = params?.[0] as number[];
     const record = examRecords.find((row) => row.exam_id === JEE_EXAM_ID && row.exam_year === 2027);
     const number = writtenNumber ?? record?.application_number ?? null;
+    const sessions = writtenSessions ?? record?.sessions_applied ?? null;
     if (!record && writtenNumber === null && !storedCiphertext) return [];
-    return [{ student_id: studentId, application_number: number, ciphertext_saved: storedCiphertext !== null }];
+    return [
+      {
+        student_id: studentId,
+        application_number: number,
+        sessions_applied: sessions,
+        ciphertext_saved: storedCiphertext !== null,
+      },
+    ];
   }
   if (text.includes("application_password_ciphertext = $4")) {
     const legacyCleared = !text.includes("ser.application_password IS NULL") || legacyPlaintext === null;
@@ -230,6 +240,7 @@ async function record(studentId: string, fields: [string, string][], file?: { na
 const FILLED_KEEP: [string, string][] = [
   ["status", "filled"],
   ["applicationNumber", " 270310000001 "],
+  ["sessions", "1"],
 ];
 const FILLED: [string, string][] = [...FILLED_KEEP, ["password", ` ${TYPED_PASSWORD} `]];
 const NOT_FILLED: [string, string][] = [
@@ -261,6 +272,7 @@ beforeEach(() => {
   legacyPlaintext = null;
   dbServiceClearsLegacy = true;
   writtenNumber = null;
+  writtenSessions = null;
   mockQuery.mockImplementation(fakeQuery as typeof query);
   // As withTransaction does: COMMIT after the callback, ROLLBACK when it throws.
   mockWithTransaction.mockImplementation(async (fn) => {
@@ -296,6 +308,9 @@ beforeEach(() => {
       if (status < 300 && dbServiceClearsLegacy && sent.application_password === null) legacyPlaintext = null;
       if (status < 300 && url.includes("student-exam-record") && typeof sent.application_number === "string") {
         writtenNumber = sent.application_number;
+      }
+      if (status < 300 && url.includes("student-exam-record") && Array.isArray(sent.sessions_applied)) {
+        writtenSessions = sent.sessions_applied as number[];
       }
       const record = {
         id: 77,
@@ -375,6 +390,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
           exam_id: JEE_EXAM_ID,
           exam_year: 2027,
           application_number: "270310000001",
+          sessions_applied: [1],
           application_password: null,
           application_password_ciphertext: CIPHERTEXT,
         }),
@@ -396,6 +412,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     expect(writesTo("blended_learning_mentor_flags")).toEqual([]);
     expect(res.body.form.current).toMatchObject({ status: "filled", applicationNumber: "270310000001", hasConfirmation: false });
     expect(res.body.form.passwordSaved).toBe(true);
+    expect(res.body.form.sessionsApplied).toEqual([1]);
     expect(res.body.form.reminderItems).toEqual([{ id: 81, text: "JEE Form Filling (Reminder)", status: "done" }]);
   });
 
@@ -410,6 +427,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
         method: "PATCH",
         body: JSON.stringify({
           application_number: "270310000001",
+          sessions_applied: [1],
           application_password: null,
           application_password_ciphertext: CIPHERTEXT,
         }),
@@ -429,6 +447,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
         JSON.stringify({
           application_number: "270310000001",
           exam_year: 2027,
+          sessions_applied: [1],
           application_password: null,
           application_password_ciphertext: CIPHERTEXT,
         }),
@@ -438,7 +457,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
   it("sends nothing to the DB Service when the stored 2027 record already has the number and a password", async () => {
     examRecords = [
-      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", sessions_applied: [1], has_password: true },
     ];
     storedCiphertext = "c2F2ZWQ=";
     signedInAs(MENTOR_A);
@@ -457,7 +476,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     txWrites = [];
     fetchCalls = [];
     examRecords = [
-      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", sessions_applied: [1], has_password: true },
     ];
 
     const again = await record("501", FILLED_KEEP);
@@ -476,13 +495,13 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
   describe("after the number was edited in the Exams tab", () => {
     const EDITED = "270310000099";
-    const FILLED_EDITED: [string, string][] = [["status", "filled"], ["applicationNumber", EDITED]];
+    const FILLED_EDITED: [string, string][] = [["status", "filled"], ["applicationNumber", EDITED], ["sessions", "1"]];
 
     // Recorded Filled with a PDF; then the Exams tab changed the record's number.
     async function filledThenEdited() {
       signedInAs(MENTOR_A);
       expect((await record("501", FILLED, PDF)).status).toBe(201);
-      examRecords = [{ id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: EDITED, has_password: true }];
+      examRecords = [{ id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: EDITED, sessions_applied: [1], has_password: true }];
       writtenNumber = null;
       txWrites = [];
       fetchCalls = [];
@@ -517,7 +536,11 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       const again = await record("501", FILLED_KEEP);
       expect(again.status).toBe(201);
       expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
-        ["PATCH", "http://db-service.test/api/student-exam-record/77", JSON.stringify({ application_number: "270310000001" })],
+        [
+          "PATCH",
+          "http://db-service.test/api/student-exam-record/77",
+          JSON.stringify({ application_number: "270310000001", sessions_applied: [1] }),
+        ],
       ]);
       const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
       // Not the number shown, so the confirmation isn't carried over.
@@ -530,7 +553,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     signedInAs(MENTOR_A);
     expect((await record("501", FILLED, PDF)).status).toBe(201);
     examRecords = [
-      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", sessions_applied: [1], has_password: true },
     ];
 
     const again = await record("501", FILLED);
@@ -627,7 +650,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
   it("replaces a saved password on its own when the number is unchanged", async () => {
     examRecords = [
-      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", sessions_applied: [1], has_password: true },
     ];
     storedCiphertext = "b2xk";
     signedInAs(MENTOR_A);
@@ -644,7 +667,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
   it("clears a legacy plaintext with the new ciphertext, and confirms it is gone", async () => {
     examRecords = [
-      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001" },
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", sessions_applied: [1] },
     ];
     legacyPlaintext = STORED_PASSWORD;
     signedInAs(MENTOR_A);
@@ -677,7 +700,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     error.mockRestore();
   });
 
-  it("changes only the number when no password is typed, leaving both password columns as they are (the Exams tab's keep)", async () => {
+  it("changes only the number (and sessions) when no password is typed, leaving both password columns as they are (the Exams tab's keep)", async () => {
     examRecords = [
       { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "111", has_password: true },
     ];
@@ -686,7 +709,11 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
     expect((await record("501", FILLED_KEEP)).status).toBe(201);
     expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
-      ["PATCH", "http://db-service.test/api/student-exam-record/77", JSON.stringify({ application_number: "270310000001" })],
+      [
+        "PATCH",
+        "http://db-service.test/api/student-exam-record/77",
+        JSON.stringify({ application_number: "270310000001", sessions_applied: [1] }),
+      ],
     ]);
     expect(kms.commandCalls(EncryptCommand)).toEqual([]);
   });
@@ -772,9 +799,98 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
   it("needs an application number", async () => {
     signedInAs(MENTOR_A);
-    const res = await record("501", [["status", "filled"], ["applicationNumber", "  "]]);
+    const res = await record("501", [["status", "filled"], ["applicationNumber", "  "], ["sessions", "1"]]);
     expect(res.status).toBe(422);
     expect(res.body.fieldErrors).toEqual({ applicationNumber: "Enter the application number." });
+  });
+});
+
+describe("POST /api/blended-learning/students/[id]/jee-form: sessions applied", () => {
+  const SAVED = { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001" };
+  const withSessions = (...sessions: string[]): [string, string][] => [
+    ["status", "filled"],
+    ["applicationNumber", "270310000001"],
+    ...sessions.map((session): [string, string] => ["sessions", session]),
+  ];
+
+  it("refuses Filled without a session, or with one the Exams tab doesn't allow, before any write (422)", async () => {
+    signedInAs(MENTOR_A);
+    const none = await record("501", [...withSessions(), ["password", TYPED_PASSWORD]]);
+    expect(none.status).toBe(422);
+    expect(none.body.fieldErrors).toEqual({
+      sessions: "Choose the session the student applied for: Session 1, Session 2 or both.",
+    });
+    for (const bad of ["3", "0", "one", ""]) {
+      const res = await record("501", [...withSessions(bad), ["password", TYPED_PASSWORD]]);
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ sessions: "Sessions applied for JEE Mains must be Session 1 or Session 2" });
+    }
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+    expect(fetchCalls).toEqual([]);
+  });
+
+  it("saves both sessions to the record, sorted and once each, and returns them", async () => {
+    signedInAs(MENTOR_A);
+    const res = await record("501", [...withSessions("2", "1", "2"), ["password", TYPED_PASSWORD]]);
+
+    expect(res.status).toBe(201);
+    expect(JSON.parse(fetchCalls[0].body!)).toMatchObject({ application_number: "270310000001", sessions_applied: [1, 2] });
+    expect(res.body.form.sessionsApplied).toEqual([1, 2]);
+    // Sessions live only on the exam record: the update's insert doesn't name them.
+    const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
+    expect(insert.sql).not.toMatch(/session/i);
+  });
+
+  it("counts a sessions-only change as a change: patches the record, records an update (201) that keeps the PDF, and ticks", async () => {
+    signedInAs(MENTOR_A);
+    expect((await record("501", [...withSessions("1"), ["password", TYPED_PASSWORD]], PDF)).status).toBe(201);
+    examRecords = [{ ...SAVED, sessions_applied: [1], has_password: true }];
+    writtenSessions = null;
+    txWrites = [];
+    fetchCalls = [];
+
+    const again = await record("501", withSessions("1", "2"));
+    expect(again.status).toBe(201);
+    expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
+      [
+        "PATCH",
+        "http://db-service.test/api/student-exam-record/77",
+        JSON.stringify({ application_number: "270310000001", sessions_applied: [1, 2] }),
+      ],
+    ]);
+    // No password typed: neither password key is sent, nothing is encrypted again.
+    expect(kms.commandCalls(EncryptCommand)).toHaveLength(1);
+    const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
+    expect(insert.params.slice(3, 6)).toEqual(["filled", "270310000001", 4401]);
+    expect(writesTo("UPDATE blended_learning_action_items").map((write) => write.params[2])).toEqual([901]);
+    expect(again.body.form.sessionsApplied).toEqual([1, 2]);
+  });
+
+  it("writes nothing when the number, the sessions and the password are all unchanged (200), still ticking", async () => {
+    signedInAs(MENTOR_A);
+    expect((await record("501", [...withSessions("1", "2"), ["password", TYPED_PASSWORD]])).status).toBe(201);
+    examRecords = [{ ...SAVED, sessions_applied: [2, 1], has_password: true }];
+    txWrites = [];
+    fetchCalls = [];
+
+    const again = await record("501", withSessions("2", "1"));
+    expect(again.status).toBe(200);
+    expect(fetchCalls).toEqual([]);
+    expect(writesTo("INSERT INTO blended_learning_jee_form_updates")).toEqual([]);
+    expect(writesTo("UPDATE blended_learning_action_items").map((write) => write.params[2])).toEqual([900]);
+  });
+
+  it("ignores sessions sent with Not filled and never touches the record's sessions", async () => {
+    examRecords = [{ ...SAVED, sessions_applied: [2], has_password: true }];
+    signedInAs(MENTOR_A);
+    const res = await record("501", [...NOT_FILLED, ["sessions", "1"], ["sessions", "9"]]);
+
+    expect(res.status).toBe(201);
+    expect(fetchCalls).toEqual([]);
+    expect(txSql.some((text) => text.includes("student_exam_record"))).toBe(false);
+    // The Not filled form still reads (not writes) the record's sessions.
+    expect(res.body.form.sessionsApplied).toEqual([2]);
   });
 });
 
@@ -953,7 +1069,9 @@ describe("the password is write-only and never plaintext", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const responses = [await record("501", FILLED, PDF), await record("501", NOT_FILLED)];
     examRecords = [];
-    responses.push(await record("501", [["status", "filled"], ["applicationNumber", "999"], ["password", TYPED_PASSWORD]]));
+    responses.push(
+      await record("501", [["status", "filled"], ["applicationNumber", "999"], ["sessions", "2"], ["password", TYPED_PASSWORD]])
+    );
 
     for (const text of [...sql, ...txSql]) {
       // The legacy plaintext column is only ever tested IS NULL (the
@@ -974,7 +1092,13 @@ describe("the password is write-only and never plaintext", () => {
       expect(res.text).not.toContain(TYPED_PASSWORD);
       expect(res.text).not.toContain(STORED_PASSWORD);
       expect(res.text).not.toContain(CIPHERTEXT);
-      expect(Object.keys(res.body.form).sort()).toEqual(["current", "earlier", "passwordSaved", "reminderItems"]);
+      expect(Object.keys(res.body.form).sort()).toEqual([
+        "current",
+        "earlier",
+        "passwordSaved",
+        "reminderItems",
+        "sessionsApplied",
+      ]);
     }
     const logged = JSON.stringify(error.mock.calls);
     for (const secret of [STORED_PASSWORD, TYPED_PASSWORD, CIPHERTEXT]) expect(logged).not.toContain(secret);

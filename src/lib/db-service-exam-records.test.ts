@@ -105,27 +105,32 @@ describe("db-service exam record writes", () => {
 });
 
 describe("plaintext-free exam record writes", () => {
-  it("creates with exactly the four named fields, even if the caller passes more, and never reads the answer", async () => {
+  it("creates with exactly the named fields, even if the caller passes more, and never reads the answer", async () => {
     const reply = answer(201);
     mockFetch.mockResolvedValue(reply.response);
 
-    const input = { student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", sessions_applied: [1] };
+    const input = { student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", notes: "not sent" };
     await createExamRecordWithoutPlaintext(input);
+    await createExamRecordWithoutPlaintext({ ...input, sessions_applied: [1, 2] });
 
-    expect(mockFetch).toHaveBeenCalledWith("http://db/student-exam-record", {
+    expect(mockFetch).toHaveBeenNthCalledWith(1, "http://db/student-exam-record", {
       method: "POST",
       headers: { Authorization: "Bearer token", "Content-Type": "application/json", accept: "application/json" },
       body: JSON.stringify({ student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703" }),
     });
+    expect(mockFetch.mock.calls[1][1].body).toBe(
+      JSON.stringify({ student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", sessions_applied: [1, 2] })
+    );
     expect(reply.json).not.toHaveBeenCalled();
     expect(reply.text).not.toHaveBeenCalled();
   });
 
-  it("patches only the number (and the year when given), so the stored password is left as it is", async () => {
+  it("patches only the number (and the year or sessions when given), so the stored password is left as it is", async () => {
     mockFetch.mockImplementation(async () => answer(200).response);
 
     await patchExamRecordWithoutPlaintext(77, { application_number: "2703" });
     await patchExamRecordWithoutPlaintext(55, { application_number: "2703", exam_year: 2027 });
+    await patchExamRecordWithoutPlaintext(77, { application_number: "2703", sessions_applied: [2] });
 
     expect(mockFetch.mock.calls.map(([url, init]) => [url, init.method, init.body])).toEqual([
       ["http://db/student-exam-record/77", "PATCH", JSON.stringify({ application_number: "2703" })],
@@ -134,6 +139,7 @@ describe("plaintext-free exam record writes", () => {
         "PATCH",
         JSON.stringify({ application_number: "2703", exam_year: 2027 }),
       ],
+      ["http://db/student-exam-record/77", "PATCH", JSON.stringify({ application_number: "2703", sessions_applied: [2] })],
     ]);
   });
 

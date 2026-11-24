@@ -8,12 +8,22 @@
 // tab only ever learns whether one is saved (`passwordSaved`), never the
 // password, which the server stores as KMS ciphertext and shows only through
 // the logged reveal (`/api/blended-learning/students/[id]/jee-form/password`).
+//
+// A Filled form also says which JEE Main session(s) the Student applied for
+// (Session 1, Session 2 or both; at least one). They are stored only on the
+// exam record (`student_exam_record.sessions_applied`), as the Exams tab
+// stores them, and checked against the same allowed values
+// (`canonicalizeSessions`).
 
-import { APPLICATION_PASSWORD_MAX_LENGTH } from "./competitive-exams";
+import { APPLICATION_PASSWORD_MAX_LENGTH, examSessionsFor } from "./competitive-exams";
+import { canonicalizeSessions } from "./exam-records-payload";
 
 export const JEE_FORM_EXAM = { label: "JEE Main 2027", examName: "JEE Mains", examYear: 2027 } as const;
 
 export type JeeFormStatus = "filled" | "not_filled";
+
+// The sittings a Filled form can name: Session 1 and Session 2.
+export const JEE_FORM_SESSIONS: readonly number[] = examSessionsFor(JEE_FORM_EXAM.examName);
 
 // Worded exactly as the program team's sheet. The codes are stored
 // (blended_learning_jee_form_updates.reasons), and the db-service CHECK lists
@@ -80,6 +90,9 @@ export type JeeFormView = {
   // The JEE Main 2027 record holds an exam-portal password (as ciphertext).
   // Only ever this flag: the password itself never reaches page data.
   passwordSaved: boolean;
+  // The JEE Main 2027 record's sessions applied, sorted; [] when it has none
+  // (or there is no record). Shown for Filled and pre-fills the form.
+  sessionsApplied: number[];
 };
 
 // The JEE status a view-only viewer (a team lead on a supervised Mentor's
@@ -123,11 +136,12 @@ export function jeeRowStatus(form: { current: { status: JeeFormStatus } | null }
 
 export type JeeFormInput =
   // `password` null keeps the saved password (allowed only when one is saved).
-  | { status: "filled"; applicationNumber: string; password: string | null }
+  // `sessions`: sorted, without repeats, at least one.
+  | { status: "filled"; applicationNumber: string; password: string | null; sessions: number[] }
   | { status: "not_filled"; reasons: JeeFormReason[]; details: string | null };
 
 export type JeeFormFieldErrors = Partial<
-  Record<"status" | "applicationNumber" | "password" | "reasons" | "details" | "confirmation", string>
+  Record<"status" | "applicationNumber" | "password" | "sessions" | "reasons" | "details" | "confirmation", string>
 >;
 
 export type JeeFormValidation = { ok: true; input: JeeFormInput } | { ok: false; fieldErrors: JeeFormFieldErrors };
@@ -136,6 +150,8 @@ export type RawJeeForm = {
   status?: unknown;
   applicationNumber?: unknown;
   password?: unknown;
+  // Numbers from the tab; the route passes the multipart values as text.
+  sessions?: unknown;
   reasons?: unknown;
   details?: unknown;
 };
@@ -145,6 +161,7 @@ function trimmed(value: unknown): string {
 }
 
 export const JEE_PASSWORD_REQUIRED = "Enter the exam portal password.";
+export const JEE_SESSIONS_REQUIRED = "Choose the session the student applied for: Session 1, Session 2 or both.";
 
 function applicationNumberError(applicationNumber: string): string | null {
   if (!applicationNumber) return "Enter the application number.";
@@ -160,6 +177,19 @@ function passwordError(raw: unknown, password: string, requirePassword: boolean)
   return null;
 }
 
+// Multipart sends each session as text ("1"), the tab as a number; both go
+// through the Exams tab's canonicalizeSessions (deduped, sorted, only the
+// exam's sessions), and at least one is required.
+function parseSessions(raw: unknown): { ok: true; sessions: number[] } | { ok: false; error: string } {
+  const values = Array.isArray(raw)
+    ? raw.map((value) => (typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : value))
+    : raw;
+  const result = canonicalizeSessions(values, JEE_FORM_EXAM.examName);
+  if (!result.ok) return { ok: false, error: result.error };
+  if (!result.sessions) return { ok: false, error: JEE_SESSIONS_REQUIRED };
+  return { ok: true, sessions: result.sessions };
+}
+
 function validateFilled(raw: RawJeeForm, requirePassword: boolean): JeeFormValidation {
   const applicationNumber = trimmed(raw.applicationNumber);
   const password = trimmed(raw.password);
@@ -168,8 +198,13 @@ function validateFilled(raw: RawJeeForm, requirePassword: boolean): JeeFormValid
   if (numberError) fieldErrors.applicationNumber = numberError;
   const secretError = passwordError(raw.password, password, requirePassword);
   if (secretError) fieldErrors.password = secretError;
-  if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
-  return { ok: true, input: { status: "filled", applicationNumber, password: password || null } };
+  const sessions = parseSessions(raw.sessions);
+  if (!sessions.ok) fieldErrors.sessions = sessions.error;
+  if (Object.keys(fieldErrors).length > 0 || !sessions.ok) return { ok: false, fieldErrors };
+  return {
+    ok: true,
+    input: { status: "filled", applicationNumber, password: password || null, sessions: sessions.sessions },
+  };
 }
 
 function validateNotFilled(raw: RawJeeForm): JeeFormValidation {

@@ -89,7 +89,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   };
 }
 
-const JEE_FORM = { current: null, earlier: [], reminderItems: [], passwordSaved: false };
+const JEE_FORM = { current: null, earlier: [], reminderItems: [], passwordSaved: false, sessionsApplied: [] };
 
 function signedInAs(access: { actorEmail: string }) {
   mockGetServerSession.mockResolvedValue({ user: { email: access.actorEmail } });
@@ -300,6 +300,7 @@ describe("MenteeDetailPage", () => {
       const line = screen.getByRole("region", { name: "JEE Main 2027 form" });
       expect(within(line).getByText("Filled")).toBeInTheDocument();
       expect(within(line).queryByText(/App no\./)).not.toBeInTheDocument();
+      expect(within(line).queryByText(/Session/)).not.toBeInTheDocument();
     });
 
     it("sends them back to the supervised Mentor's list, or to Flags when they came from it", async () => {
@@ -704,26 +705,42 @@ describe("MenteeDetailPage", () => {
       expect(within(line()).queryByRole("button")).not.toBeInTheDocument();
     });
 
-    it("shows Filled with the application number, and Update for a recorder", async () => {
+    it("shows Filled with the application number and the sessions applied, and Update for a recorder", async () => {
       signedInAs(MENTOR);
-      mockGetJeeForm.mockResolvedValue({ current: FILLED, earlier: [], reminderItems: [], passwordSaved: false });
+      mockGetJeeForm.mockResolvedValue({
+        current: FILLED,
+        earlier: [],
+        reminderItems: [],
+        passwordSaved: false,
+        sessionsApplied: [1, 2],
+      });
 
       await renderPage();
 
       expect(within(line()).getByText("Filled")).toBeInTheDocument();
       expect(within(line()).getByText("270310000001")).toHaveClass("font-mono");
+      expect(within(line()).getByText("1, 2")).toHaveClass("font-mono");
+      expect(within(line()).getByText("1, 2").previousElementSibling).toHaveTextContent("Sessions");
       expect(within(line()).getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
       expect(within(line()).getByRole("link", { name: "Update in JEE tab" })).toBeInTheDocument();
     });
 
     it("shows Not filled with its reasons", async () => {
       signedInAs(MENTOR);
-      mockGetJeeForm.mockResolvedValue({ current: NOT_FILLED, earlier: [], reminderItems: [], passwordSaved: false });
+      mockGetJeeForm.mockResolvedValue({
+        current: NOT_FILLED,
+        earlier: [],
+        reminderItems: [],
+        passwordSaved: false,
+        sessionsApplied: [1],
+      });
 
       await renderPage();
 
       expect(within(line()).getByText("Not filled")).toBeInTheDocument();
       expect(within(line()).getByText("Not aware about the exam; Other")).toBeInTheDocument();
+      // Sessions are a Filled detail only.
+      expect(within(line()).queryByText(/Session/)).not.toBeInTheDocument();
     });
 
     it("still renders the page when the status fails to load, without logging what failed", async () => {

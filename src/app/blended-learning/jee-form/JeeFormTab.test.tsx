@@ -46,7 +46,13 @@ const NOT_FILLED: JeeFormUpdate = {
 };
 const REMINDER = { id: 81, text: "JEE Form Filling (Reminder)", status: "open" as const };
 
-function row(studentId: number, name: string, current: JeeFormUpdate | null, mentor = 9001): JeeFormRow {
+function row(
+  studentId: number,
+  name: string,
+  current: JeeFormUpdate | null,
+  mentor = 9001,
+  sessionsApplied: number[] = []
+): JeeFormRow {
   return {
     studentId,
     programStudentId: `00${studentId}`,
@@ -54,7 +60,7 @@ function row(studentId: number, name: string, current: JeeFormUpdate | null, men
     mentorUserId: mentor,
     mentorName: mentor === 9001 ? "Mentor Alpha" : "Mentor Beta",
     viewOnly: false,
-    form: { current, earlier: [], reminderItems: [REMINDER], passwordSaved: false },
+    form: { current, earlier: [], reminderItems: [REMINDER], passwordSaved: false, sessionsApplied },
   };
 }
 
@@ -195,6 +201,7 @@ describe("JeeFormTab rows", () => {
       earlier: [],
       reminderItems: [],
       passwordSaved: true,
+      sessionsApplied: [1],
     };
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ form: saved }), { status: 201 }));
     goTo("?status=not_recorded&student=501");
@@ -203,6 +210,7 @@ describe("JeeFormTab rows", () => {
     const asha = rowOf("Asha Testcase");
     await userEvent.click(within(asha).getByRole("radio", { name: "Filled" }));
     await userEvent.type(within(asha).getByLabelText("Application number"), "2703");
+    await userEvent.click(within(asha).getByRole("checkbox", { name: "Session 1" }));
     await userEvent.type(within(asha).getByLabelText("Exam portal password"), "fake-portal-pass-1");
     await userEvent.click(within(asha).getByRole("button", { name: "Save" }));
 
@@ -210,6 +218,8 @@ describe("JeeFormTab rows", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/blended-learning/students/501/jee-form", expect.anything());
     expect(counts()).toEqual({ Filled: "2", "Not filled": "1", "Not recorded": "1" });
     expect(within(asha).getAllByText("2703").length).toBeGreaterThan(0);
+    // The row's summary shows the saved session too.
+    expect(within(asha).getByRole("button", { expanded: true })).toHaveTextContent("App no. 2703 · Session 1");
     expect(listedNames()).toEqual(["Asha Testcase", "Dev Placeholder"]);
     expect(window.location.pathname).toBe("/blended-learning/jee-form");
 
@@ -270,7 +280,7 @@ describe("JeeFormTab for an admin", () => {
 
 describe("JeeFormTab for a team lead", () => {
   const TEAM_ROWS = [
-    row(501, "Asha Testcase", FILLED),
+    row(501, "Asha Testcase", FILLED, 9001, [1, 2]),
     viewOnlyRow(601, "Dev Placeholder", FILLED),
     viewOnlyRow(602, "Esha Dummy", NOT_FILLED),
   ];
@@ -282,12 +292,14 @@ describe("JeeFormTab for a team lead", () => {
     const own = rowOf("Asha Testcase");
     expect(within(own).getByRole("button")).toBeInTheDocument();
     expect(within(own).queryByText("View only")).not.toBeInTheDocument();
+    expect(within(own).getByRole("button")).toHaveTextContent(/Sessions\s*1, 2/);
 
     const filled = rowOf("Dev Placeholder");
     expect(within(filled).getByText("View only")).toBeInTheDocument();
     expect(within(filled).getByText("Filled")).toBeInTheDocument();
     expect(within(filled).getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
     expect(within(filled).queryByText(/App no\./)).not.toBeInTheDocument();
+    expect(within(filled).queryByText(/Session/)).not.toBeInTheDocument();
     expect(within(filled).queryByRole("button")).not.toBeInTheDocument();
 
     const notFilled = rowOf("Esha Dummy");

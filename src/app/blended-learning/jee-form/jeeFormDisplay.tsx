@@ -40,16 +40,34 @@ export function updateSummary(update: JeeFormUpdate): string {
   return `Not filled · ${reasonsText(update)}`;
 }
 
-// The application number (Filled) or the reasons (Not filled), on one line.
-// A view-only status has no application number, so Filled shows nothing more.
-export function JeeStatusDetail({ current }: { current: CurrentStatus }) {
+// The application number and the exam record's sessions applied (Filled) or
+// the reasons (Not filled), on one line. A view-only status has neither the
+// number nor the sessions, so Filled shows nothing more.
+export function JeeStatusDetail({
+  current,
+  sessionsApplied = [],
+}: {
+  current: CurrentStatus;
+  sessionsApplied?: number[];
+}) {
   if (!current) return null;
   if (current.status === "filled") {
-    if (!current.applicationNumber) return null;
+    if (!current.applicationNumber && sessionsApplied.length === 0) return null;
     return (
       <span className="min-w-0 break-words text-text-primary">
-        <span className="text-text-muted">App no. </span>
-        <span className="font-mono">{current.applicationNumber}</span>
+        {current.applicationNumber && (
+          <>
+            <span className="text-text-muted">App no. </span>
+            <span className="font-mono">{current.applicationNumber}</span>
+          </>
+        )}
+        {current.applicationNumber && sessionsApplied.length > 0 && " · "}
+        {sessionsApplied.length > 0 && (
+          <>
+            <span className="text-text-muted">{sessionsApplied.length === 1 ? "Session " : "Sessions "}</span>
+            <span className="font-mono">{sessionsApplied.join(", ")}</span>
+          </>
+        )}
       </span>
     );
   }

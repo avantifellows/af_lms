@@ -146,6 +146,7 @@ export interface ExamRecordCreateWithoutPlaintext {
   exam_id: number;
   exam_year: number;
   application_number: string;
+  sessions_applied?: number[];
   /** Only ever null: clears the legacy plaintext. Send it with a ciphertext. */
   application_password?: null;
   application_password_ciphertext?: string;
@@ -154,6 +155,7 @@ export interface ExamRecordCreateWithoutPlaintext {
 export interface ExamRecordPatchWithoutPlaintext {
   application_number?: string;
   exam_year?: number;
+  sessions_applied?: number[];
   /** Only ever null: clears the legacy plaintext. Send it with a ciphertext. */
   application_password?: null;
   application_password_ciphertext?: string;
@@ -179,10 +181,17 @@ const CREATE_KEYS = [
   "exam_id",
   "exam_year",
   "application_number",
+  "sessions_applied",
   "application_password",
   "application_password_ciphertext",
 ] as const;
-const PATCH_KEYS = ["application_number", "exam_year", "application_password", "application_password_ciphertext"] as const;
+const PATCH_KEYS = [
+  "application_number",
+  "exam_year",
+  "sessions_applied",
+  "application_password",
+  "application_password_ciphertext",
+] as const;
 
 // The named keys that are set, in a fixed order; nothing else ever goes out.
 // The legacy plaintext key is only ever sent as null, so even a caller that

@@ -50,14 +50,16 @@ import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type U
 //
 // - Filled: the application number is upserted into `student_exam_record`
 //   through the DB Service (one record per Student + "JEE Mains" + 2027; an
-//   existing row is updated, never duplicated) with the exam-portal password
+//   existing row is updated, never duplicated) with the session(s) applied
+//   for (`sessions_applied`, as the Exams tab stores them; only on the
+//   record, not on the update) and the exam-portal password
 //   as KMS ciphertext (required while the record has none; optional to
 //   replace after), the optional confirmation PDF
 //   goes to S3 and `lms_student_documents` through the existing document
 //   upload, and the Student's open "JEE Form Filling (Reminder)" Common
 //   Action Item is ticked done. Saving the same Filled form again adds no
 //   update but still ticks an open reminder (by the latest update); a typed
-//   password always counts as a change.
+//   password, or sessions other than the record's, always count as a change.
 //   The number shown for a Filled status is the exam record's (an Exams tab
 //   edit shows here), else the one the update recorded; earlier updates keep
 //   the number recorded at the time. "The same form" compares with the
@@ -160,27 +162,47 @@ function byStudent<T extends { student_id: number | string }>(rows: T[]): Map<nu
   return groups;
 }
 
-type SavedRecord = { applicationNumber: string | null; passwordSaved: boolean };
+type SavedRecord = { applicationNumber: string | null; passwordSaved: boolean; sessionsApplied: number[] };
 
-// Each Student's JEE Mains 2027 record: its application number (the first
-// non-blank one, should there ever be two records) and whether it holds a
-// password ciphertext. Named columns only: of the ciphertext only whether it
-// is there, and never the legacy plaintext column.
+// Sittings as stored (unsorted or repeated, from older writes) → sorted, once each.
+function sortedSessions(sessions: readonly number[] | null | undefined): number[] {
+  return [...new Set((sessions ?? []).map(Number))].sort((a, b) => a - b);
+}
+
+function sameSessions(saved: readonly number[] | null | undefined, sessions: readonly number[]): boolean {
+  return sortedSessions(saved).join(",") === sortedSessions(sessions).join(",");
+}
+
+// Each Student's JEE Mains 2027 record: its application number and sessions
+// applied (from the first record with a non-blank number, else the first,
+// should there ever be two records) and whether any holds a password
+// ciphertext. Named columns only: of the ciphertext only whether it is there,
+// and never the legacy plaintext column.
 async function listSavedRecords(studentIds: number[], examId: number): Promise<Map<number, SavedRecord>> {
-  const rows = await query<{ student_id: number | string; application_number: string | null; ciphertext_saved: boolean }>(
-    `SELECT ser.student_id,
-            (array_agg(btrim(ser.application_number) ORDER BY ser.id)
-               FILTER (WHERE btrim(ser.application_number) <> ''))[1] AS application_number,
-            bool_or(ser.application_password_ciphertext IS NOT NULL) AS ciphertext_saved
+  const rows = await query<{
+    student_id: number | string;
+    application_number: string | null;
+    sessions_applied: number[] | null;
+    ciphertext_saved: boolean;
+  }>(
+    `SELECT DISTINCT ON (ser.student_id) ser.student_id,
+            NULLIF(btrim(ser.application_number), '') AS application_number,
+            ser.sessions_applied,
+            bool_or(ser.application_password_ciphertext IS NOT NULL) OVER (PARTITION BY ser.student_id)
+              AS ciphertext_saved
      FROM student_exam_record ser
      WHERE ser.student_id = ANY($1::bigint[]) AND ser.exam_id = $2 AND ser.exam_year = $3
-     GROUP BY ser.student_id`,
+     ORDER BY ser.student_id, (COALESCE(btrim(ser.application_number), '') = ''), ser.id`,
     [studentIds, examId, JEE_FORM_EXAM.examYear]
   );
   return new Map(
     rows.map((row) => [
       Number(row.student_id),
-      { applicationNumber: row.application_number, passwordSaved: Boolean(row.ciphertext_saved) },
+      {
+        applicationNumber: row.application_number,
+        passwordSaved: Boolean(row.ciphertext_saved),
+        sessionsApplied: sortedSessions(row.sessions_applied),
+      },
     ])
   );
 }
@@ -217,7 +239,13 @@ async function jeeFormViews(studentIds: number[], examId: number): Promise<Map<n
       }));
       return [
         studentId,
-        { current: current ?? null, earlier, reminderItems, passwordSaved: record?.passwordSaved ?? false },
+        {
+          current: current ?? null,
+          earlier,
+          reminderItems,
+          passwordSaved: record?.passwordSaved ?? false,
+          sessionsApplied: record?.sessionsApplied ?? [],
+        },
       ];
     })
   );
@@ -327,7 +355,13 @@ export async function listJeeFormRows(access: BlendedLearningAccess): Promise<Je
     if (viewOnly(row)) {
       return { ...base, viewOnly: true, form: statuses.get(studentId) ?? { statusOnly: true, current: null } };
     }
-    const form = views.get(studentId) ?? { current: null, earlier: [], reminderItems: [], passwordSaved: false };
+    const form = views.get(studentId) ?? {
+      current: null,
+      earlier: [],
+      reminderItems: [],
+      passwordSaved: false,
+      sessionsApplied: [],
+    };
     return { ...base, viewOnly: false, form };
   });
 }
@@ -358,17 +392,20 @@ type ExamRecordRow = {
   exam_name: string | null;
   exam_year: number | null;
   application_number: string | null;
+  sessions_applied?: number[] | null;
   // The record holds a password ciphertext (the ciphertext isn't selected).
   has_password?: boolean;
 };
 
 // What to send the DB Service so the Student has exactly one "JEE Mains"
-// 2027 record holding this application number.
+// 2027 record holding this application number and these sessions.
 export type ExamRecordPlan =
   | { kind: "none" }
   | { kind: "create" }
   | { kind: "patch"; id: number; examYear?: number }
   | { kind: "conflict"; message: string };
+
+type FilledInput = Extract<JeeFormInput, { status: "filled" }>;
 
 const sameNumber = (a: string | null, b: string) => (a ?? "").trim().toLowerCase() === b.toLowerCase();
 
@@ -382,7 +419,8 @@ const sameNumber = (a: string | null, b: string) => (a ?? "").trim().toLowerCase
 export function planExamRecordWrite(
   rows: ExamRecordRow[],
   examId: number,
-  applicationNumber: string
+  applicationNumber: string,
+  sessions: readonly number[]
 ): ExamRecordPlan {
   const isJee = (row: ExamRecordRow) => Number(row.exam_id) === examId;
   const target = rows.find((row) => isJee(row) && Number(row.exam_year) === JEE_FORM_EXAM.examYear);
@@ -396,7 +434,8 @@ export function planExamRecordWrite(
     };
   }
   if (target) {
-    return target.application_number === applicationNumber ? { kind: "none" } : { kind: "patch", id: Number(target.id) };
+    const same = target.application_number === applicationNumber && sameSessions(target.sessions_applied, sessions);
+    return same ? { kind: "none" } : { kind: "patch", id: Number(target.id) };
   }
   const yearless = holders.find((row) => isJee(row) && row.exam_year === null);
   if (yearless) return { kind: "patch", id: Number(yearless.id), examYear: JEE_FORM_EXAM.examYear };
@@ -404,13 +443,14 @@ export function planExamRecordWrite(
 }
 
 // The plan, the record it writes (null for a create), whether that record
-// already holds a password ciphertext, and the number the Student's JEE Mains
-// 2027 record held before this save (null without one).
+// already holds a password ciphertext, and the number and sessions the
+// Student's JEE Mains 2027 record held before this save (null without one).
 type ExamRecordTarget = {
   plan: ExamRecordPlan;
   recordId: number | null;
   passwordSaved: boolean;
   savedNumber: string | null;
+  savedSessions: number[] | null;
 };
 
 function planTarget(rows: ExamRecordRow[], examId: number, plan: ExamRecordPlan): ExamRecordTarget {
@@ -425,6 +465,7 @@ function planTarget(rows: ExamRecordRow[], examId: number, plan: ExamRecordPlan)
     recordId: row ? Number(row.id) : null,
     passwordSaved: Boolean(row?.has_password),
     savedNumber: saved?.application_number ?? null,
+    savedSessions: saved ? sortedSessions(saved.sessions_applied) : null,
   };
 }
 
@@ -432,13 +473,14 @@ async function examRecordPlan(
   client: PoolClient,
   studentId: number,
   examId: number,
-  applicationNumber: string
+  input: FilledInput
 ): Promise<ExamRecordTarget> {
+  const { applicationNumber, sessions } = input;
   // Named columns only: never the legacy password, and only whether a
   // ciphertext is there, not the ciphertext.
   const { rows } = await client.query<ExamRecordRow>(
     `SELECT ser.id, ser.exam_id, e.name AS exam_name, ser.exam_year, ser.application_number,
-            (ser.application_password_ciphertext IS NOT NULL) AS has_password
+            ser.sessions_applied, (ser.application_password_ciphertext IS NOT NULL) AS has_password
      FROM student_exam_record ser
      LEFT JOIN exam e ON e.id = ser.exam_id
      WHERE ser.student_id = $1
@@ -446,23 +488,26 @@ async function examRecordPlan(
      ORDER BY ser.id`,
     [studentId, examId, applicationNumber]
   );
-  return planTarget(rows, examId, planExamRecordWrite(rows, examId, applicationNumber));
+  return planTarget(rows, examId, planExamRecordWrite(rows, examId, applicationNumber, sessions));
 }
 
-// `ciphertext` (a new password) rides along with the plan's write; with
-// nothing else to change, it is patched onto the record on its own. It always
-// goes with `application_password: null`, clearing any legacy plaintext as
-// the Exams tab does; a write without a new password (a number change alone)
-// leaves both password columns as they are, as the Exams tab's "keep" does.
+// The plan's create or patch sends the number and the sessions (the Exams
+// tab's `sessions_applied`). `ciphertext` (a new password) rides along with
+// the plan's write; with nothing else to change, it is patched onto the
+// record on its own. It always goes with `application_password: null`,
+// clearing any legacy plaintext as the Exams tab does; a write without a new
+// password (a number or sessions change alone) leaves both password columns
+// as they are, as the Exams tab's "keep" does.
 async function applyExamRecordPlan(
   client: PoolClient,
   target: ExamRecordTarget,
   studentId: number,
   examId: number,
-  applicationNumber: string,
+  input: FilledInput,
   ciphertext: string | null
 ): Promise<void> {
   const { plan } = target;
+  const { applicationNumber, sessions } = input;
   const password =
     ciphertext === null ? {} : { application_password: null, application_password_ciphertext: ciphertext };
   if (plan.kind === "create") {
@@ -471,12 +516,14 @@ async function applyExamRecordPlan(
       exam_id: examId,
       exam_year: JEE_FORM_EXAM.examYear,
       application_number: applicationNumber,
+      sessions_applied: sessions,
       ...password,
     });
   } else if (plan.kind === "patch") {
     await patchExamRecordWithoutPlaintext(plan.id, {
       application_number: applicationNumber,
       ...(plan.examYear === undefined ? {} : { exam_year: plan.examYear }),
+      sessions_applied: sessions,
       ...password,
     });
   } else if (plan.kind === "none" && ciphertext !== null && target.recordId !== null) {
@@ -598,16 +645,23 @@ function shownNumber(latest: LatestRow, savedNumber: string | null): string | nu
 // tab pre-fills it, is no change: nothing is appended, and an open reminder is
 // still ticked. A typed password can't be compared with the saved ciphertext
 // (and is written to the exam record before the update is appended), so it
-// always counts as a change and records a new update.
+// always counts as a change and records a new update. So do sessions other
+// than the record's before this save (`savedSessions`, null without a 2027
+// record): they were written to the record, and the update dates the change.
 function unchanged(
   latest: LatestRow | undefined,
   input: JeeFormInput,
   newDocument: boolean,
-  savedNumber: string | null
+  saved: SavedValues
 ): boolean {
   if (!latest || latest.status !== input.status || newDocument) return false;
   if (input.status === "filled") {
-    return input.password === null && shownNumber(latest, savedNumber) === input.applicationNumber;
+    return (
+      input.password === null &&
+      shownNumber(latest, saved.savedNumber) === input.applicationNumber &&
+      saved.savedSessions !== null &&
+      sameSessions(saved.savedSessions, input.sessions)
+    );
   }
   return (latest.reasons ?? []).join(",") === input.reasons.join(",") && latest.details === input.details;
 }
@@ -715,13 +769,14 @@ async function appendUpdate(
     input: JeeFormInput;
     latest: LatestRow | undefined;
     stored: StoredConfirmation | null;
-    // The JEE Mains 2027 record's number before this save (Filled only).
-    savedNumber: string | null;
+    // The JEE Mains 2027 record's number and sessions before this save (Filled only).
+    saved: SavedValues;
     mapping: MappingSnapshot;
   }
 ): Promise<boolean> {
-  const { studentId, examId, input, latest, stored, savedNumber, mapping } = values;
-  if (unchanged(latest, input, stored !== null, savedNumber)) {
+  const { studentId, examId, input, latest, stored, saved, mapping } = values;
+  const { savedNumber } = saved;
+  if (unchanged(latest, input, stored !== null, saved)) {
     if (latest?.status === "filled") await tickReminder(client, access, studentId, Number(latest.id));
     return false;
   }
@@ -755,8 +810,12 @@ function validateFile(input: JeeFormInput, file: ConfirmationFile | null): JeeFo
   return error ? { confirmation: error } : null;
 }
 
+// The JEE Mains 2027 record's number and sessions before this save: null
+// for both without a record (and for Not filled, which reads no record).
+type SavedValues = { savedNumber: string | null; savedSessions: number[] | null };
+
 type ExternalWrite =
-  | { ok: true; stored: StoredConfirmation | null; savedNumber: string | null }
+  | ({ ok: true; stored: StoredConfirmation | null } & SavedValues)
   | { ok: false; result: RecordJeeFormResult };
 
 const NVS_REFUSED: RecordJeeFormResult = {
@@ -798,26 +857,26 @@ async function passwordCiphertext(
 // locks and before the update is appended. The password is encrypted before
 // anything is written; on failure the stored PDF is withdrawn. A same-form
 // re-save runs this too: with no password or PDF it sends nothing while the
-// record holds the number shown, writes the record again when it was removed
-// (or lost its number) elsewhere, and still answers 409 / 422 when the number
-// now clashes or the record has no password.
+// record holds the number shown and the same sessions, writes the record
+// again when it was removed (or lost its number) elsewhere, and still answers
+// 409 / 422 when the number now clashes or the record has no password.
 async function writeApplication(
   client: PoolClient,
   access: BlendedLearningAccess,
   studentId: number,
   examId: number,
-  input: Extract<JeeFormInput, { status: "filled" }>,
+  input: FilledInput,
   file: ConfirmationFile | null
 ): Promise<ExternalWrite> {
-  const target = await examRecordPlan(client, studentId, examId, input.applicationNumber);
+  const target = await examRecordPlan(client, studentId, examId, input);
   if (target.plan.kind === "conflict") return { ok: false, result: conflict({ applicationNumber: target.plan.message }) };
   const secret = await passwordCiphertext(studentId, input.password, target.passwordSaved);
   if (!secret.ok) return secret;
   let stored: StoredConfirmation | null = null;
   try {
     if (file) stored = await storeConfirmation(studentId, file, access.actorEmail);
-    await applyExamRecordPlan(client, target, studentId, examId, input.applicationNumber, secret.ciphertext);
-    return { ok: true, stored, savedNumber: target.savedNumber };
+    await applyExamRecordPlan(client, target, studentId, examId, input, secret.ciphertext);
+    return { ok: true, stored, savedNumber: target.savedNumber, savedSessions: target.savedSessions };
   } catch (error) {
     // Never log keys, bodies or the number: the error's name is enough.
     console.error("JEE form external write failed:", error instanceof Error ? error.name : "unknown");
@@ -865,7 +924,10 @@ export async function recordJeeForm(
   if (examId === null) return { ok: false, status: 503, error: "The JEE Mains exam isn't set up yet." };
 
   // Set once the PDF is stored, so a failure after that withdraws it.
-  const written: { stored: StoredConfirmation | null; savedNumber: string | null } = { stored: null, savedNumber: null };
+  const written: { stored: StoredConfirmation | null; saved: SavedValues } = {
+    stored: null,
+    saved: { savedNumber: null, savedSessions: null },
+  };
   let created: boolean;
   try {
     created = await withTransaction(async (client) => {
@@ -877,10 +939,10 @@ export async function recordJeeForm(
         const external = await writeApplication(client, access, studentId, examId, input, file);
         if (!external.ok) throw new SaveRefused(external.result);
         written.stored = external.stored;
-        written.savedNumber = external.savedNumber;
+        written.saved = { savedNumber: external.savedNumber, savedSessions: external.savedSessions };
       }
-      const { stored, savedNumber } = written;
-      return appendUpdate(client, access, { studentId, examId, input, latest, stored, savedNumber, mapping });
+      const { stored, saved } = written;
+      return appendUpdate(client, access, { studentId, examId, input, latest, stored, saved, mapping });
     });
   } catch (error) {
     await discardConfirmation(written.stored);

@@ -3,18 +3,21 @@ import { failureResponse, withBlendedLearning } from "@/lib/blended-learning-gua
 import { recordJeeForm, type ConfirmationFile } from "@/lib/blended-learning-jee-form";
 
 // Record a Mentee's JEE Main 2027 form status from the JEE Form tab:
-// multipart `status` (filled | not_filled), `applicationNumber`, the
-// exam-portal `password` (required while none is saved; blank keeps the saved
-// one) and an optional `confirmation` PDF when filled, or one `reasons` entry
+// multipart `status` (filled | not_filled), `applicationNumber`, one
+// `sessions` entry per JEE Main session applied for (1, 2; at least one,
+// saved to the exam record's `sessions_applied`), the exam-portal `password`
+// (required while none is saved; blank keeps the saved one) and an optional
+// `confirmation` PDF when filled, or one `reasons` entry
 // per reason and optional `details` when not. Only the Mentor of an active
 // Mapping records it; Blended Learning Admins and read-only accounts get 403
 // (they may still reveal the password, through ./password). The
 // password is stored only as KMS ciphertext, and the response carries only
 // whether one is saved (`passwordSaved`), never the password. 201 when an
 // update is recorded; 200 when the same form is saved again (no password
-// typed, no new PDF), which records nothing new but still ticks an open
-// "JEE Form Filling (Reminder)" when Filled. Either way `form` is read after
-// the save, so its `reminderItems` show the tick.
+// typed, the sessions the record holds, no new PDF), which records nothing
+// new but still ticks an open "JEE Form Filling (Reminder)" when Filled.
+// Either way `form` is read after the save, so its `reminderItems` show the
+// tick.
 export const POST = withBlendedLearning("record_jee_form", async (request, { access, id }) => {
   let form: FormData;
   try {
@@ -38,6 +41,7 @@ export const POST = withBlendedLearning("record_jee_form", async (request, { acc
       status: form.get("status"),
       applicationNumber: form.get("applicationNumber"),
       password: form.get("password"),
+      sessions: form.getAll("sessions"),
       reasons: form.getAll("reasons"),
       details: form.get("details"),
     },

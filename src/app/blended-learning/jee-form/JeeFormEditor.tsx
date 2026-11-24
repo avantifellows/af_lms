@@ -10,6 +10,7 @@ import {
   JEE_FORM_DETAILS_MAX_LENGTH,
   JEE_FORM_EXAM,
   JEE_FORM_REASONS,
+  JEE_FORM_SESSIONS,
   JEE_FORM_STATUS_LABEL,
   confirmationError,
   validateJeeForm,
@@ -24,8 +25,10 @@ import { FieldError, GrowingTextarea, LABEL_CLASSES, Optional, SegmentedChoice }
 import { JeePasswordField } from "./JeePassword";
 
 // The JEE form's Filled / Not filled form, opened in a JEE Form tab row.
-// Filled takes the application number, the exam-portal password (required
-// until one is saved, then optional to replace) and, optionally, the
+// Filled takes the application number, the session(s) applied for (Session
+// 1, Session 2 or both, as on the Exams tab; pre-filled from the exam
+// record), the exam-portal password (required until one is saved, then
+// optional to replace) and, optionally, the
 // confirmation page PDF, and ticks the "JEE Form Filling (Reminder)" Action
 // Item; Not filled takes one or more reasons (details required for Other) and
 // flags the program team. The password is write-only: it is posted, never
@@ -42,17 +45,20 @@ type Draft = {
   password: string;
   // A saved password is being replaced (its field is open).
   replacePassword: boolean;
+  // Sorted session numbers (Filled only).
+  sessions: number[];
   confirmation: File | null;
   reasons: JeeFormReason[];
   details: string;
 };
 
-function draftFrom(current: JeeFormUpdate | null): Draft {
+function draftFrom(current: JeeFormUpdate | null, sessionsApplied: number[]): Draft {
   return {
     status: current?.status ?? null,
     applicationNumber: current?.applicationNumber ?? "",
     password: "",
     replacePassword: false,
+    sessions: sessionsApplied.filter((session) => JEE_FORM_SESSIONS.includes(session)),
     confirmation: null,
     reasons: current?.reasons ?? [],
     details: current?.details ?? "",
@@ -82,6 +88,37 @@ type FieldsProps = {
   change: (next: Partial<Draft>) => void;
   fieldErrors: JeeFormFieldErrors;
 };
+
+// "Sessions applied", worded and laid out as on the Exams tab; at least one.
+function SessionChoices({ draft, change, fieldErrors }: FieldsProps) {
+  function toggle(session: number) {
+    const sessions = draft.sessions.includes(session)
+      ? draft.sessions.filter((value) => value !== session)
+      : [...draft.sessions, session].sort((a, b) => a - b);
+    change({ sessions });
+  }
+  return (
+    <fieldset className="min-w-0" aria-invalid={Boolean(fieldErrors.sessions)}>
+      <legend className={LABEL_CLASSES}>Sessions applied</legend>
+      <div className="flex flex-wrap gap-x-6">
+        {JEE_FORM_SESSIONS.map((session) => (
+          <label key={session} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              name="sessions"
+              value={session}
+              checked={draft.sessions.includes(session)}
+              onChange={() => toggle(session)}
+              className="h-5 w-5 shrink-0 accent-accent"
+            />
+            Session {session}
+          </label>
+        ))}
+      </div>
+      <FieldError message={fieldErrors.sessions} />
+    </fieldset>
+  );
+}
 
 function FilledFields({
   draft,
@@ -113,6 +150,7 @@ function FilledFields({
         />
         <FieldError message={fieldErrors.applicationNumber} />
       </div>
+      <SessionChoices draft={draft} change={change} fieldErrors={fieldErrors} />
       <JeePasswordField
         studentId={studentId}
         passwordSaved={passwordSaved}
@@ -227,6 +265,7 @@ function formBody(draft: Draft): FormData {
     body.set("applicationNumber", draft.applicationNumber);
     // Blank keeps the saved password, so it isn't sent.
     if (draft.password.trim()) body.set("password", draft.password);
+    for (const session of draft.sessions) body.append("sessions", String(session));
     if (draft.confirmation) body.set("confirmation", draft.confirmation);
   } else {
     for (const reason of draft.reasons) body.append("reasons", reason);
@@ -277,6 +316,7 @@ export function JeeFormEditor({
   studentId,
   current,
   passwordSaved,
+  sessionsApplied,
   openReminder,
   onCancel,
   onSaved,
@@ -284,12 +324,14 @@ export function JeeFormEditor({
   studentId: number;
   current: JeeFormUpdate | null;
   passwordSaved: boolean;
+  // The exam record's saved sessions, to pre-fill.
+  sessionsApplied: number[];
   // The open reminder's text (as the program team named it), or null.
   openReminder: string | null;
   onCancel: () => void;
   onSaved: (form: JeeFormView) => void;
 }) {
-  const [draft, setDraft] = useState(() => draftFrom(current));
+  const [draft, setDraft] = useState(() => draftFrom(current, sessionsApplied));
   const [fieldErrors, setFieldErrors] = useState<JeeFormFieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);

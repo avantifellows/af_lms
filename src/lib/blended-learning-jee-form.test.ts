@@ -9,42 +9,58 @@ import { getJeeFormLine, listJeeFormRows, planExamRecordWrite } from "./blended-
 const mockQuery = vi.mocked(query);
 
 const JEE = 1;
-const row = (id: number, exam_id: number, exam_year: number | null, application_number: string, exam_name = "JEE Mains") => ({
+const row = (
+  id: number,
+  exam_id: number,
+  exam_year: number | null,
+  application_number: string,
+  exam_name = "JEE Mains",
+  sessions_applied: number[] | null = [1]
+) => ({
   id,
   exam_id,
   exam_name,
   exam_year,
   application_number,
+  sessions_applied,
 });
 
 // The DB Service's create upserts on (student, application number), so the
 // plan must never let a POST move another record.
 describe("planExamRecordWrite", () => {
   it("creates a record when the Student has no JEE Mains 2027 record and no record with the number", () => {
-    expect(planExamRecordWrite([], JEE, "2703")).toEqual({ kind: "create" });
-    expect(planExamRecordWrite([row(5, JEE, 2026, "1111")], JEE, "2703")).toEqual({ kind: "create" });
-    expect(planExamRecordWrite([row(5, JEE, null, "1111")], JEE, "2703")).toEqual({ kind: "create" });
+    expect(planExamRecordWrite([], JEE, "2703", [1])).toEqual({ kind: "create" });
+    expect(planExamRecordWrite([row(5, JEE, 2026, "1111")], JEE, "2703", [1])).toEqual({ kind: "create" });
+    expect(planExamRecordWrite([row(5, JEE, null, "1111")], JEE, "2703", [1])).toEqual({ kind: "create" });
   });
 
   it("updates the existing 2027 record, or leaves it when it already has the number", () => {
-    expect(planExamRecordWrite([row(7, JEE, 2027, "1111")], JEE, "2703")).toEqual({ kind: "patch", id: 7 });
-    expect(planExamRecordWrite([row(7, JEE, 2027, "2703")], JEE, "2703")).toEqual({ kind: "none" });
+    expect(planExamRecordWrite([row(7, JEE, 2027, "1111")], JEE, "2703", [1])).toEqual({ kind: "patch", id: 7 });
+    expect(planExamRecordWrite([row(7, JEE, 2027, "2703")], JEE, "2703", [1])).toEqual({ kind: "none" });
+  });
+
+  it("patches the 2027 record when only the sessions differ, comparing them sorted and once each", () => {
+    const saved = (sessions: number[] | null) => [row(7, JEE, 2027, "2703", "JEE Mains", sessions)];
+    expect(planExamRecordWrite(saved([1]), JEE, "2703", [1, 2])).toEqual({ kind: "patch", id: 7 });
+    expect(planExamRecordWrite(saved(null), JEE, "2703", [1])).toEqual({ kind: "patch", id: 7 });
+    expect(planExamRecordWrite(saved([]), JEE, "2703", [2])).toEqual({ kind: "patch", id: 7 });
+    expect(planExamRecordWrite(saved([2, 1, 2]), JEE, "2703", [1, 2])).toEqual({ kind: "none" });
   });
 
   it("gives the year to a yearless JEE Mains record holding the number, ignoring case and spaces", () => {
-    expect(planExamRecordWrite([row(5, JEE, null, " ab12 ")], JEE, "AB12")).toEqual({ kind: "patch", id: 5, examYear: 2027 });
+    expect(planExamRecordWrite([row(5, JEE, null, " ab12 ")], JEE, "AB12", [1])).toEqual({ kind: "patch", id: 5, examYear: 2027 });
   });
 
   it("refuses a number held by another exam, another year, or another record beside the 2027 one", () => {
-    expect(planExamRecordWrite([row(9, 7, null, "2703", "JEE Advanced")], JEE, "2703")).toEqual({
+    expect(planExamRecordWrite([row(9, 7, null, "2703", "JEE Advanced")], JEE, "2703", [1])).toEqual({
       kind: "conflict",
       message: "This application number is already saved for JEE Advanced.",
     });
-    expect(planExamRecordWrite([row(5, JEE, 2026, "2703")], JEE, "2703")).toEqual({
+    expect(planExamRecordWrite([row(5, JEE, 2026, "2703")], JEE, "2703", [1])).toEqual({
       kind: "conflict",
       message: "This application number is already saved for JEE Mains 2026.",
     });
-    expect(planExamRecordWrite([row(7, JEE, 2027, "1111"), row(5, JEE, null, "2703")], JEE, "2703")).toMatchObject({
+    expect(planExamRecordWrite([row(7, JEE, 2027, "1111"), row(5, JEE, null, "2703")], JEE, "2703", [1])).toMatchObject({
       kind: "conflict",
     });
   });
@@ -128,6 +144,7 @@ describe("listJeeFormRows", () => {
       earlier: [],
       reminderItems: [{ id: 81, text: "JEE Form Filling (Reminder)", status: "open" }],
       passwordSaved: false,
+      sessionsApplied: [],
     });
 
     const mappings = sql.find(({ text }) => text.includes("FROM blended_learning_mentor_mentee_mappings"));
@@ -180,10 +197,33 @@ describe("listJeeFormRows", () => {
     records.length = 0;
     expect((await listJeeFormRows(MENTOR))![0].form.current).toMatchObject({ applicationNumber: "2712" });
 
-    // Named columns only, the JEE Mains 2027 record, blank numbers skipped.
+    // Named columns only, the JEE Mains 2027 record, a record with a number first.
     const read = sql.find(({ text }) => text.includes("FROM student_exam_record ser"))!;
     expect(read.params).toEqual([[501, 502], 1, 2027]);
-    expect(read.text).toContain("FILTER (WHERE btrim(ser.application_number) <> '')");
+    expect(read.text).toContain("ORDER BY ser.student_id, (COALESCE(btrim(ser.application_number), '') = ''), ser.id");
+  });
+
+  it("carries each Student's sessions applied from the exam record, sorted, [] without any", async () => {
+    mockQuery.mockImplementation((async (text: string, params: unknown[] = []) => {
+      sql.push({ text, params });
+      if (text.includes("FROM exam WHERE name")) return [{ id: 1 }];
+      if (text.includes("FROM blended_learning_mentor_mentee_mappings")) return MAPPED.slice(0, 2);
+      if (text.includes("FROM blended_learning_jee_form_updates u")) return [update(501, 12, "filled")];
+      if (text.includes("FROM blended_learning_action_items item")) return [];
+      if (text.includes("FROM student_exam_record ser")) {
+        return [
+          { student_id: 501, application_number: "2799", sessions_applied: [2, 1], ciphertext_saved: true },
+          { student_id: 502, application_number: "2788", sessions_applied: null, ciphertext_saved: false },
+        ];
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    }) as typeof query);
+
+    const [asha, biren] = (await listJeeFormRows(MENTOR))!;
+    if (asha.viewOnly || biren.viewOnly) throw new Error("own rows");
+    expect(asha.form.sessionsApplied).toEqual([1, 2]);
+    expect(biren.form.sessionsApplied).toEqual([]);
+    expect(sql.find(({ text }) => text.includes("FROM student_exam_record ser"))!.text).toContain("ser.sessions_applied");
   });
 
   it("gives a team lead their own Students' forms and their reportees' Students' status only", async () => {
@@ -198,8 +238,9 @@ describe("listJeeFormRows", () => {
       [502, false],
       [601, true],
     ]);
-    // Exactly the status: no application number, details, confirmation,
-    // history, reminder or password flag, whatever the row read returned.
+    // Exactly the status: no application number, sessions, details,
+    // confirmation, history, reminder or password flag, whatever the row read
+    // returned.
     expect(rows?.[2].form).toEqual({
       statusOnly: true,
       current: { status: "not_filled", reasons: ["not_aware"], recordedOn: "2026-11-14" },
