@@ -87,6 +87,19 @@ export async function listStudentExamRecords(
   return rows.map(toRecord);
 }
 
+/** What one roster-wide read of the exam registrations came back with. */
+export interface RosterExamSummaries {
+  /** Registrations by student id; a Student with none is simply absent. */
+  byStudent: Map<number, StudentExamSummary[]>;
+  /**
+   * The read itself failed. The roster still renders, but a Student with no
+   * registrations now means "not read", not "not registered" — the Data
+   * completeness table (#468) says so instead of counting every expected
+   * Student as a gap.
+   */
+  failed: boolean;
+}
+
 /**
  * Exam registrations for a whole roster, keyed by student id. One query for
  * the page rather than one per card.
@@ -94,13 +107,13 @@ export async function listStudentExamRecords(
  * The exam tables are the DB Service's, and this is a display extra on a page
  * whose point is the roster: if the read fails (most likely a database that
  * has not run the DB Service migration yet), the roster still renders, just
- * without the exam tags.
+ * without the exam tags — and says so, via `failed`.
  */
 export async function listExamSummariesForStudents(
   studentIds: number[],
-): Promise<Map<number, StudentExamSummary[]>> {
+): Promise<RosterExamSummaries> {
   const byStudent = new Map<number, StudentExamSummary[]>();
-  if (studentIds.length === 0) return byStudent;
+  if (studentIds.length === 0) return { byStudent, failed: false };
 
   let rows: StudentExamRecordRow[];
   try {
@@ -123,7 +136,7 @@ export async function listExamSummariesForStudents(
       "Failed to load student exam records for the roster:",
       error instanceof Error ? error.message : error,
     );
-    return byStudent;
+    return { byStudent, failed: true };
   }
 
   for (const row of rows) {
@@ -133,7 +146,7 @@ export async function listExamSummariesForStudents(
     if (existing) existing.push(summary);
     else byStudent.set(studentId, [summary]);
   }
-  return byStudent;
+  return { byStudent, failed: false };
 }
 
 /** What one registration's stored password is held as. */

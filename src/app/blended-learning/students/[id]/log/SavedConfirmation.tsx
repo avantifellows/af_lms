@@ -42,12 +42,15 @@ export function SavedConfirmation({
   studentId,
   firstName,
   groupBefore,
+  studentsHref = "/blended-learning",
 }: {
   saved: Saved;
   studentId: number;
   firstName: string;
   // The Mentee's Student list group when the form opened; null when unknown.
   groupBefore: MenteeGroup | null;
+  // The Mentor's own list.
+  studentsHref?: string;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   // The form is gone; move focus to what replaced it.
@@ -76,7 +79,7 @@ export function SavedConfirmation({
             {`View ${firstName}'s history`}
           </Link>
           <Link
-            href="/blended-learning"
+            href={studentsHref}
             className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-bg-card px-4 text-sm font-bold text-text-primary shadow-sm hover:bg-hover-bg"
           >
             Back to students

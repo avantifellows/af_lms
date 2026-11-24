@@ -14,7 +14,8 @@ import type { DraftState } from "@/lib/blended-learning-drafts";
 // (discarded or saved elsewhere) disappears.
 // Those who can manage drafts (not read-only) can retry a failed draft or one
 // still queued after 10 minutes, and discard any open draft. Those who can log
-// open a ready draft for review. Everyone else sees those buttons disabled.
+// open a ready draft for review. Everyone else sees those buttons disabled,
+// except a team lead on a reportee's Mentee (`hideActions`), who sees none.
 
 const DRAFT_POLL_MS = 15_000;
 
@@ -188,6 +189,7 @@ export function DraftStatus({
   initialRetryOffered = false,
   canManage = false,
   reviewHref = null,
+  hideActions = false,
   pollMs = DRAFT_POLL_MS,
   onReady,
   drafting = null,
@@ -199,6 +201,9 @@ export function DraftStatus({
   canManage?: boolean;
   // The log page that reviews a ready draft, for those who can log.
   reviewHref?: string | null;
+  // True to leave out Review, Retry and Discard rather than show them
+  // disabled: a team lead never acts on a reportee's Mentee's draft.
+  hideActions?: boolean;
   pollMs?: number;
   // Called once the polled draft turns ready.
   onReady?: () => void;
@@ -252,15 +257,17 @@ export function DraftStatus({
     <section aria-label="Conversation Draft">
       <DraftFrame framed={framed}>
         <DraftHeading state={status.state} drafting={drafting} />
-        <DraftActions
-          state={status.state}
-          reviewHref={reviewHref}
-          retryOffered={status.retryOffered}
-          canManage={canManage}
-          busy={busy}
-          onRetry={retry}
-          onDiscard={discard}
-        />
+        {!hideActions && (
+          <DraftActions
+            state={status.state}
+            reviewHref={reviewHref}
+            retryOffered={status.retryOffered}
+            canManage={canManage}
+            busy={busy}
+            onRetry={retry}
+            onDiscard={discard}
+          />
+        )}
         {message && (
           <p role="status" className="text-sm text-text-secondary">
             {message}

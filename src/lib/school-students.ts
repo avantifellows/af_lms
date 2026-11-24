@@ -10,6 +10,12 @@ import { listExamSummariesForStudents } from "@/lib/student-exam-records";
 export interface SchoolRoster {
   students: Student[];
   issues: DataIssue[];
+  /**
+   * The exam-registration read failed, so `exam_records` is absent everywhere
+   * and means nothing. The Data completeness table (#468) shows the Exams row
+   * as unread rather than counting every expected Student as unregistered.
+   */
+  examRecordsFailed: boolean;
 }
 
 /**
@@ -150,16 +156,23 @@ function collectsExamRecords(student: Student): boolean {
  * Hang each Student's exam registrations off the roster, in one query for the
  * whole page. Passwords are never part of this shape — the card only says
  * whether one is stored.
+ *
+ * A failed read is carried on the roster rather than swallowed: "no
+ * registration on file" and "we couldn't look" are different answers, and the
+ * completeness table shows them differently.
  */
-async function withExamRecords(roster: SchoolRoster): Promise<SchoolRoster> {
+async function withExamRecords(
+  roster: Omit<SchoolRoster, "examRecordsFailed">,
+): Promise<SchoolRoster> {
   const studentIds = roster.students
     .filter(collectsExamRecords)
     .map((student) => Number(student.student_pk_id))
     .filter((id) => Number.isFinite(id) && id > 0);
-  const byStudent = await listExamSummariesForStudents(studentIds);
-  if (byStudent.size === 0) return roster;
+  const { byStudent, failed } = await listExamSummariesForStudents(studentIds);
+  if (byStudent.size === 0) return { ...roster, examRecordsFailed: failed };
   return {
     ...roster,
+    examRecordsFailed: failed,
     students: roster.students.map((student) => {
       const records = byStudent.get(Number(student.student_pk_id));
       return records ? { ...student, exam_records: records } : student;

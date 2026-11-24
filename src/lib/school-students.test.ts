@@ -145,6 +145,49 @@ describe("getSchoolRoster", () => {
     expect(students[0].exam_records).toBeUndefined();
   });
 
+  // Review of #468: the exam read used to swallow its own failure, so "no
+  // registration on file" and "we couldn't look" reached the completeness
+  // table as the same answer and every expected Student read as a gap.
+  it("flags a failed exam read rather than passing it off as no registrations", async () => {
+    const roster = [
+      makeStudent({
+        student_pk_id: "5",
+        program_id: PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+        student_program_ids: [PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP],
+      }),
+    ];
+    mocks.mockQuery.mockReset();
+    mocks.mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM student_exam_record ser")) {
+        throw new Error("relation \"student_exam_record\" does not exist");
+      }
+      return sql.includes("WITH program_dropout_audits") ? roster : [];
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { students, examRecordsFailed } = await getSchoolRoster("school-1");
+
+    // The roster still renders — the registrations are a display extra.
+    expect(students).toHaveLength(1);
+    expect(students[0].exam_records).toBeUndefined();
+    expect(examRecordsFailed).toBe(true);
+    consoleError.mockRestore();
+  });
+
+  it("reports a clean exam read as read, even when nobody has registered", async () => {
+    mocks.mockQuery.mockResolvedValueOnce([
+      makeStudent({
+        student_pk_id: "5",
+        program_id: PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+        student_program_ids: [PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP],
+      }),
+    ]);
+
+    const { examRecordsFailed } = await getSchoolRoster("school-1");
+
+    expect(examRecordsFailed).toBe(false);
+  });
+
   it("keeps a Student who sits in a physical-centre Program as well as JNV NVS", async () => {
     mocks.mockQuery.mockResolvedValueOnce([
       makeStudent({

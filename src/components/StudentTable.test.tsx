@@ -2000,3 +2000,76 @@ describe("StudentTable - exam registrations", () => {
     expect(screen.queryByText("JEE123")).not.toBeInTheDocument();
   });
 });
+
+// ─── Data completeness filter (#468) ────────────────────────────────────────
+
+describe("StudentTable - restrictToGroupUserIds", () => {
+  const aarav = makeStudent({ student_pk_id: "1", first_name: "Aarav" });
+  const bela = makeStudent({
+    group_user_id: "gu-2",
+    student_pk_id: "2",
+    first_name: "Bela",
+  });
+
+  it("shows only the Students the completeness chip counted", () => {
+    render(
+      <StudentTable
+        students={[aarav, bela]}
+        grades={defaultGrades}
+        restrictToGroupUserIds={new Set(["gu-1"])}
+      />,
+    );
+
+    expect(screen.getByText(/Aarav/)).toBeInTheDocument();
+    expect(screen.queryByText(/Bela/)).not.toBeInTheDocument();
+  });
+
+  it("shows everyone when no chip is active", () => {
+    render(
+      <StudentTable
+        students={[aarav, bela]}
+        grades={defaultGrades}
+        restrictToGroupUserIds={null}
+      />,
+    );
+
+    expect(screen.getByText(/Aarav/)).toBeInTheDocument();
+    expect(screen.getByText(/Bela/)).toBeInTheDocument();
+  });
+
+  it("leaves the Dropout tab alone — the table counts the active roster", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[aarav]}
+        dropoutStudents={[bela]}
+        grades={defaultGrades}
+        restrictToGroupUserIds={new Set(["gu-1"])}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Dropout/ }));
+
+    expect(screen.getByText(/Bela/)).toBeInTheDocument();
+  });
+
+  // The roster LEFT JOINs `student`, so a card can exist with no record id.
+  // The table counts such a Student, so the filter has to be able to show them.
+  it("can still show a Student with no record id", () => {
+    const noRecord = makeStudent({
+      group_user_id: "gu-3",
+      student_pk_id: null,
+      first_name: "Chandra",
+    });
+    render(
+      <StudentTable
+        students={[aarav, noRecord]}
+        grades={defaultGrades}
+        restrictToGroupUserIds={new Set(["gu-3"])}
+      />,
+    );
+
+    expect(screen.getByText(/Chandra/)).toBeInTheDocument();
+    expect(screen.queryByText(/Aarav/)).not.toBeInTheDocument();
+  });
+});

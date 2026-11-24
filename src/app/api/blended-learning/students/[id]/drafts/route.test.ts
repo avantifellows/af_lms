@@ -12,7 +12,7 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
 }));
 
 import { withTransaction } from "@/lib/db";
-import { MAPPING, MENTOR, READ_ONLY_ADMIN, mockBlendedDb, pgError, rows, signedInAs } from "@/app/api/blended-learning/test-db";
+import { MAPPING, MENTOR, READ_ONLY_ADMIN, SUPERVISOR, mockBlendedDb, pgError, rows, signedInAs } from "@/app/api/blended-learning/test-db";
 import { POST } from "./route";
 
 // S3 holds the uploaded recording; HeadObject confirms it and its size.
@@ -131,6 +131,15 @@ describe("POST /api/blended-learning/students/[id]/drafts", () => {
       body: { error: message, fieldErrors: { s3Key: message } },
     });
     expect(withTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 to a team lead for their reportee's Mentee, and creates nothing", async () => {
+    signedInAs(SUPERVISOR);
+    configureEtl();
+    // Student 501 is mapped to 9001, whom the team lead (9003) supervises.
+    expect(await createDraft("501", UPLOADED)).toEqual({ status: 404, body: { error: "Not found" } });
+    expect(withTransaction).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("returns 409 when the open-draft unique index refuses a second draft", async () => {
