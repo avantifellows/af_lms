@@ -194,6 +194,9 @@ export const JEE_FORM_MENTEES = {
   admin: { key: "K3", firstName: "Lata", lastName: "Jee", gender: "Female", grade: 12, programId: 80 },
 } as const satisfies Record<string, FixtureMentee>;
 export const JEE_REMINDER_TEXT = "JEE Form Filling (Reminder)";
+// The hidden key the app finds the reminder by (db-service 20261124142920),
+// whatever its text.
+export const JEE_REMINDER_KEY = "jee_form_reminder";
 // Students for the JEE reminder spec (blended-learning-jee-reminder.spec.ts),
 // seeded with no Mapping: the spec maps them to Mentor C, the push ones
 // before the first push and the pushAgain ones after it, and ends those
@@ -647,7 +650,8 @@ async function seedFeedFlags(
 }
 
 // The JEE form Mentees' Mappings, their open "JEE Form Filling (Reminder)"
-// (pushed as a Common Action Item to these Students only) and the mobile
+// (pushed as a Common Action Item to these Students only, holding the
+// reminder's key as the db-service migration gives it) and the mobile
 // Mentee's yearless JEE Mains record.
 async function seedJeeForm(client: Client, studentIds: number[], mentorC: number) {
   const mentees = Object.values(JEE_FORM_MENTEES);
@@ -661,10 +665,10 @@ async function seedJeeForm(client: Client, studentIds: number[], mentorC: number
     });
   }
   const common = await client.query<{ id: string }>(
-    `INSERT INTO blended_learning_common_action_items (text, owner, target_kind, target_student_ids, created_by_email)
-     VALUES ($1, 'student', 'students', $2::text[], 'e2e-blended-admin@test.local')
+    `INSERT INTO blended_learning_common_action_items (text, owner, target_kind, target_student_ids, created_by_email, key)
+     VALUES ($1, 'student', 'students', $2::text[], 'e2e-blended-admin@test.local', $3)
      RETURNING id`,
-    [JEE_REMINDER_TEXT, mentees.map(programStudentId)]
+    [JEE_REMINDER_TEXT, mentees.map(programStudentId), JEE_REMINDER_KEY]
   );
   await client.query(
     `INSERT INTO blended_learning_action_items (common_action_item_id, student_id, position, text, owner)

@@ -4,6 +4,7 @@ import { getTestPool } from "../helpers/db";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 import {
   BLENDED_MENTOR_C,
+  JEE_REMINDER_KEY,
   JEE_REMINDER_MENTEES,
   programStudentId,
 } from "../helpers/blended-learning-fixtures";
@@ -12,17 +13,29 @@ import {
 // Conversation can't), so it must never sit open for a Student already
 // Filled. A push, first push and Push again alike, adds it done for a Student
 // whose latest JEE form update is Filled, by that update; saving the same
-// Filled form again ticks one left open. Against the real fixture DDL and the
-// e2e DB Service stub (e2e/helpers/db-service-stub.mjs). JEE_REMINDER_MENTEES
-// exist only for this spec, with no Mapping: it maps them to Mentor C, and
-// afterwards removes the Common Action Items it pushed and ends those
-// Mappings, so later specs see neither. The tests build on each other, so
-// they run in order. Application numbers and passwords are synthetic.
+// Filled form again ticks one left open. The reminder is the Common Action
+// Item holding the hidden key 'jee_form_reminder', whatever its text: a
+// rename keeps it linked, an item with the same text but no key is an
+// ordinary one, and one removed and created again gets the key back. Against
+// the real fixture DDL and the e2e DB Service stub
+// (e2e/helpers/db-service-stub.mjs). JEE_REMINDER_MENTEES exist only for this
+// spec, with no Mapping: it maps them to Mentor C, and afterwards removes the
+// Common Action Items it pushed and ends those Mappings, so later specs see
+// neither. The fixture's own reminder has its key taken off for the spec (so
+// the spec's reminder can be created with it) and given back afterwards. The
+// tests build on each other, so they run in order. Application numbers and
+// passwords are synthetic.
 const BLENDED_ADMIN = { name: "Synthetic Blended Admin", email: "e2e-blended-admin@test.local" };
 const TAB = "/blended-learning/jee-form";
-// Not the fixture's "JEE Form Filling (Reminder)": the reminder is matched
-// ignoring case, and this keeps its rows apart from the fixture's.
+// The spec's own reminder: its text is the reminder's with case aside, so
+// creating it gets the key; the lower case keeps it apart from the fixture's
+// "JEE Form Filling (Reminder)" on the page.
 const REMINDER = "JEE form filling (reminder)";
+// The reminder's new name after the program team renames it.
+const RENAMED = "Synthetic: fill in the JEE Main form";
+// The reminder's text in upper case, created while the reminder holds the
+// key: an ordinary item that the JEE form never ticks.
+const TWIN = "JEE FORM FILLING (REMINDER)";
 // Any other Common Action Item is pushed open, Filled or not.
 const OTHER_ITEM = "Synthetic: bring the admit card";
 const PASSWORD = "e2e-reminder-pass-1";
@@ -35,6 +48,8 @@ const studentIds: Record<string, number> = {};
 // The Common Action Items this spec pushes, removed again afterwards.
 const commonIds: number[] = [];
 let mentorCUserId = 0;
+// The fixture's reminder, whose key the spec borrows.
+let fixtureReminderId = 0;
 
 async function withPool<T>(fn: (pool: ReturnType<typeof getTestPool>) => Promise<T>): Promise<T> {
   const pool = getTestPool();
@@ -72,6 +87,12 @@ test.beforeAll(async () => {
       [BLENDED_MENTOR_C.email]
     );
     mentorCUserId = Number(mentor.rows[0].id);
+    const fixture = await pool.query<{ id: string }>(
+      `UPDATE blended_learning_common_action_items SET key = NULL
+       WHERE key = $1 AND removed_at IS NULL RETURNING id`,
+      [JEE_REMINDER_KEY]
+    );
+    fixtureReminderId = Number(fixture.rows[0].id);
   });
   // The pushAgain set is mapped only after the first push.
   await mapToMentorC([...Object.values(push), raced]);
@@ -88,6 +109,10 @@ test.afterAll(async ({ browser }) => {
   } finally {
     await context.close();
   }
+  // The spec's reminders are removed now, so the fixture's can hold the key again.
+  await withPool((pool) =>
+    pool.query(`UPDATE blended_learning_common_action_items SET key = $2 WHERE id = $1`, [fixtureReminderId, JEE_REMINDER_KEY])
+  );
   await withPool((pool) =>
     pool.query(
       `UPDATE blended_learning_mentor_mentee_mappings
@@ -143,6 +168,16 @@ async function pushedRows(commonId: number): Promise<PushedRow[]> {
   });
 }
 
+async function commonKey(commonId: number): Promise<string | null> {
+  return withPool(async (pool) => {
+    const result = await pool.query<{ key: string | null }>(
+      `SELECT key FROM blended_learning_common_action_items WHERE id = $1`,
+      [commonId]
+    );
+    return result.rows[0].key;
+  });
+}
+
 const DONE = { status: "done", completed_by_latest_update: true, completed_by_email: BLENDED_MENTOR_C.email, completed: true };
 const OPEN = { status: "open", completed_by_latest_update: false, completed_by_email: null, completed: false };
 
@@ -169,6 +204,7 @@ test.describe("Blended Learning JEE reminder — never left open for a Filled St
   test.describe.configure({ mode: "serial" });
   const pushedTo = [...Object.values(push), ...Object.values(pushAgain)];
   let reminderId = 0;
+  let twinId = 0;
 
   test("a push adds the reminder done for a Student already Filled, and open for Not filled or not recorded", async ({ page }) => {
     await signInAs(page, BLENDED_MENTOR_C);
@@ -179,6 +215,9 @@ test.describe("Blended Learning JEE reminder — never left open for a Filled St
     // Listed with the pushAgain set, which has no Mapping yet and so gets nothing now.
     const reminder = await pushNew(page, REMINDER, pushedTo);
     reminderId = reminder.id;
+    // Its text is the reminder's (case aside) and no active item holds the
+    // key, so it gets the key.
+    expect(await commonKey(reminderId)).toBe(JEE_REMINDER_KEY);
     expect(reminder.added).toBe(3);
     expect(await pushedRows(reminderId)).toEqual([
       { student_id: id(push.filled), ...DONE },
@@ -274,7 +313,8 @@ test.describe("Blended Learning JEE reminder — never left open for a Filled St
     await page.goto(`${TAB}?student=${id(raced)}`);
     const open = row(page, raced);
     await expect(open.getByRole("radio", { name: "Filled", exact: true })).toBeChecked();
-    await expect(open.getByText(/Saving ticks the student's “JEE Form Filling \(Reminder\)” action item/)).toBeVisible();
+    // Named by the reminder's own text.
+    await expect(open.getByText(`Saving ticks the student's “${REMINDER}” action item.`)).toBeVisible();
     await page.waitForLoadState("networkidle");
     // The same number, no password, no PDF.
     const response = page.waitForResponse((res) => res.url().endsWith(jeeFormUrl(raced)));
@@ -301,4 +341,56 @@ test.describe("Blended Learning JEE reminder — never left open for a Filled St
     await expect(openActionItems(page).getByText(REMINDER)).toHaveCount(0);
   });
 
+  test("a renamed reminder keeps its key and is still ticked; an un-keyed item with the reminder's text isn't", async ({ page }) => {
+    await signInAs(page, BLENDED_ADMIN);
+    // The Manage page edit: text and owner only.
+    const renamed = await page.request.patch(`/api/blended-learning/common-action-items/${reminderId}`, {
+      data: { text: RENAMED, owner: "student", key: null },
+    });
+    expect(renamed.status()).toBe(200);
+    expect(await commonKey(reminderId)).toBe(JEE_REMINDER_KEY);
+
+    // The reminder's text again, while the renamed one holds the key: no key.
+    const twin = await pushNew(page, TWIN, [pushAgain.notFilled]);
+    twinId = twin.id;
+    expect(await commonKey(twin.id)).toBeNull();
+    expect(await pushedRows(twin.id)).toEqual([{ student_id: id(pushAgain.notFilled), ...OPEN }]);
+
+    // Recording Filled ticks the renamed reminder, never the twin.
+    await signInAs(page, BLENDED_MENTOR_C);
+    await recordFilled(page, pushAgain.notFilled, "E2E-JEE-REM-05");
+    expect(await pushedRows(reminderId)).toContainEqual({ student_id: id(pushAgain.notFilled), ...DONE });
+    expect(await pushedRows(twin.id)).toEqual([{ student_id: id(pushAgain.notFilled), ...OPEN }]);
+
+    // On the Mentee page the twin is an ordinary open item, with a tick box
+    // rather than the JEE tab link.
+    await page.goto(`/blended-learning/students/${id(pushAgain.notFilled)}`);
+    const twinItem = openActionItems(page).getByRole("listitem").filter({ hasText: TWIN });
+    await expect(twinItem).toBeVisible();
+    await expect(twinItem.getByRole("link", { name: "Fill in JEE tab" })).toHaveCount(0);
+    await expect(openActionItems(page).getByText(RENAMED)).toHaveCount(0);
+
+    // The JEE tab's form has no open reminder left to tick, though the twin is open.
+    await page.goto(`${TAB}?student=${id(pushAgain.notFilled)}`);
+    const open = row(page, pushAgain.notFilled);
+    await expect(open.getByRole("radio", { name: "Filled", exact: true })).toBeChecked();
+    await expect(open.getByText(/Saving ticks the student's/)).toHaveCount(0);
+  });
+
+  test("a reminder removed and created again gets the key back, and is added done for a Filled Student", async ({ page }) => {
+    await signInAs(page, BLENDED_ADMIN);
+    expect((await page.request.delete(`/api/blended-learning/common-action-items/${reminderId}`)).status()).toBe(200);
+    commonIds.splice(commonIds.indexOf(reminderId), 1);
+    // The removed one keeps its key as history, but no longer holds it.
+    expect(await commonKey(reminderId)).toBe(JEE_REMINDER_KEY);
+
+    const again = await pushNew(page, REMINDER, [push.filled, push.notFilled]);
+    expect(await commonKey(again.id)).toBe(JEE_REMINDER_KEY);
+    expect(await pushedRows(again.id)).toEqual([
+      { student_id: id(push.filled), ...DONE },
+      { student_id: id(push.notFilled), ...OPEN },
+    ]);
+    // The twin made while the old one held the key stays an ordinary item.
+    expect(await commonKey(twinId)).toBeNull();
+  });
 });

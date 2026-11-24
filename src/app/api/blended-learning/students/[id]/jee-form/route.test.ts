@@ -389,7 +389,10 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     const [tick] = writesTo("UPDATE blended_learning_action_items");
     expect(tick.sql).toMatch(/SET status = 'done', completed_by_jee_form_update_id = \$3/);
     expect(tick.sql).toContain("item.status = 'open'");
-    expect(tick.params).toEqual([501, "JEE Form Filling (Reminder)", 900, MENTOR_A]);
+    // The reminder is found by its key, bound as $2, whatever its text now is.
+    expect(tick.sql).toContain("AND common.key = $2");
+    expect(tick.sql).not.toContain("common.text");
+    expect(tick.params).toEqual([501, "jee_form_reminder", 900, MENTOR_A]);
     expect(writesTo("blended_learning_mentor_flags")).toEqual([]);
     expect(res.body.form.current).toMatchObject({ status: "filled", applicationNumber: "270310000001", hasConfirmation: false });
     expect(res.body.form.passwordSaved).toBe(true);
@@ -466,7 +469,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     const [tick] = writesTo("UPDATE blended_learning_action_items");
     expect(tick.sql).toContain("item.status = 'open'");
     // Done by the latest update (900), which is Filled.
-    expect(tick.params).toEqual([501, "JEE Form Filling (Reminder)", 900, MENTOR_A]);
+    expect(tick.params).toEqual([501, "jee_form_reminder", 900, MENTOR_A]);
     expect(again.body.form.current).toMatchObject({ id: 900, status: "filled" });
     expect(again.body.form.reminderItems).toEqual([{ id: 81, text: "JEE Form Filling (Reminder)", status: "done" }]);
   });

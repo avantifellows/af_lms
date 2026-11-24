@@ -6,8 +6,7 @@ import {
   canViewBlendedStudent,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
-import { JEE_FORM_REMINDER_TEXT } from "./blended-learning-jee-form-input";
-import { jeeReminderMatchSql } from "./blended-learning-jee-reminder";
+import { JEE_FORM_REMINDER_KEY, jeeReminderMatchSql } from "./blended-learning-jee-reminder";
 import type { OpenDraftState } from "./blended-learning-mentees";
 import { getObjectText, headObject, presignDocumentPage } from "./s3";
 
@@ -385,7 +384,7 @@ export async function getMenteeDetail(
        FROM blended_learning_action_items item
        WHERE item.student_id = $1
        ORDER BY item.conversation_id, item.position, item.id`,
-      [studentId, JEE_FORM_REMINDER_TEXT]
+      [studentId, JEE_FORM_REMINDER_KEY]
     ),
     query<FlagRow>(
       `SELECT conversation_id, recipient, comment

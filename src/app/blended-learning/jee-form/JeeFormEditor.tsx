@@ -87,11 +87,11 @@ function FilledFields({
   draft,
   change,
   fieldErrors,
-  reminderOpen,
+  openReminder,
   confirmationOf,
   studentId,
   passwordSaved,
-}: FieldsProps & { reminderOpen: boolean; confirmationOf: number | null; studentId: number; passwordSaved: boolean }) {
+}: FieldsProps & { openReminder: string | null; confirmationOf: number | null; studentId: number; passwordSaved: boolean }) {
   const numberId = useId();
   const fileId = useId();
   return (
@@ -142,8 +142,8 @@ function FilledFields({
         <p className="mt-1 text-xs text-text-muted">PDF, up to 5 MB.</p>
         <FieldError message={fieldErrors.confirmation} />
       </div>
-      {reminderOpen && (
-        <p className="text-sm text-text-secondary">Saving ticks the student&apos;s “JEE Form Filling (Reminder)” action item.</p>
+      {openReminder !== null && (
+        <p className="text-sm text-text-secondary">Saving ticks the student&apos;s “{openReminder}” action item.</p>
       )}
     </div>
   );
@@ -277,14 +277,15 @@ export function JeeFormEditor({
   studentId,
   current,
   passwordSaved,
-  reminderOpen,
+  openReminder,
   onCancel,
   onSaved,
 }: {
   studentId: number;
   current: JeeFormUpdate | null;
   passwordSaved: boolean;
-  reminderOpen: boolean;
+  // The open reminder's text (as the program team named it), or null.
+  openReminder: string | null;
   onCancel: () => void;
   onSaved: (form: JeeFormView) => void;
 }) {
@@ -336,7 +337,7 @@ export function JeeFormEditor({
           draft={draft}
           change={change}
           fieldErrors={fieldErrors}
-          reminderOpen={reminderOpen}
+          openReminder={openReminder}
           confirmationOf={confirmationOf}
           studentId={studentId}
           passwordSaved={passwordSaved}

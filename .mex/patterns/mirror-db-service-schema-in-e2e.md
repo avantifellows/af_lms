@@ -12,7 +12,7 @@ edges:
     condition: when the e2e run itself fails
   - target: context/data-access.md
     condition: for which tables LMS reads and writes directly
-last_updated: 2026-10-28
+last_updated: 2026-11-24
 ---
 
 # Mirror db-service schema in e2e
@@ -58,6 +58,12 @@ and `20261030120000_add_blended_learning_screener_feedback.sql`, 2026-10-28; col
   `pg_dump` prints a random `\restrict` token per dump; drop those lines before diffing.
 - Function bodies are compared verbatim, so copy them exactly. Comments inside a body show up
   in the diff.
+- Write a mirror re-runnable, as the Blended Learning ones are: `ADD COLUMN IF NOT EXISTS`,
+  `DROP CONSTRAINT IF EXISTS` before each `ADD CONSTRAINT`, `CREATE … IF NOT EXISTS`, and a data
+  step guarded by `NOT EXISTS` (e.g. `20261124142920_add_key_to_blended_learning_common_action_items.sql`,
+  2026-11-24). Apply it twice to the SQL scratch DB before the diff to prove it. To run only the new
+  `.exs` files, point the migrate snippet's `Path.wildcard` at the temp dir holding them; the base
+  for both scratch DBs can be the stub parents plus the earlier fixture SQL files the table needs.
 
 ## Verify
 - [ ] `diff` of the two schema dumps is empty.

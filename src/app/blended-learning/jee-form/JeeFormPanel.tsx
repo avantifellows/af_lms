@@ -225,7 +225,7 @@ export function JeeFormPanel({
           studentId={studentId}
           current={form.current}
           passwordSaved={form.passwordSaved}
-          reminderOpen={form.reminderItems.some((item) => item.status === "open")}
+          openReminder={form.reminderItems.find((item) => item.status === "open")?.text ?? null}
           onCancel={onClose}
           onSaved={handleSaved}
         />

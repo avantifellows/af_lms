@@ -124,6 +124,12 @@ describe("JeeFormPanel for a recorder", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("names the open reminder by its current text, so a renamed one reads right", async () => {
+    panel({ ...EMPTY, reminderItems: [{ ...REMINDER_OPEN, text: "Fill the JEE Main form" }] });
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    expect(screen.getByText("Saving ticks the student's “Fill the JEE Main form” action item.")).toBeInTheDocument();
+  });
+
   it("posts the number and the PDF, then shows what was saved with the ticked reminder", async () => {
     const { rerender } = panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));

@@ -179,7 +179,7 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     expectWrite(6, "INSERT INTO blended_learning_mentor_flags", [700, 501, "emotional_wellbeing", "Seemed anxious", MENTOR.actorEmail]);
     expectWrite(7, "INSERT INTO blended_learning_mentor_flags", [700, 501, "physics", null, MENTOR.actorEmail]);
     // None of the ticked items is the JEE form reminder.
-    expectWrite(8, "JOIN blended_learning_common_action_items common", [[802, 803], 501, "JEE Form Filling (Reminder)"]);
+    expectWrite(8, "JOIN blended_learning_common_action_items common", [[802, 803], 501, "jee_form_reminder"]);
     expectWrite(9, "UPDATE blended_learning_action_items", [700, MENTOR.actorEmail, [802, 803], 501]);
     // Only the Emotional Well-being flag emails, after commit.
     expect(mockNotify.mock.calls).toEqual([[41]]);
@@ -250,7 +250,8 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
         status: 409,
         body: { error: expect.stringContaining("ticked only by recording the JEE form as Filled in the JEE Form tab") },
       });
-      expectWrite(4, "lower(regexp_replace(btrim(common.text)", [[802, 805], 501, "JEE Form Filling (Reminder)"]);
+      // Found by the reminder's key, whatever its text now is.
+      expectWrite(4, "AND common.key = $3", [[802, 805], 501, "jee_form_reminder"]);
       // Nothing was ticked, and the rolled-back save sends no email.
       expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes("UPDATE blended_learning_action_items"))).toBe(false);
       expect(mockNotify).not.toHaveBeenCalled();

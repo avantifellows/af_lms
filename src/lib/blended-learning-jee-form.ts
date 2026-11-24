@@ -16,7 +16,6 @@ import {
 } from "./blended-learning-access";
 import {
   JEE_FORM_EXAM,
-  JEE_FORM_REMINDER_TEXT,
   JEE_PASSWORD_REQUIRED,
   confirmationError,
   jeeFormFlagComment,
@@ -34,7 +33,7 @@ import {
   type JeeStatusOnlyView,
   type RawJeeForm,
 } from "./blended-learning-jee-form-input";
-import { jeeReminderMatchSql } from "./blended-learning-jee-reminder";
+import { JEE_FORM_REMINDER_KEY, jeeReminderMatchSql } from "./blended-learning-jee-reminder";
 import { createDocument, softDeleteDocument } from "./db-service-documents";
 import {
   createExamRecordWithoutPlaintext,
@@ -148,7 +147,7 @@ async function listReminderItems(studentIds: number[]): Promise<ReminderRow[]> {
      JOIN blended_learning_common_action_items common ON common.id = item.common_action_item_id
      WHERE item.student_id = ANY($1::bigint[]) AND ${jeeReminderMatchSql("common", "$2")}
      ORDER BY item.student_id, item.id`,
-    [studentIds, JEE_FORM_REMINDER_TEXT]
+    [studentIds, JEE_FORM_REMINDER_KEY]
   );
 }
 
@@ -676,7 +675,7 @@ async function tickReminder(
      FROM blended_learning_common_action_items common
      WHERE common.id = item.common_action_item_id
        AND item.student_id = $1 AND item.status = 'open' AND ${jeeReminderMatchSql("common", "$2")}`,
-    [studentId, JEE_FORM_REMINDER_TEXT, updateId, access.actorEmail]
+    [studentId, JEE_FORM_REMINDER_KEY, updateId, access.actorEmail]
   );
 }
 

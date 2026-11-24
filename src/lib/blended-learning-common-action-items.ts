@@ -16,8 +16,14 @@ import {
   type CommonTarget,
   type FieldErrors,
 } from "./blended-learning-manage-input";
-import { JEE_FORM_EXAM, JEE_FORM_REMINDER_TEXT } from "./blended-learning-jee-form-input";
-import { jeeReminderMatchSql, latestFilledJeeUpdateSql } from "./blended-learning-jee-reminder";
+import { JEE_FORM_EXAM } from "./blended-learning-jee-form-input";
+import {
+  JEE_FORM_REMINDER_KEY,
+  activeJeeReminderSql,
+  isJeeReminderText,
+  jeeReminderMatchSql,
+  latestFilledJeeUpdateSql,
+} from "./blended-learning-jee-reminder";
 import { currentGradeLateralSql } from "./blended-learning-mentees";
 
 // Common Action Items (server-only): an Action Item a Blended Learning Admin
@@ -29,10 +35,12 @@ import { currentGradeLateralSql } from "./blended-learning-mentees";
 // later get it only when it is pushed again, which adds it to targeted
 // Students who don't have it yet (the partial unique index makes that
 // idempotent). Mentors tick these off like any open Action Item, except the
-// "JEE Form Filling (Reminder)", which only the JEE form ticks: a push adds it
-// done to a Student whose latest JEE form update is already Filled. Editing
-// updates the still-open rows; removing deletes them, keeps done ones and
-// soft-removes the Common Action Item. Every call needs `manage`.
+// "JEE Form Filling (Reminder)" (the one holding the hidden key
+// 'jee_form_reminder', whatever its text), which only the JEE form ticks: a
+// push adds it done to a Student whose latest JEE form update is already
+// Filled. Editing updates the still-open rows (text and owner only: the key is
+// never set, changed or cleared here); removing deletes them, keeps done ones
+// and soft-removes the Common Action Item. Every call needs `manage`.
 
 export type CommonActionItem = {
   id: number;
@@ -243,7 +251,7 @@ export async function listCommonActionItems(access: BlendedLearningAccess): Prom
 // Add the Common Action Item, as an open Action Item, to every targeted
 // Student who doesn't have it yet. Returns how many were added (open or done).
 //
-// The JEE reminder (matched as jeeReminderMatchSql does) is the exception: a
+// The JEE reminder (the Common Action Item holding JEE_FORM_REMINDER_KEY) is the exception: a
 // Student whose latest JEE form update for JEE_FORM_EXAM is already Filled
 // gets it done by that update, as if saving Filled had ticked it, with the
 // update's recorder as `completed_by_email`. Added open, nothing could close
@@ -267,7 +275,7 @@ async function materialise(client: PoolClient, commonId: number): Promise<number
      WHERE common.id = $1 AND common.removed_at IS NULL
      ON CONFLICT (common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING
      RETURNING id`,
-    [commonId, CURRENT_ACADEMIC_YEAR, JEE_FORM_REMINDER_TEXT, JEE_FORM_EXAM.examName, JEE_FORM_EXAM.examYear]
+    [commonId, CURRENT_ACADEMIC_YEAR, JEE_FORM_REMINDER_KEY, JEE_FORM_EXAM.examName, JEE_FORM_EXAM.examYear]
   );
   return result.rowCount ?? result.rows.length;
 }
@@ -277,7 +285,11 @@ class NoStudents extends Error {}
 const NO_STUDENTS_ERRORS: FieldErrors = { target: "No students match this target. Choose another." };
 
 // Save a new Common Action Item and push it to its target, in one
-// transaction. A target that reaches no Student saves nothing (422).
+// transaction. A target that reaches no Student saves nothing (422). The key
+// is never taken from the request: an item whose text is the JEE reminder's
+// (isJeeReminderText) gets JEE_FORM_REMINDER_KEY when no active Common Action
+// Item holds it, so a reminder removed and created again is still the one the
+// JEE form ticks; otherwise (another holds it, or other text) it has none.
 export async function createCommonActionItem(
   access: BlendedLearningAccess,
   raw: unknown
@@ -290,10 +302,14 @@ export async function createCommonActionItem(
     return await withTransaction(async (client) => {
       const inserted = await client.query<{ id: number | string }>(
         `INSERT INTO blended_learning_common_action_items
-           (text, owner, target_kind, target_grade, target_mentor_user_id, target_student_ids, created_by_email)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (text, owner, target_kind, target_grade, target_mentor_user_id, target_student_ids, created_by_email, key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7,
+                 CASE WHEN $8::varchar IS NOT NULL AND NOT EXISTS (
+                   SELECT 1 FROM blended_learning_common_action_items held
+                   WHERE ${activeJeeReminderSql("held", "$8::varchar")}
+                 ) THEN $8::varchar END)
          RETURNING id`,
-        [text, owner, ...targetParams(target), access.actorEmail]
+        [text, owner, ...targetParams(target), access.actorEmail, isJeeReminderText(text) ? JEE_FORM_REMINDER_KEY : null]
       );
       const id = Number(inserted.rows[0].id);
       const added = await materialise(client, id);

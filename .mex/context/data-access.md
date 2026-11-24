@@ -835,8 +835,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Audience:** every Student in an active current-year Blended Learning Mapping (all
   programs). One exam is hard-coded: JEE Main 2027 = the `exam` row named "JEE Mains" +
   `exam_year` 2027 (`JEE_FORM_EXAM` in the client-safe `src/lib/blended-learning-jee-form-input.ts`).
-- **Tables:** db-service `20261124122211_add_blended_learning_jee_form_updates` (branch
-  `feat/bl-jee-form`; deploy it before this code): append-only
+- **Tables:** db-service #856 (branch `feat/bl-jee-form`; deploy all of its migrations before this
+  code): `20261124122211_add_blended_learning_jee_form_updates` and
+  `20261124142920_add_key_to_blended_learning_common_action_items` (below). The first adds append-only
   `blended_learning_jee_form_updates` (latest row per Student + exam + year is the status, the
   rest is history; `filled` carries `application_number` and an optional
   `confirmation_document_id` → `lms_student_documents`; `not_filled` carries `reasons` (fixed
@@ -849,6 +850,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `20261019120000_…sessions_applied.sql` for the tables db-dump.sql predates (all pg_dump-identical),
   and `20261116090707_add_exam_password_ciphertext_and_reveals.sql` (db-service `20261116085521` +
   `20261116090707`: `application_password_ciphertext` and `lms_exam_password_reveals`).
+  `20261124142920` adds `blended_learning_common_action_items.key varchar(64)` (CHECK
+  `^[a-z][a-z0-9_]*$`, unique among active rows: `bl_common_action_items_key_unique … WHERE key IS
+  NOT NULL AND removed_at IS NULL`) and keys the lowest-id active item whose text normalises to
+  "jee form filling (reminder)" as `jee_form_reminder`; mirrored by
+  `e2e/fixtures/migrations/20261124142920_add_key_to_blended_learning_common_action_items.sql`
+  (pg_dump- and row-identical against the `.exs` on two scratch DBs, re-runnable).
 - **Write:** `POST /api/blended-learning/students/[id]/jee-form` (multipart) → `recordJeeForm` in
   `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (a Mentor mutation: only the
   Mentor of the active Mapping, never read-only; Blended Learning Admins and LMS admins get 403 and
@@ -861,8 +868,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `jee_main_confirmation` (labelled in the Documents tab by `documentTypeLabel`, not offered in its
   picker). The update (Mapping's Mentor/program/year, actor as `recorded_by_email`) then either
   raises the `jee_form` flag (comment = exam + reason labels + details) or ticks the Student's open
-  Action Items whose Common Action Item text is "JEE Form Filling (Reminder)" (case and spacing
-  ignored; no id is hard-coded). **Save order (one transaction):** a per-Student
+  Action Items whose Common Action Item holds the key `jee_form_reminder` (whatever its text; no id
+  is hard-coded). **Save order (one transaction):** a per-Student
   `pg_advisory_xact_lock(hashtextextended('blended_learning_jee_form:<studentId>', 0))` (serializes
   two tabs) → `lockMappingInScope` (out of scope → 404 before any KMS/S3/DB Service write) →
   latest update → for Filled, `writeApplication` (plan/409, password/422/403, KMS, PDF, exam record;
@@ -937,7 +944,17 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `JeeFormStatusLine` (from `getJeeFormLine`: by `blendedStudentScope`, the whole form or, view
   only, the status alone) linking to `?student=<id>`; it renders without the data
   when the read fails, and so does the tab.
-- **Reminder rule:** `src/lib/blended-learning-jee-reminder.ts` holds the reminder's text match.
+- **Reminder rule:** `src/lib/blended-learning-jee-reminder.ts` finds the reminder by its key
+  (`JEE_FORM_REMINDER_KEY = 'jee_form_reminder'`, bound as a parameter, never by text):
+  `jeeReminderMatchSql` (`common.key = $n`, for joining an Action Item to its Common Action Item:
+  `tickReminder`, `listReminderItems`, `jeeReminderItemIds`, `getMenteeDetail`'s `jee_reminder`,
+  `materialise`) and `activeJeeReminderSql` (`key = $n AND removed_at IS NULL`, for the reminder
+  itself). The key is hidden: the Manage page never shows, sets or edits it, and
+  `updateCommonActionItem` writes text and owner only, so a rename keeps it. `createCommonActionItem`
+  gives a new item the key when its text is the reminder's (`isJeeReminderText`, case and spacing
+  aside) and no active item holds it, so a removed and re-created reminder is linked again; an item
+  with the reminder's text created while another holds the key is an ordinary one. (Two such
+  creates at the same moment: the second hits the unique index, a 500; accepted as unlikely.)
   `getMenteeDetail` marks the open item `jeeReminder`, so the Mentee page and the log form show a
   "Fill in JEE tab" link instead of a tick; `completeActionItems` (the only manual tick path, used
   by the log form and draft saves) answers 409 when a ticked id is the reminder. Only the JEE form
@@ -947,8 +964,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   adds it done for a Student whose latest JEE Mains 2027 update is Filled
   (`latestFilledJeeUpdateSql`: `completed_by_jee_form_update_id` = that update, `completed_by_email`
   = its `recorded_by_email`, `completed_at` = now), open for everyone else; every other Common
-  Action Item is added open as before. It is never unticked. (Editing another Common Action Item's
-  text into the reminder's leaves its open rows open; a Filled re-save ticks them.)
+  Action Item is added open as before. It is never unticked. (Renaming another Common Action Item
+  to the reminder's text doesn't make it the reminder: it has no key.)
   `GET …/jee-form/confirmation` redirects to a 5-minute presigned GET (anyone who can view the
   Mentee). The Flags feed shows `jee_form` flags as "JEE form (program team)": `listFlags` and
   `listFlagMentors` LEFT JOIN the Conversation and the JEE form update and COALESCE Mentor,
@@ -960,9 +977,11 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   C's `JEE_FORM_MENTEES` (K1–K3, seeded last, with
   the reminder pushed to them and K2's yearless JEE Mains record). `blended-learning-jee-reminder.spec.ts`
   (a push and Push again to a Filled / Not filled / not-recorded mix; a reminder left open for a
-  Filled Student ticked by a re-save) uses `JEE_REMINDER_MENTEES` (L1–L7, seeded with no Mapping):
-  it maps them to Mentor C, then removes its Common Action Items and ends those Mappings
-  (`ended_by_email` `e2e-cleanup@example.com`). E2E has no S3, so the PDF upload is route-tested only.
+  Filled Student ticked by a re-save; a renamed reminder still ticked while an un-keyed twin with
+  its text isn't; a removed reminder created again gets the key) uses `JEE_REMINDER_MENTEES` (L1–L7,
+  seeded with no Mapping): it borrows the fixture reminder's key (the fixture seeds it with
+  `JEE_REMINDER_KEY`) and gives it back, maps them to Mentor C, then removes its Common Action
+  Items and ends those Mappings (`ended_by_email` `e2e-cleanup@example.com`). E2E has no S3, so the PDF upload is route-tested only.
 - **Not built:** a write-only encrypted application password (the panel leaves a row for it), other
   exams, any import or prefill. The Exams tab keeps one record per exam, so a Student with both a
   yearless and a 2027 JEE Mains record shows only one there.

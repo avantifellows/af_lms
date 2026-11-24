@@ -138,6 +138,11 @@ describe("listJeeFormRows", () => {
     const updates = sql.filter(({ text }) => text.includes("FROM blended_learning_jee_form_updates u"));
     expect(updates.map(({ params }) => params)).toEqual([[[501, 502], 1, 2027]]);
     expect(updates[0].text).toMatch(/row_number\(\) OVER \(PARTITION BY u\.student_id ORDER BY u\.id DESC\)/);
+    // One read of the reminders, found by the reminder's key (bound), not its text.
+    const reminders = sql.filter(({ text }) => text.includes("FROM blended_learning_action_items item"));
+    expect(reminders.map(({ params }) => params)).toEqual([[[501, 502], "jee_form_reminder"]]);
+    expect(reminders[0].text).toMatch(/AND common\.key = \$2\s/);
+    expect(reminders[0].text).not.toMatch(/common\.text|removed_at/);
     // One read of which Students' JEE Mains 2027 record holds a ciphertext.
     const saved = sql.filter(({ text }) => text.includes("FROM student_exam_record ser"));
     expect(saved.map(({ params }) => params)).toEqual([[[501, 502], 1, 2027]]);

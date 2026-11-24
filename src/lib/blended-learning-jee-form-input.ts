@@ -40,8 +40,10 @@ export function jeeFormReasonLabel(reason: JeeFormReason): string {
   return REASON_LABELS.get(reason) ?? reason;
 }
 
-// The Common Action Item a filled form ticks, matched on its text (case and
-// spacing aside) so no id is hard-coded.
+// The reminder's usual text. The Common Action Item a filled form ticks is
+// found by its key, not this text (blended-learning-jee-reminder); a Common
+// Action Item created with this text (case and spacing aside) while no active
+// one holds the key gets the key.
 export const JEE_FORM_REMINDER_TEXT = "JEE Form Filling (Reminder)";
 
 export const JEE_FORM_STATUS_LABEL: Record<JeeFormStatus, string> = {

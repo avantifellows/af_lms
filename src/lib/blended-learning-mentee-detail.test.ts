@@ -372,9 +372,11 @@ describe("getMenteeDetail", () => {
     const actionItemsSql = mockQuery.mock.calls.map(([sql]) => sql).find((sql) => sql.includes("FROM blended_learning_action_items"));
     expect(actionItemsSql).toMatch(/WHERE item\.student_id = \$1\s+ORDER BY/);
     expect(actionItemsSql).not.toMatch(/JOIN/);
-    // The reminder is matched on its Common Action Item's text, bound as $2.
+    // The reminder is its Common Action Item's key, bound as $2 (not its text,
+    // which the program team may rename; not removed_at, so a removed
+    // reminder's items are still marked).
     const actionItemsCall = mockQuery.mock.calls.find(([sql]) => sql.includes("FROM blended_learning_action_items"));
-    expect(actionItemsCall?.[1]).toEqual([501, "JEE Form Filling (Reminder)"]);
-    expect(actionItemsSql).toMatch(/AS jee_reminder/);
+    expect(actionItemsCall?.[1]).toEqual([501, "jee_form_reminder"]);
+    expect(actionItemsSql).toMatch(/WHERE common\.id = item\.common_action_item_id AND common\.key = \$2\)\s+AS jee_reminder/);
   });
 });
