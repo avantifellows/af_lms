@@ -142,20 +142,32 @@ function normaliseName(value: string): string {
     .trim();
 }
 
-// Dropouts included: their links are kept for when their status changes back,
-// and a workbook row for one is matched rather than reported as no_match.
+// The Students with a current-year Mapping not yet ended (running, given a
+// future end, or yet to start). Dropouts included: their links are kept for
+// when their status changes back, and a workbook row for one is matched
+// rather than reported as no_match. Only the Student is read, never which
+// Mapping, so a Student mid-handover (an old Mapping ending in the future and
+// its successor starting then) is one row (EXISTS), whichever Mapping is in
+// force; the index skips a repeated id too, so a repeat can never make their
+// name look ambiguous.
 async function loadActiveMappedStudents(): Promise<StudentIndex> {
   const rows = await query<MappedStudentRow>(
-    `SELECT DISTINCT st.id, st.student_id, account.first_name, account.last_name
-     FROM blended_learning_mentor_mentee_mappings mapping
-     JOIN student st ON st.id = mapping.student_id
+    `SELECT st.id, st.student_id, account.first_name, account.last_name
+     FROM student st
      JOIN "user" account ON account.id = st.user_id
-     WHERE ${currentBlendedMappingRowSql("mapping", "$1")}`,
+     WHERE EXISTS (
+       SELECT 1 FROM blended_learning_mentor_mentee_mappings mapping
+       WHERE mapping.student_id = st.id AND ${currentBlendedMappingRowSql("mapping", "$1")}
+     )
+     ORDER BY st.id`,
     [CURRENT_ACADEMIC_YEAR]
   );
 
   const index: StudentIndex = { byStudentId: new Map(), byName: new Map() };
+  const seen = new Set<number>();
   for (const row of rows) {
+    if (seen.has(Number(row.id))) continue;
+    seen.add(Number(row.id));
     const student: MappedStudent = {
       id: Number(row.id),
       studentId: row.student_id?.trim() || null,

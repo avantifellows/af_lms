@@ -33,7 +33,9 @@ describe("POST /api/blended-learning/team-leads/[id]/end", () => {
     expect(res.status).toBe(204);
     const [update, params] = db.query.mock.calls[0];
     expect(update).toContain("SET ended_at = GREATEST(started_at,");
-    expect(update).toContain("WHERE id = $1 AND academic_year = $2 AND ended_at IS NULL");
+    expect(update).toContain(
+      "WHERE id = $1 AND academic_year = $2 AND (blended_learning_mentor_supervisions.ended_at IS NULL OR blended_learning_mentor_supervisions.ended_at > (now() AT TIME ZONE 'UTC'))"
+    );
     expect(params).toEqual([7, "2026-2027", "admin@test.local", "af_lms_manage_ui", "supervision_ended"]);
     expect(db.clientQuery).not.toHaveBeenCalled();
   });

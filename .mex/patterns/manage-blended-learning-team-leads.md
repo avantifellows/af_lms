@@ -12,7 +12,7 @@ edges:
     condition: for what a Supervision grants (view only) and where the access policy checks it
   - target: context/data-access.md
     condition: for the Supervision table and the Mapping source it mirrors
-last_updated: 2026-11-23
+last_updated: 2026-11-24
 ---
 
 # Manage Blended Learning Team Leads
@@ -42,7 +42,8 @@ code, tests, runbooks or PR text.
 3. To end one (team change), press **End** on its row and confirm. It sets `ended_at`,
    `ended_by_email`, `end_source = af_lms_manage_ui`, `end_reason = supervision_ended`; rows are
    never deleted. The end matches the row by its id, so a pair ended and re-added meanwhile keeps
-   its new row.
+   its new row. A link given a future end outside the app shows "ending on <date>"; End cuts it
+   short to now and records the admin as who ended it.
 
 ## Gotchas
 - The user id is resolved as the app resolves it: `user_permission.user_id`, else the lowest-id

@@ -72,7 +72,9 @@ describe("listFlags", () => {
     const page = await listFlags(ADMIN, {}, { lastSeenAt: null });
 
     const [listSql] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
-    expect(listSql).toMatch(/mapping\.academic_year = \$6 AND mapping\.ended_at IS NULL/);
+    expect(listSql).toContain(
+      "mapping.academic_year = $6 AND mapping.started_at <= (now() AT TIME ZONE 'UTC') AND (mapping.ended_at IS NULL OR mapping.ended_at > (now() AT TIME ZONE 'UTC'))"
+    );
     expect(page?.flags.map((flag) => [flag.id, flag.inScope])).toEqual([[7, false], [6, true]]);
   });
 });
@@ -124,7 +126,7 @@ describe("countNewFlags", () => {
 
 // A Mentor's Flags tab: only flags on Students with an active current-year
 // Mapping to them, in every read, so another Mentor's flags never leave the DB.
-const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = ANY\(\$(\d)::bigint\[\]\)\s+AND own\.academic_year = \$(\d) AND own\.ended_at IS NULL AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = own\.student_id AND dropout_student\.status = 'dropout'\)\)/;
+const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = ANY\(\$(\d)::bigint\[\]\)\s+AND own\.academic_year = \$(\d) AND own\.started_at <= \(now\(\) AT TIME ZONE 'UTC'\) AND \(own\.ended_at IS NULL OR own\.ended_at > \(now\(\) AT TIME ZONE 'UTC'\)\) AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = own\.student_id AND dropout_student\.status = 'dropout'\)\)/;
 
 describe("a Mentor's flags", () => {
   it("narrows the feed to the Mentor's own Students and ignores a Mentor filter", async () => {
@@ -207,7 +209,7 @@ describe("a supervisor's flags", () => {
     const filter = /\$9::bigint IS NULL OR EXISTS \(([\s\S]*?)\)\)\n/.exec(sql)![1];
     expect(filter).toContain("FROM blended_learning_mentor_mentee_mappings current_mapping");
     expect(filter).toContain("current_mapping.student_id = flag.student_id AND current_mapping.mentor_user_id = $9::bigint");
-    expect(filter).toContain("current_mapping.ended_at IS NULL");
+    expect(filter).toContain("current_mapping.started_at <= (now() AT TIME ZONE 'UTC') AND (current_mapping.ended_at IS NULL OR current_mapping.ended_at > (now() AT TIME ZONE 'UTC'))");
     expect(filter).toContain("dropout_student.status = 'dropout'");
     expect(params![1]).toBeNull();
   });
