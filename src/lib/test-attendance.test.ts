@@ -113,6 +113,27 @@ describe("loadTestAttendance", () => {
     expect(data.serverTime).toBe(NOW.toISOString());
   });
 
+  it("trims Student IDs and maps empty or missing values to null", async () => {
+    mocks.getSchoolRoster.mockResolvedValue({
+      students: [
+        rosterRow({ user_id: "30", student_id: " NVS030 " }),
+        rosterRow({ user_id: "31", student_id: "" }),
+        rosterRow({ user_id: "32", student_id: "   " }),
+        rosterRow({ user_id: "33", student_id: null }),
+      ],
+      issues: [],
+    });
+
+    const data = await loadTestAttendance("7", NOW);
+
+    expect(data.students.map((student) => [student.userId, student.studentId])).toEqual([
+      ["30", "NVS030"],
+      ["31", null],
+      ["32", null],
+      ["33", null],
+    ]);
+  });
+
   it("trims APAAR IDs and maps empty or missing values to null", async () => {
     mocks.getSchoolRoster.mockResolvedValue({
       students: [

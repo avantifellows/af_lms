@@ -199,8 +199,8 @@ describe("AllYearPage — list", () => {
 
     const cards = within(screen.getByRole("list", { name: "All students" })).getAllByRole("listitem");
     expect(cards.map((card) => card.textContent)).toEqual([
-      "Asha BoseStudent ID NVS4 · APAAR 444455556666Grade 11 · EngineeringFollow upAugSepOctAttended 0 of 3 (0%)Missed Aug, Sep, Oct",
-      "Kiran DasStudent ID NVS2 · APAAR —Grade 12 · MedicalFollow upAugSepOctAttended 1 of 3 (33%)Missed Aug, Sep · attended Oct",
+      "Asha BoseStudent ID NVS4 · APAAR ID 444455556666Grade 11 · EngineeringFollow upAugSepOctAttended 0 of 3 (0%)Missed Aug, Sep, Oct",
+      "Kiran DasStudent ID NVS2 · APAAR ID —Grade 12 · MedicalFollow upAugSepOctAttended 1 of 3 (33%)Missed Aug, Sep · attended Oct",
     ]);
     expect(boxes(cards[1])).toEqual(["Aug: Absent", "Sep: Absent", "Oct: Submitted"]);
     expect(cards[0].querySelector(".bg-danger-bg")).not.toBeNull();

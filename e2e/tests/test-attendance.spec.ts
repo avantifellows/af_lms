@@ -1,6 +1,8 @@
 import ExcelJS from "exceljs";
 import type { Locator, Page } from "@playwright/test";
 
+import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
+import { TEST_ATTENDANCE_GRADES } from "../../src/types/test-attendance";
 import { test, expect, signInAs } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
 import {
@@ -62,6 +64,23 @@ test.describe("Test Attendance tab", () => {
   const pool = getTestPool();
 
   test.beforeAll(async () => {
+    const [startYear, endYear] = CURRENT_ACADEMIC_YEAR.split("-");
+    const { rows } = await pool.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count
+         FROM session
+        WHERE meta_data->>'test_purpose' = $1
+          AND meta_data->>'group' = $2
+          AND meta_data->>'grade' = ANY($3::text[])
+          AND is_active = true
+          AND start_time >= $4::timestamp
+          AND start_time < $5::timestamp
+          AND COALESCE(btrim(platform_id), '') <> ''`,
+      ["system_wide_mandated", "EnableStudents", TEST_ATTENDANCE_GRADES.map(String), `${startYear}-04-01 00:00:00`, `${endYear}-04-01 00:00:00`],
+    );
+    expect(
+      rows[0]?.count ?? 0,
+      "e2e database must have no active current-year NVS mandated sessions so the tab skips BigQuery and shows 'No Monthly Tests yet'",
+    ).toBe(0);
     await seedTestAttendanceFixture(pool);
   });
 
@@ -82,7 +101,7 @@ test.describe("Test Attendance tab", () => {
     await tabs.getByRole("tab", { name: "Test Attendance" }).click();
     const enrolled = page.getByRole("region", { name: "Enrolled" });
     await expect(enrolled).toBeVisible();
-    await expect(enrolled).toContainText("2");
+    await expect(enrolled.getByText("2", { exact: true })).toBeVisible();
     await expect(page.getByText("No Monthly Tests yet")).toBeVisible();
     await expect(page.getByRole("alert").filter({ hasText: "Couldn't load Test Attendance" })).toHaveCount(0);
 

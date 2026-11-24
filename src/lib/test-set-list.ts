@@ -15,9 +15,9 @@ import { query } from "@/lib/db";
 import { TEST_ATTENDANCE_GRADES, type TestSet } from "@/types/test-attendance";
 
 /** `session.meta_data.group` of NVS sessions. */
-export const NVS_AUTH_GROUP = "EnableStudents";
+const NVS_AUTH_GROUP = "EnableStudents";
 /** `session.meta_data.test_purpose` of a System-wide Mandated Test. */
-export const MANDATED_TEST_PURPOSE = "system_wide_mandated";
+const MANDATED_TEST_PURPOSE = "system_wide_mandated";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",

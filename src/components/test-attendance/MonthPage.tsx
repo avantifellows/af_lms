@@ -7,6 +7,7 @@
 import { useState } from "react";
 
 import { Button, Card } from "@/components/ui";
+import { StudentIdentityCells, StudentIdentityHeaders, StudentIdsLine } from "@/components/test-attendance/StudentIds";
 import StudentListHeader from "@/components/test-attendance/StudentListHeader";
 import {
   MONTH_LIST_FILTERS,
@@ -168,35 +169,13 @@ function PreviousNote({ previous }: { previous: MonthStudentRow["previous"] }) {
   );
 }
 
-/** A Student ID or APAAR ID cell value: "—" when missing (matches the Students tab). */
-export const formatStudentId = (value: string | null) => value || "—";
-
-/** Secondary ID line under a Student's name on phone cards; wraps between the two IDs, never mid-value. */
-export function StudentIdsLine({ student }: { student: Pick<TestAttendanceStudent, "studentId" | "apaarId"> }) {
-  return (
-    <p className="text-xs text-text-muted">
-      <span className="whitespace-nowrap">
-        Student ID <span className="font-mono">{formatStudentId(student.studentId)}</span>
-      </span>{" "}
-      ·{" "}
-      <span className="whitespace-nowrap">
-        APAAR <span className="font-mono">{formatStudentId(student.apaarId)}</span>
-      </span>
-    </p>
-  );
-}
-
 function StudentTable({ rows }: { rows: MonthStudentRow[] }) {
   return (
     <div className="hidden overflow-x-auto sm:block">
       <table aria-label="Students" className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Student</th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Student ID</th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">APAAR ID</th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Grade</th>
-            <th scope="col" className="py-2 pr-3 font-medium">Exam Preparing For</th>
+            <StudentIdentityHeaders />
             <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Status</th>
             <th scope="col" className="whitespace-nowrap py-2 font-medium">Previous 3 tests</th>
           </tr>
@@ -204,17 +183,9 @@ function StudentTable({ rows }: { rows: MonthStudentRow[] }) {
         <tbody>
           {rows.map(({ student, status, previous }) => (
             <tr key={student.userId} className="border-b border-border last:border-0">
-              <td className="min-w-[8rem] py-2 pr-3 text-text-primary">{student.name}</td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-text-secondary">
-                {formatStudentId(student.studentId)}
-              </td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-text-secondary">
-                {formatStudentId(student.apaarId)}
-              </td>
-              <td className="whitespace-nowrap py-2 pr-3 text-text-secondary">{student.grade}</td>
-              <td className="whitespace-nowrap py-2 pr-3 text-text-secondary">{student.examPreparingFor ?? "Not set"}</td>
+              <StudentIdentityCells student={student} />
               <td className={`whitespace-nowrap py-2 pr-3 font-medium ${statusTone[status]}`}>{status}</td>
-              <td className="min-w-[10rem] max-w-[16rem] py-2">
+              <td className="min-w-40 max-w-64 py-2">
                 <PreviousNote previous={previous} />
               </td>
             </tr>

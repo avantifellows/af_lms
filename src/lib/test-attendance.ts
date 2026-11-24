@@ -83,7 +83,7 @@ export async function loadSchoolTestAttendance(
   const students: ListedStudent[] = roster.map((student) => ({
     userId: String(student.user_id),
     name: [student.first_name, student.last_name].filter(Boolean).join(" "),
-    studentId: student.student_id ?? null,
+    studentId: student.student_id?.trim() || null,
     apaarId: student.apaar_id?.trim() || null,
     grade: Number(student.grade),
     examPreparingFor: examPreparingFor(student.stream),

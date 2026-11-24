@@ -12,7 +12,8 @@ import { useState } from "react";
 import { Badge, Card } from "@/components/ui";
 import AttendanceChart from "@/components/test-attendance/AttendanceChart";
 import StudentListHeader from "@/components/test-attendance/StudentListHeader";
-import { formatStudentId, StudentIdsLine, Tile, TileNumber } from "@/components/test-attendance/MonthPage";
+import { StudentIdentityCells, StudentIdentityHeaders, StudentIdsLine } from "@/components/test-attendance/StudentIds";
+import { Tile, TileNumber } from "@/components/test-attendance/MonthPage";
 import {
   ALL_YEAR_LIST_FILTERS,
   type AllYearListFilter,
@@ -103,11 +104,7 @@ function StudentTable({ rows, columns }: { rows: AllYearStudentRow[]; columns: T
       <table aria-label="All students" className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Student</th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Student ID</th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">APAAR ID</th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Grade</th>
-            <th scope="col" className="py-2 pr-3 font-medium">Exam Preparing For</th>
+            <StudentIdentityHeaders />
             {columns.map((test) => (
               <th key={test.key} scope="col" className="whitespace-nowrap px-1 py-2 text-center font-medium">
                 {test.shortName}
@@ -120,15 +117,7 @@ function StudentTable({ rows, columns }: { rows: AllYearStudentRow[]; columns: T
         <tbody>
           {rows.map((row) => (
             <tr key={row.student.userId} className={`border-b border-border last:border-0 ${toneOf(row.followUp)}`}>
-              <td className="min-w-[8rem] py-2 pr-3 text-text-primary">{row.student.name}</td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-text-secondary">
-                {formatStudentId(row.student.studentId)}
-              </td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-text-secondary">
-                {formatStudentId(row.student.apaarId)}
-              </td>
-              <td className="whitespace-nowrap py-2 pr-3 text-text-secondary">{row.student.grade}</td>
-              <td className="whitespace-nowrap py-2 pr-3 text-text-secondary">{row.student.examPreparingFor ?? "Not set"}</td>
+              <StudentIdentityCells student={row.student} />
               {columns.map((test) => (
                 <td key={test.key} className="px-1 py-2 text-center">
                   <MonthBox test={test} mark={windowMark(row, test.key)} />
@@ -137,7 +126,7 @@ function StudentTable({ rows, columns }: { rows: AllYearStudentRow[]; columns: T
               <td className="whitespace-nowrap py-2 pl-2 pr-3 font-mono text-text-secondary">
                 {attendedText(row.attended, row.counted)}
               </td>
-              <td className="min-w-[10rem] max-w-[14rem] py-2">
+              <td className="min-w-40 max-w-56 py-2">
                 <div className="flex flex-col items-start gap-1">
                   <FollowUpTag followUp={row.followUp} />
                   <FollowUpNote followUp={row.followUp} />

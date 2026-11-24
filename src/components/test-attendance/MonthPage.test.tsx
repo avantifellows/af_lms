@@ -224,10 +224,10 @@ describe("MonthPage — Students list", () => {
 
     const cards = within(screen.getByRole("list", { name: "Students" })).getAllByRole("listitem");
     expect(cards.map((card) => card.textContent)).toEqual([
-      "Arun MehtaYet to startStudent ID NVS2 · APAAR —Grade 11 · Not setPrevious 3 tests: Missed Oct",
-      "Bina ShahIn progressStudent ID NVS3 · APAAR 333344445555Grade 11 · MedicalPrevious 3 tests: Not submitted Oct",
-      "Charu PalYet to startStudent ID — · APAAR 444455556666Grade 11 · NDA",
-      "Zara KhanSubmittedStudent ID NVS1 · APAAR 111122223333Grade 11 · Engineering",
+      "Arun MehtaYet to startStudent ID NVS2 · APAAR ID —Grade 11 · Not setPrevious 3 tests: Missed Oct",
+      "Bina ShahIn progressStudent ID NVS3 · APAAR ID 333344445555Grade 11 · MedicalPrevious 3 tests: Not submitted Oct",
+      "Charu PalYet to startStudent ID — · APAAR ID 444455556666Grade 11 · NDA",
+      "Zara KhanSubmittedStudent ID NVS1 · APAAR ID 111122223333Grade 11 · Engineering",
     ]);
   });
 

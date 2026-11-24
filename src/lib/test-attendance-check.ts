@@ -179,11 +179,6 @@ function uniqueQuizIds(testSets: TestSet[]): { quizId: string; testSet: string }
   return [...seen].map(([quizId, testSet]) => ({ quizId, testSet }));
 }
 
-/**
- * Checks `session` row completeness for the quiz ids in the Monthly Tests.
- * Now that Monthly Tests come from active `session` rows (ADR 0014), this
- * should always pass unless a row lacks a closing time.
- */
 function paperRows(testSets: TestSet[], papers: PaperWindow[]): CheckReport["papers"] {
   const byQuizId = new Map(papers.map((paper) => [paper.quizId, paper]));
   const quizIds = uniqueQuizIds(testSets);
