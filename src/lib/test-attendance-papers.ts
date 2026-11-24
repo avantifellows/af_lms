@@ -2,10 +2,10 @@
 // closing time, grade and on/off state from the LMS `session` table, matched
 // on the quiz id (`platform_id`). Server-only (Postgres).
 //
-// Checked on production, 18 Nov 2026: all 49 quiz ids in the PMU test set
-// list have exactly one `session` row, `platform_id` holds the quiz id and
-// `meta_data.grade` is always set. The rules below still tolerate several
-// rows, no row, and missing values.
+// Checked on production, 20 Nov 2026: all 60 switched-on NVS Monthly Test
+// Papers (July to November) have a `session` row with `platform_id` holding
+// the quiz id and `meta_data.grade` set. The rules below still tolerate
+// several rows, no row, and missing values.
 
 import { query } from "@/lib/db";
 import { dbIstTimestampToUtcIso } from "@/lib/quiz-session-time";

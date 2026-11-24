@@ -13,9 +13,9 @@ vi.mock("@/lib/test-attendance-export", () => ({ downloadTestAttendance: mockDow
 const threeStudents = {
   monthlyTests: [],
   students: [
-    { userId: "10", name: "Nisha Rao", studentId: "NVS001", grade: 11, examPreparingFor: "Engineering", attendance: {} },
-    { userId: "12", name: "Ravi Das", studentId: "NVS003", grade: 11, examPreparingFor: null, attendance: {} },
-    { userId: "14", name: "Maya Iyer", studentId: "NVS002", grade: 12, examPreparingFor: "Medical", attendance: {} },
+    { userId: "10", name: "Nisha Rao", studentId: "NVS001", apaarId: "100000000001", grade: 11, examPreparingFor: "Engineering", attendance: {} },
+    { userId: "12", name: "Ravi Das", studentId: "NVS003", apaarId: null, grade: 11, examPreparingFor: null, attendance: {} },
+    { userId: "14", name: "Maya Iyer", studentId: "NVS002", apaarId: "100000000002", grade: 12, examPreparingFor: "Medical", attendance: {} },
   ],
   serverTime: "2026-11-18T08:30:00.000Z",
 };
@@ -238,11 +238,11 @@ describe("TestAttendanceTab — period strip", () => {
 // A running November and a closed October, Grades 11 and 12, counted by hand.
 // Ekta (Grade 12) has no November mark: November has no Grade 12 Paper.
 const monthStudents = [
-  { userId: "1", name: "Zara Khan", studentId: "NVS1", grade: 11, examPreparingFor: "Engineering", attendance: { october: "submitted", november: "submitted" } },
-  { userId: "2", name: "Arun Mehta", studentId: "NVS2", grade: 11, examPreparingFor: null, attendance: { october: "not_opened", november: "not_opened" } },
-  { userId: "3", name: "Bina Shah", studentId: "NVS3", grade: 11, examPreparingFor: "Medical", attendance: { october: "opened", november: "opened" } },
-  { userId: "4", name: "Charu Pal", studentId: "NVS4", grade: 11, examPreparingFor: "NDA", attendance: { october: "submitted", november: "not_opened" } },
-  { userId: "5", name: "Ekta Jain", studentId: "NVS5", grade: 12, examPreparingFor: "CLAT", attendance: { october: "not_opened" } },
+  { userId: "1", name: "Zara Khan", studentId: "NVS1", apaarId: "111122223333", grade: 11, examPreparingFor: "Engineering", attendance: { october: "submitted", november: "submitted" } },
+  { userId: "2", name: "Arun Mehta", studentId: "NVS2", apaarId: null, grade: 11, examPreparingFor: null, attendance: { october: "not_opened", november: "not_opened" } },
+  { userId: "3", name: "Bina Shah", studentId: "NVS3", apaarId: "333344445555", grade: 11, examPreparingFor: "Medical", attendance: { october: "opened", november: "opened" } },
+  { userId: "4", name: "Charu Pal", studentId: "NVS4", apaarId: "444455556666", grade: 11, examPreparingFor: "NDA", attendance: { october: "submitted", november: "not_opened" } },
+  { userId: "5", name: "Ekta Jain", studentId: "NVS5", apaarId: "555566667777", grade: 12, examPreparingFor: "CLAT", attendance: { october: "not_opened" } },
 ];
 const monthData = {
   monthlyTests: [october, { ...november, grades: [11] }],
@@ -364,7 +364,7 @@ describe("TestAttendanceTab — filters", () => {
     expect(tile("Submitted")).toHaveTextContent("0 of 1");
     expect(tile("Opened, not submitted")).toHaveTextContent("0 of 1");
     expect(tile("Absent")).toHaveTextContent("1 of 1");
-    expect(studentRows()).toEqual([["Ekta Jain", "12", "CLAT", "Absent", ""]]);
+    expect(studentRows()).toEqual([["Ekta Jain", "NVS5", "555566667777", "12", "CLAT", "Absent", ""]]);
     expect(groupRows()).toEqual([["Grade 12 · CLAT", "0 of 1 (0%)", "0", "1"]]);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
@@ -382,7 +382,7 @@ describe("TestAttendanceTab — filters", () => {
 
     expect(filterButton("Exam Preparing For", "Not set")).toHaveAttribute("aria-pressed", "true");
     expect(tile("Yet to start")).toHaveTextContent("1 of 1");
-    expect(studentRows()).toEqual([["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"]]);
+    expect(studentRows()).toEqual([["Arun Mehta", "NVS2", "—", "11", "Not set", "Yet to start", "Missed Oct"]]);
     expect(groupRows()).toEqual([["Grade 11 · Not set", "0 of 1 (0%)", "0", "1"]]);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
@@ -618,13 +618,13 @@ const september = {
   opensAt: "2026-09-14T23:30:00.000Z", closesAt: "2026-09-19T18:25:00.000Z", state: "closed", grades: [11, 12],
 };
 const yearStudents = [
-  { userId: "1", name: "Zoya Ali", studentId: "NVS1", grade: 11, examPreparingFor: "Engineering", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "submitted" } },
-  { userId: "2", name: "Kiran Das", studentId: "NVS2", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", october: "submitted", november: "not_opened" } },
-  { userId: "3", name: "Neel Jha", studentId: "NVS3", grade: 11, examPreparingFor: "Engineering", attendance: { august: "opened", september: "submitted", october: "opened", november: "not_opened" } },
-  { userId: "4", name: "Asha Bose", studentId: "NVS4", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "not_opened", october: "not_opened", november: "submitted" } },
-  { userId: "5", name: "Bala Nair", studentId: "NVS5", grade: 11, examPreparingFor: null, attendance: { august: "submitted", september: "opened", october: "submitted", november: "submitted" } },
+  { userId: "1", name: "Zoya Ali", studentId: "NVS1", apaarId: "111122223333", grade: 11, examPreparingFor: "Engineering", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "submitted" } },
+  { userId: "2", name: "Kiran Das", studentId: "NVS2", apaarId: null, grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", october: "submitted", november: "not_opened" } },
+  { userId: "3", name: "Neel Jha", studentId: "NVS3", apaarId: "333344445555", grade: 11, examPreparingFor: "Engineering", attendance: { august: "opened", september: "submitted", october: "opened", november: "not_opened" } },
+  { userId: "4", name: "Asha Bose", studentId: "NVS4", apaarId: "444455556666", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "not_opened", october: "not_opened", november: "submitted" } },
+  { userId: "5", name: "Bala Nair", studentId: "NVS5", apaarId: "555566667777", grade: 11, examPreparingFor: null, attendance: { august: "submitted", september: "opened", october: "submitted", november: "submitted" } },
   // Joined in November: counted for none of the window's tests.
-  { userId: "6", name: "Omar Khan", studentId: "NVS6", grade: 12, examPreparingFor: "Engineering", attendance: { november: "not_opened" } },
+  { userId: "6", name: "Omar Khan", studentId: "NVS6", apaarId: "666677778888", grade: 12, examPreparingFor: "Engineering", attendance: { november: "not_opened" } },
 ];
 const yearData = {
   monthlyTests: [august, september, october, november],

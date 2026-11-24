@@ -105,7 +105,7 @@ function withoutQuizIds(test: OpenedMonthlyTest): TestAttendanceMonthlyTest {
 /**
  * The Monthly Tests that have opened by `now`, ordered by closing time, with
  * the quiz ids of their usable Papers (the Papers the tab reads attendance
- * for; the response never carries them). A Monthly Test is one test set list
+ * for; the response never carries them). A Monthly Test is one `TestSet`
  * entry with at least one usable Paper (switched on, both times known); it
  * runs from its earliest Paper opening until its latest Paper closing and is
  * closed from then on.

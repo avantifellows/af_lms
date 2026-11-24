@@ -97,7 +97,7 @@ export async function removeTestAttendanceFixture(pool: Pool): Promise<void> {
   await pool.query(`DELETE FROM "user" WHERE id = ANY($1)`, [userIds]);
 }
 
-// The e2e server cannot read the PMU test set list or the warehouse, so specs
+// The e2e server cannot read the warehouse, so specs
 // that need a loaded tab answer the read route in the browser with this
 // response (made-up Students; they need not match the seeded roster). Server
 // time 18 Nov 2026, 2:00 pm IST: August, September and October are closed and
@@ -120,15 +120,15 @@ export const TEST_ATTENDANCE_RESPONSE: TestAttendanceResponse = {
     testAttendanceMonth("november", "November", "2026-11-16T23:30:00.000Z", "2026-11-21T18:25:00.000Z", "running"),
   ],
   students: [
-    { userId: "e2e-ta-1", name: "Asha Bose", studentId: "E2E-TA-1", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "not_opened", october: "not_opened", november: "submitted" } },
-    { userId: "e2e-ta-2", name: "Kiran Das", studentId: "E2E-TA-2", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", october: "submitted", november: "not_opened" } },
-    { userId: "e2e-ta-3", name: "Neel Jha", studentId: "E2E-TA-3", grade: 11, examPreparingFor: "Engineering", attendance: { august: "opened", september: "submitted", october: "opened", november: "not_opened" } },
-    { userId: "e2e-ta-4", name: "Bala Nair", studentId: "E2E-TA-4", grade: 11, examPreparingFor: null, attendance: { august: "submitted", september: "opened", october: "submitted", november: "submitted" } },
-    { userId: "e2e-ta-5", name: "Zoya Ali", studentId: null, grade: 11, examPreparingFor: "Engineering", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "opened" } },
+    { userId: "e2e-ta-1", name: "Asha Bose", studentId: "E2E-TA-1", apaarId: "111122223331", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "not_opened", october: "not_opened", november: "submitted" } },
+    { userId: "e2e-ta-2", name: "Kiran Das", studentId: "E2E-TA-2", apaarId: "111122223332", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", october: "submitted", november: "not_opened" } },
+    { userId: "e2e-ta-3", name: "Neel Jha", studentId: "E2E-TA-3", apaarId: "111122223333", grade: 11, examPreparingFor: "Engineering", attendance: { august: "opened", september: "submitted", october: "opened", november: "not_opened" } },
+    { userId: "e2e-ta-4", name: "Bala Nair", studentId: "E2E-TA-4", apaarId: null, grade: 11, examPreparingFor: null, attendance: { august: "submitted", september: "opened", october: "submitted", november: "submitted" } },
+    { userId: "e2e-ta-5", name: "Zoya Ali", studentId: null, apaarId: "111122223335", grade: 11, examPreparingFor: "Engineering", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "opened" } },
     // Joined in November: counted for November only.
-    { userId: "e2e-ta-6", name: "Omar Khan", studentId: "E2E-TA-6", grade: 12, examPreparingFor: "CLAT", attendance: { november: "not_opened" } },
-    { userId: "e2e-ta-7", name: "Ravi Sen", studentId: "E2E-TA-7", grade: 12, examPreparingFor: "NDA", attendance: { august: "submitted", september: "submitted", october: "not_opened", november: "opened" } },
-    { userId: "e2e-ta-8", name: "Meera Iyer", studentId: "E2E-TA-8", grade: 12, examPreparingFor: "CA", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "submitted" } },
+    { userId: "e2e-ta-6", name: "Omar Khan", studentId: "E2E-TA-6", apaarId: "111122223336", grade: 12, examPreparingFor: "CLAT", attendance: { november: "not_opened" } },
+    { userId: "e2e-ta-7", name: "Ravi Sen", studentId: "E2E-TA-7", apaarId: "111122223337", grade: 12, examPreparingFor: "NDA", attendance: { august: "submitted", september: "submitted", october: "not_opened", november: "opened" } },
+    { userId: "e2e-ta-8", name: "Meera Iyer", studentId: "E2E-TA-8", apaarId: "111122223338", grade: 12, examPreparingFor: "CA", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "submitted" } },
   ],
   lastRefreshed: "2026-11-18T08:15:00.000Z",
   serverTime: "2026-11-18T08:30:00.000Z",

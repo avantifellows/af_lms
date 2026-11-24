@@ -243,6 +243,7 @@ const listed = (userId: string, grade: number, name = `Student ${userId}`): List
   userId,
   name,
   studentId: `NVS${userId}`,
+  apaarId: null,
   grade,
   examPreparingFor: "Engineering",
 });
@@ -437,6 +438,7 @@ describe("testAttendanceFrom", () => {
         userId: "1",
         name: "Nisha Rao",
         studentId: "NVS1",
+        apaarId: null,
         grade: 11,
         examPreparingFor: "Engineering",
         attendance: { october: "not_opened" },
@@ -480,6 +482,7 @@ const student = (
   userId,
   name,
   studentId: `NVS${userId}`,
+  apaarId: null,
   grade,
   examPreparingFor: userId === "4" ? null : "Engineering",
   attendance,
@@ -575,6 +578,7 @@ const grouped = (
   userId,
   name,
   studentId: `NVS${userId}`,
+  apaarId: null,
   grade,
   examPreparingFor: examPreparingFor as TestAttendanceStudent["examPreparingFor"],
   attendance,
@@ -748,6 +752,7 @@ const marks = (attendance: TestAttendanceStudent["attendance"]): TestAttendanceS
   userId: "1",
   name: "Asha Roy",
   studentId: "NVS1",
+  apaarId: null,
   grade: 11,
   examPreparingFor: "Engineering",
   attendance,
@@ -987,6 +992,7 @@ describe("monthStudents — Previous 3 tests", () => {
     userId,
     name,
     studentId: `NVS${userId}`,
+    apaarId: null,
     grade: 11,
     examPreparingFor: "Engineering" as const,
     attendance: { ...attendance, november: "not_opened" as const },
@@ -1046,7 +1052,7 @@ const yearStudent = (
   grade: number,
   attendance: TestAttendanceStudent["attendance"],
   examPreparingFor: TestAttendanceStudent["examPreparingFor"] = "Engineering",
-): TestAttendanceStudent => ({ userId, name, studentId: `NVS${userId}`, grade, examPreparingFor, attendance });
+): TestAttendanceStudent => ({ userId, name, studentId: `NVS${userId}`, apaarId: null, grade, examPreparingFor, attendance });
 const yearFixture = [
   yearStudent("1", "Zoya Ali", 11, { august: "submitted", september: "submitted", october: "submitted" }),
   yearStudent("2", "Kiran Das", 12, { august: "not_opened", september: "not_opened", october: "submitted" }), // pattern 3

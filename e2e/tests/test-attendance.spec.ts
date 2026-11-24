@@ -52,9 +52,12 @@ async function screenRows(table: Locator) {
 
 // Test Attendance tab (#517): NVS Schools only. A PMU Govt School User at a
 // JNV School with listed NVS Students sees the tab right after Performance;
-// the e2e teacher opens the same School page without it. The e2e server has no
-// Google access (GOOGLE_SERVICE_ACCOUNT_JSON is " "), so the PMU test set list
-// cannot be read and the tab must show its error panel, never zeros.
+// the e2e teacher opens the same School page without it. Monthly Tests come
+// from the local e2e Postgres `session` table (ADR 0014); the e2e database has
+// no matching NVS mandated sessions, so `getNvsTestSets()` returns [], the
+// attendance read skips BigQuery (and `lastRefreshed` tolerates the blank
+// GOOGLE_SERVICE_ACCOUNT_JSON as null), and the tab shows its Enrolled count
+// with "No Monthly Tests yet".
 test.describe("Test Attendance tab", () => {
   const pool = getTestPool();
 
@@ -77,11 +80,11 @@ test.describe("Test Attendance tab", () => {
     expect(tabNames).toEqual(["Enrollment", "Performance", "Test Attendance"]);
 
     await tabs.getByRole("tab", { name: "Test Attendance" }).click();
-    const failed = page.getByRole("alert").filter({ hasText: "Couldn't load Test Attendance" });
-    await expect(failed).toBeVisible();
-    await expect(failed.getByRole("button", { name: "Retry" })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Enrolled" })).toHaveCount(0);
-    await expect(page.getByText("No Monthly Tests yet")).toHaveCount(0);
+    const enrolled = page.getByRole("region", { name: "Enrolled" });
+    await expect(enrolled).toBeVisible();
+    await expect(enrolled).toContainText("2");
+    await expect(page.getByText("No Monthly Tests yet")).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Couldn't load Test Attendance" })).toHaveCount(0);
 
     await teacherPage.goto(`/school/${TEST_ATTENDANCE_SCHOOL_CODE}`);
     const teacherTabs = teacherPage.getByRole("tablist", { name: "School sections" });
@@ -103,11 +106,14 @@ test.describe("Test Attendance tab", () => {
 
     expect(file.filename).toBe(`test-attendance-${TEST_ATTENDANCE_SCHOOL_CODE}-october.xlsx`);
     expect(file.name).toBe("October");
-    expect(file.header).toEqual(["Student Name", "Student ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"]);
-    // Same Students, same order, same values (the file adds the Student ID).
-    expect(file.rows.map(([name, , ...rest]) => [name, ...rest])).toEqual(onScreen);
-    expect(file.rows.map((row) => row[1])).toEqual(
-      onScreen.map(([name]) => TEST_ATTENDANCE_RESPONSE.students.find((s) => s.name === name)?.studentId ?? ""),
+    expect(file.header).toEqual(["Student Name", "Student ID", "APAAR ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"]);
+    // Same Students, same order, same values (blank cells in Excel show as "—" on screen).
+    expect(file.rows.map(([name, studentId, apaarId, ...rest]) => [name, studentId || "—", apaarId || "—", ...rest])).toEqual(onScreen);
+    expect(file.rows.map((row) => [row[1], row[2]])).toEqual(
+      onScreen.map(([name]) => {
+        const student = TEST_ATTENDANCE_RESPONSE.students.find((s) => s.name === name);
+        return [student?.studentId ?? "", student?.apaarId ?? ""];
+      }),
     );
 
     // A narrower list downloads narrower: Grade 12, Absent.
@@ -115,7 +121,7 @@ test.describe("Test Attendance tab", () => {
     await page.getByRole("group", { name: "Show Students" }).getByRole("button", { name: "Absent" }).click();
     const absent = await screenRows(table);
     const absentFile = await downloadSheet(page);
-    expect(absentFile.rows.map(([name, , ...rest]) => [name, ...rest])).toEqual(absent);
+    expect(absentFile.rows.map(([name, studentId, apaarId, ...rest]) => [name, studentId || "—", apaarId || "—", ...rest])).toEqual(absent);
     expect(absent.map(([name]) => name)).toEqual(["Ravi Sen"]);
   });
 
@@ -132,11 +138,12 @@ test.describe("Test Attendance tab", () => {
 
       expect(file.filename).toBe(`test-attendance-${TEST_ATTENDANCE_SCHOOL_CODE}-all-year.xlsx`);
       expect(file.name).toBe("All year");
-      expect(file.header.slice(4, -3)).toEqual(headers.slice(3, -2));
-      // Screen: name, grade, Exam Preparing For, a status per month, Attended, tag + note in one cell.
-      const fileAsScreen = file.rows.map(([name, , ...rest]) => {
+      expect(file.header.slice(0, 5)).toEqual(["Student Name", "Student ID", "APAAR ID", "Grade", "Exam Preparing For"]);
+      expect(file.header.slice(5, -3)).toEqual(headers.slice(5, -2));
+      // Screen: name, Student ID, APAAR ID, grade, Exam Preparing For, a status per month, Attended, tag + note in one cell.
+      const fileAsScreen = file.rows.map(([name, studentId, apaarId, ...rest]) => {
         const [tag, note] = rest.slice(-2);
-        return [name, ...rest.slice(0, -2), tag + note];
+        return [name, studentId || "—", apaarId || "—", ...rest.slice(0, -2), tag + note];
       });
       expect(fileAsScreen).toEqual(onScreen);
     }

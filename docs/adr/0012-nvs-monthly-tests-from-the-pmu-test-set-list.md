@@ -1,4 +1,5 @@
 # NVS Monthly Tests come from the PMU test set list in Firestore, with times and grades from `session`
+Superseded by ADR 0014 (24 Nov 2026).
 
 The Test Attendance Tab (#517) groups System-wide Mandated Test Papers into Monthly Tests. Which Papers make up a Monthly Test, and its name, come from the PMU test set list: the Firestore document `pmu_live_tracking_sessions/nvs`, field `test_sets: [{label, quiz_ids}]`, which the PMU team already keeps up to date for PMU Live Tracking. Each Paper's opening time, closing time, grade and on/off state come from the LMS `session` table, matched on the quiz id (`platform_id`). This is the LMS's first Firestore read. It goes through the Firestore REST API with the Google service account the LMS already uses for BigQuery, so `google-auth-library` is a direct dependency and the Firestore SDK is not added. One server-only module (`src/lib/test-set-list.ts`) reads the list, and nothing else in the LMS knows where it lives.
 

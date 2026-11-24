@@ -12,7 +12,7 @@ import { useState } from "react";
 import { Badge, Card } from "@/components/ui";
 import AttendanceChart from "@/components/test-attendance/AttendanceChart";
 import StudentListHeader from "@/components/test-attendance/StudentListHeader";
-import { Tile, TileNumber } from "@/components/test-attendance/MonthPage";
+import { formatStudentId, StudentIdsLine, Tile, TileNumber } from "@/components/test-attendance/MonthPage";
 import {
   ALL_YEAR_LIST_FILTERS,
   type AllYearListFilter,
@@ -103,31 +103,41 @@ function StudentTable({ rows, columns }: { rows: AllYearStudentRow[]; columns: T
       <table aria-label="All students" className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
-            <th scope="col" className="py-2 pr-4 font-medium">Student</th>
-            <th scope="col" className="py-2 pr-4 font-medium">Grade</th>
-            <th scope="col" className="py-2 pr-4 font-medium">Exam Preparing For</th>
+            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Student</th>
+            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Student ID</th>
+            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">APAAR ID</th>
+            <th scope="col" className="whitespace-nowrap py-2 pr-3 font-medium">Grade</th>
+            <th scope="col" className="py-2 pr-3 font-medium">Exam Preparing For</th>
             {columns.map((test) => (
-              <th key={test.key} scope="col" className="px-1 py-2 text-center font-medium">
+              <th key={test.key} scope="col" className="whitespace-nowrap px-1 py-2 text-center font-medium">
                 {test.shortName}
               </th>
             ))}
-            <th scope="col" className="py-2 pl-3 pr-4 font-medium">Attended</th>
-            <th scope="col" className="py-2 font-medium">Follow-up</th>
+            <th scope="col" className="whitespace-nowrap py-2 pl-2 pr-3 font-medium">Attended</th>
+            <th scope="col" className="whitespace-nowrap py-2 font-medium">Follow-up</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.student.userId} className={`border-b border-border last:border-0 ${toneOf(row.followUp)}`}>
-              <td className="py-2 pr-4 text-text-primary">{row.student.name}</td>
-              <td className="py-2 pr-4 text-text-secondary">{row.student.grade}</td>
-              <td className="py-2 pr-4 text-text-secondary">{row.student.examPreparingFor ?? "Not set"}</td>
+              <td className="min-w-[8rem] py-2 pr-3 text-text-primary">{row.student.name}</td>
+              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-text-secondary">
+                {formatStudentId(row.student.studentId)}
+              </td>
+              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-text-secondary">
+                {formatStudentId(row.student.apaarId)}
+              </td>
+              <td className="whitespace-nowrap py-2 pr-3 text-text-secondary">{row.student.grade}</td>
+              <td className="whitespace-nowrap py-2 pr-3 text-text-secondary">{row.student.examPreparingFor ?? "Not set"}</td>
               {columns.map((test) => (
                 <td key={test.key} className="px-1 py-2 text-center">
                   <MonthBox test={test} mark={windowMark(row, test.key)} />
                 </td>
               ))}
-              <td className="py-2 pl-3 pr-4 font-mono text-text-secondary">{attendedText(row.attended, row.counted)}</td>
-              <td className="py-2">
+              <td className="whitespace-nowrap py-2 pl-2 pr-3 font-mono text-text-secondary">
+                {attendedText(row.attended, row.counted)}
+              </td>
+              <td className="min-w-[10rem] max-w-[14rem] py-2">
                 <div className="flex flex-col items-start gap-1">
                   <FollowUpTag followUp={row.followUp} />
                   <FollowUpNote followUp={row.followUp} />
@@ -152,6 +162,7 @@ function StudentCards({ rows, columns }: { rows: AllYearStudentRow[]; columns: T
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p className="text-sm font-medium text-text-primary">{row.student.name}</p>
+                  <StudentIdsLine student={row.student} />
                   <p className="text-xs text-text-secondary">
                     Grade {row.student.grade} · {row.student.examPreparingFor ?? "Not set"}
                   </p>

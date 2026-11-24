@@ -1,179 +1,98 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// The PMU test set list reader with its two edges stubbed: Google auth (the
-// service account token) and the Firestore REST fetch.
-const { mockGetAccessToken } = vi.hoisted(() => ({ mockGetAccessToken: vi.fn() }));
-vi.mock("google-auth-library", () => ({
-  GoogleAuth: vi.fn(function GoogleAuth() {
-    return { getAccessToken: mockGetAccessToken, getProjectId: async () => "avantifellows" };
-  }),
-}));
+// The NVS Monthly Test reader with its one edge stubbed: the Postgres `query()`.
+const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
+vi.mock("@/lib/db", () => ({ query: mockQuery }));
 
-const mockFetch = vi.fn();
-
-// Firestore REST encodes a document's fields as typed values.
-const str = (value: string) => ({ stringValue: value });
-const set = (label: unknown, quizIds: unknown[], current = false) => ({
-  mapValue: {
-    fields: {
-      ...(label === undefined ? {} : { label }),
-      quiz_ids: { arrayValue: { values: quizIds } },
-      current: { booleanValue: current },
-    },
-  },
-});
-const document = (sets: unknown[]) => ({
-  name: "projects/avantifellows/databases/(default)/documents/pmu_live_tracking_sessions/nvs",
-  fields: {
-    program_label: str("NVS"),
-    test_sets: { arrayValue: { values: sets } },
-  },
-});
-const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-
-async function freshReader() {
-  vi.resetModules();
-  return (await import("./test-set-list")).getNvsTestSets;
-}
+import { academicYearBounds, getNvsTestSets, testSetsFrom } from "./test-set-list";
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("GOOGLE_SERVICE_ACCOUNT_JSON", JSON.stringify({ project_id: "avantifellows", client_email: "sa@x" }));
-  vi.stubGlobal("fetch", mockFetch);
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date("2026-11-18T08:30:00.000Z"));
-  mockGetAccessToken.mockResolvedValue("token-1");
-  vi.spyOn(console, "error").mockImplementation(() => {});
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-  vi.unstubAllEnvs();
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
 });
 
 describe("getNvsTestSets", () => {
-  it("reads the NVS test sets from the PMU Live Tracking document, in list order", async () => {
-    mockFetch.mockResolvedValue(
-      ok(
-        document([
-          set(str("July"), [str("q-jul-1"), str("q-jul-2")]),
-          set(str("August"), [str("q-aug-1")], true),
-        ]),
-      ),
-    );
-    const getNvsTestSets = await freshReader();
-
-    expect(await getNvsTestSets()).toEqual([
-      { label: "July", quizIds: ["q-jul-1", "q-jul-2"] },
-      { label: "August", quizIds: ["q-aug-1"] },
-    ]);
-    const [url, init] = mockFetch.mock.calls[0];
-    expect(String(url)).toBe(
-      "https://firestore.googleapis.com/v1/projects/avantifellows/databases/(default)/documents/pmu_live_tracking_sessions/nvs",
-    );
-    expect(init.headers).toEqual(expect.objectContaining({ Authorization: "Bearer token-1" }));
-  });
-
-  it("trims labels, trims and de-duplicates quiz ids, and drops sets with no label or no ids", async () => {
-    mockFetch.mockResolvedValue(
-      ok(
-        document([
-          set(str("  September "), [str(" q1 "), str("q2"), str("q1"), str("  "), { integerValue: "7" }]),
-          set(str("   "), [str("q3")]),
-          set(undefined, [str("q4")]),
-          set(str("October"), []),
-          set(str("November"), [str(" ")]),
-          { stringValue: "not a set" },
-          set(str("December"), [str("q5")]),
-        ]),
-      ),
-    );
-    const getNvsTestSets = await freshReader();
-
-    expect(await getNvsTestSets()).toEqual([
-      { label: "September", quizIds: ["q1", "q2"] },
-      { label: "December", quizIds: ["q5"] },
+  it("reads switched-on Grade 11 and 12 mandated NVS sessions of the current academic year", async () => {
+    mockQuery.mockResolvedValue([]);
+    await getNvsTestSets();
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("meta_data->>'test_purpose' = $1");
+    expect(sql).toContain("meta_data->>'group' = $2");
+    expect(sql).toContain("meta_data->>'grade' = ANY($3::text[])");
+    expect(sql).toContain("is_active = true");
+    expect(sql).toContain("start_time >= $4::timestamp");
+    expect(sql).toContain("start_time < $5::timestamp");
+    expect(sql).toContain("ORDER BY start_time");
+    expect(params).toEqual([
+      "system_wide_mandated",
+      "EnableStudents",
+      ["11", "12"],
+      "2026-04-01 00:00:00",
+      "2027-04-01 00:00:00",
     ]);
   });
 
-  it("ignores the current mark", async () => {
-    mockFetch.mockResolvedValue(
-      ok(document([set(str("September"), [str("q1")], false), set(str("October"), [str("q2")], true)])),
-    );
-    const getNvsTestSets = await freshReader();
-
+  it("groups the Papers into Monthly Tests named after their start month, oldest first", async () => {
+    mockQuery.mockResolvedValue([
+      { platform_id: "jul-g12", month: "2026-07" },
+      { platform_id: "aug-g12", month: "2026-08" },
+      { platform_id: "aug-g11", month: "2026-08" },
+      { platform_id: "sep-g12", month: "2026-09" },
+    ]);
     expect(await getNvsTestSets()).toEqual([
-      { label: "September", quizIds: ["q1"] },
-      { label: "October", quizIds: ["q2"] },
+      { label: "July", quizIds: ["jul-g12"] },
+      { label: "August", quizIds: ["aug-g12", "aug-g11"] },
+      { label: "September", quizIds: ["sep-g12"] },
     ]);
   });
 
-  it("returns an empty list when the document holds no sets", async () => {
-    mockFetch.mockResolvedValue(ok({ fields: { test_sets: { arrayValue: {} } } }));
-    const getNvsTestSets = await freshReader();
-
+  it("returns an empty list when no session matches", async () => {
+    mockQuery.mockResolvedValue([]);
     expect(await getNvsTestSets()).toEqual([]);
   });
 
-  it.each([
-    ["an error status", () => mockFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({}) })],
-    ["a network failure", () => mockFetch.mockRejectedValue(new TypeError("fetch failed"))],
-    ["a document with no test_sets field", () => mockFetch.mockResolvedValue(ok({ fields: { program_label: str("NVS") } }))],
-    ["test_sets that is not a list", () => mockFetch.mockResolvedValue(ok({ fields: { test_sets: str("July") } }))],
-    ["a body that is not JSON", () => mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => { throw new SyntaxError("bad"); } })],
-    ["a failed token", () => mockGetAccessToken.mockRejectedValue(new Error("invalid_grant"))],
-  ])("throws after %s, logging only the message", async (_label, fail) => {
-    fail();
-    const getNvsTestSets = await freshReader();
+  it("throws when the session read fails", async () => {
+    mockQuery.mockRejectedValue(new Error("connection refused"));
+    await expect(getNvsTestSets()).rejects.toThrow("connection refused");
+  });
+});
 
-    await expect(getNvsTestSets()).rejects.toThrow();
-    expect(console.error).toHaveBeenCalledWith("PMU test set list unavailable:", expect.any(String));
+describe("testSetsFrom", () => {
+  it("puts a quiz id with rows in two months only in the earlier one", () => {
+    expect(
+      testSetsFrom([
+        { platform_id: "q1", month: "2026-09" },
+        { platform_id: "q2", month: "2026-09" },
+        { platform_id: "q1", month: "2026-10" },
+      ]),
+    ).toEqual([{ label: "September", quizIds: ["q1", "q2"] }]);
   });
 
-  it("throws when the service account setting is not JSON, without calling Firestore", async () => {
-    vi.stubEnv("GOOGLE_SERVICE_ACCOUNT_JSON", " ");
-    const getNvsTestSets = await freshReader();
-
-    await expect(getNvsTestSets()).rejects.toThrow("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON");
-    expect(mockFetch).not.toHaveBeenCalled();
+  it("trims quiz ids and skips empty ones", () => {
+    expect(
+      testSetsFrom([
+        { platform_id: " q1 ", month: "2026-07" },
+        { platform_id: "  ", month: "2026-07" },
+      ]),
+    ).toEqual([{ label: "July", quizIds: ["q1"] }]);
   });
 
-  it("never puts the service account setting in the error or the log", async () => {
-    // JSON.parse quotes the start of a value it cannot read in its message.
-    vi.stubEnv("GOOGLE_SERVICE_ACCOUNT_JSON", "SECRET-KEY-MATERIAL");
-    const getNvsTestSets = await freshReader();
+  it("orders January to March after the months of the year before", () => {
+    expect(
+      testSetsFrom([
+        { platform_id: "jan", month: "2027-01" },
+        { platform_id: "dec", month: "2026-12" },
+      ]).map((set) => set.label),
+    ).toEqual(["December", "January"]);
+  });
+});
 
-    const error = await getNvsTestSets().catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).not.toContain("SECRET");
-    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("SECRET");
+describe("academicYearBounds", () => {
+  it("runs from 1 April to the next 1 April, as IST wall clock", () => {
+    expect(academicYearBounds("2026-2027")).toEqual({ from: "2026-04-01 00:00:00", to: "2027-04-01 00:00:00" });
   });
 
-  it("keeps a read for 5 minutes, then reads again", async () => {
-    mockFetch
-      .mockResolvedValueOnce(ok(document([set(str("October"), [str("q1")])])))
-      .mockResolvedValueOnce(ok(document([set(str("November"), [str("q2")])])));
-    const getNvsTestSets = await freshReader();
-
-    expect(await getNvsTestSets()).toEqual([{ label: "October", quizIds: ["q1"] }]);
-    vi.setSystemTime(new Date("2026-11-18T08:34:59.000Z"));
-    expect(await getNvsTestSets()).toEqual([{ label: "October", quizIds: ["q1"] }]);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-
-    vi.setSystemTime(new Date("2026-11-18T08:35:00.000Z"));
-    expect(await getNvsTestSets()).toEqual([{ label: "November", quizIds: ["q2"] }]);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not keep a failed read", async () => {
-    mockFetch
-      .mockRejectedValueOnce(new TypeError("fetch failed"))
-      .mockResolvedValueOnce(ok(document([set(str("October"), [str("q1")])])));
-    const getNvsTestSets = await freshReader();
-
-    await expect(getNvsTestSets()).rejects.toThrow("fetch failed");
-    expect(await getNvsTestSets()).toEqual([{ label: "October", quizIds: ["q1"] }]);
+  it.each(["2026", "2026-2028", "26-27", ""])("rejects %j", (year) => {
+    expect(() => academicYearBounds(year)).toThrow("Unexpected academic year");
   });
 });

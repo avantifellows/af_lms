@@ -16,13 +16,13 @@ const november = monthlyTest("november", "November", "running");
 const monthlyTests = [august, september, october, november];
 
 const students: TestAttendanceStudent[] = [
-  { userId: "1", name: "Zoya Ali", studentId: "NVS1", grade: 11, examPreparingFor: "Engineering", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "submitted" } },
-  { userId: "2", name: "Kiran Das", studentId: "NVS2", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", october: "submitted", november: "not_opened" } },
-  { userId: "3", name: "Neel Jha", studentId: "NVS3", grade: 11, examPreparingFor: "Engineering", attendance: { august: "opened", september: "submitted", october: "opened", november: "not_opened" } },
-  { userId: "4", name: "Asha Bose", studentId: "NVS4", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "not_opened", october: "not_opened", november: "submitted" } },
-  { userId: "5", name: "Bala Nair", studentId: "NVS5", grade: 11, examPreparingFor: null, attendance: { august: "submitted", september: "opened", october: "submitted", november: "submitted" } },
+  { userId: "1", name: "Zoya Ali", studentId: "NVS1", apaarId: "111122223333", grade: 11, examPreparingFor: "Engineering", attendance: { august: "submitted", september: "submitted", october: "submitted", november: "submitted" } },
+  { userId: "2", name: "Kiran Das", studentId: "NVS2", apaarId: null, grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", october: "submitted", november: "not_opened" } },
+  { userId: "3", name: "Neel Jha", studentId: null, apaarId: "333344445555", grade: 11, examPreparingFor: "Engineering", attendance: { august: "opened", september: "submitted", october: "opened", november: "not_opened" } },
+  { userId: "4", name: "Asha Bose", studentId: "NVS4", apaarId: "444455556666", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "not_opened", october: "not_opened", november: "submitted" } },
+  { userId: "5", name: "Bala Nair", studentId: "NVS5", apaarId: "555566667777", grade: 11, examPreparingFor: null, attendance: { august: "submitted", september: "opened", october: "submitted", november: "submitted" } },
   // Joined in November: counted for none of the window's tests.
-  { userId: "6", name: "Omar Khan", studentId: "NVS6", grade: 12, examPreparingFor: "Engineering", attendance: { november: "not_opened" } },
+  { userId: "6", name: "Omar Khan", studentId: "NVS6", apaarId: "666677778888", grade: 12, examPreparingFor: "Engineering", attendance: { november: "not_opened" } },
 ];
 
 function renderAllYear(tests: TestAttendanceMonthlyTest[] = monthlyTests, list: TestAttendanceStudent[] = students) {
@@ -82,7 +82,7 @@ describe("AllYearPage — list", () => {
   it("shows each Student's tag and note, the tag as a red or amber badge", () => {
     renderAllYear();
 
-    expect(rows().map((row) => cells(row)[7].textContent)).toEqual([
+    expect(rows().map((row) => cells(row)[9].textContent)).toEqual([
       "Follow upMissed Aug, Sep, Oct",
       "Follow upMissed Aug, Sep · attended Oct",
       "Not submittingNot submitted Aug, Oct",
@@ -102,12 +102,23 @@ describe("AllYearPage — list", () => {
     expect(within(table()).getByText("Not submitted Sep")).toHaveClass("text-warning-text");
   });
 
-  it("has the columns Student, Grade, Exam Preparing For, the window's months, Attended and Follow-up", () => {
+  it("has the columns Student, Student ID, APAAR ID, Grade, Exam Preparing For, the window's months, Attended and Follow-up", () => {
     renderAllYear();
 
     expect(within(table()).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
-      "Student", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Attended", "Follow-up",
+      "Student", "Student ID", "APAAR ID", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Attended", "Follow-up",
     ]);
+    expect(rows().map((row) => [cells(row)[0].textContent, cells(row)[1].textContent, cells(row)[2].textContent])).toEqual([
+      ["Asha Bose", "NVS4", "444455556666"],
+      ["Kiran Das", "NVS2", "—"],
+      ["Neel Jha", "—", "333344445555"],
+      ["Bala Nair", "NVS5", "555566667777"],
+      ["Zoya Ali", "NVS1", "111122223333"],
+      ["Omar Khan", "NVS6", "666677778888"],
+    ]);
+    const [asha] = rows();
+    expect(cells(asha)[1]).toHaveClass("font-mono", "whitespace-nowrap");
+    expect(cells(asha)[2]).toHaveClass("font-mono", "whitespace-nowrap");
   });
 
   it("shows a month box for each window test: Absent, Opened, not submitted, Submitted, or not counted", () => {
@@ -122,7 +133,7 @@ describe("AllYearPage — list", () => {
   it("shows Attended as x of y with a percentage, or a dash when counted for none", () => {
     renderAllYear();
 
-    expect(rows().map((row) => cells(row)[6].textContent)).toEqual([
+    expect(rows().map((row) => cells(row)[8].textContent)).toEqual([
       "0 of 3 (0%)", "1 of 3 (33%)", "3 of 3 (100%)", "3 of 3 (100%)", "3 of 3 (100%)", "—",
     ]);
   });
@@ -158,21 +169,21 @@ describe("AllYearPage — list", () => {
     renderAllYear(
       [august, september, { ...october, grades: [11] }, { ...november, state: "closed" }, monthlyTest("december", "December", "running")],
       [
-        { userId: "1", name: "Gita Rao", studentId: "NVS1", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", november: "submitted" } },
-        { userId: "2", name: "Hari Sen", studentId: "NVS2", grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "submitted", october: "submitted", november: "submitted" } },
+        { userId: "1", name: "Gita Rao", studentId: "NVS1", apaarId: "123456789012", grade: 12, examPreparingFor: "Medical", attendance: { august: "not_opened", september: "not_opened", november: "submitted" } },
+        { userId: "2", name: "Hari Sen", studentId: "NVS2", apaarId: null, grade: 11, examPreparingFor: "Engineering", attendance: { august: "not_opened", september: "submitted", october: "submitted", november: "submitted" } },
       ],
     );
 
     expect(within(table()).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
-      "Student", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Nov", "Attended", "Follow-up",
+      "Student", "Student ID", "APAAR ID", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Nov", "Attended", "Follow-up",
     ]);
     const [gita, hari] = rows();
     expect(cells(gita)[0]).toHaveTextContent("Gita Rao");
     expect(boxes(gita)).toEqual(["Aug: Absent", "Sep: Absent", "Oct: not counted", "Nov: Submitted"]);
     // Hari was counted for August, but it is not in his last 3.
     expect(boxes(hari)).toEqual(["Aug: not counted", "Sep: Submitted", "Oct: Submitted", "Nov: Submitted"]);
-    expect(cells(gita)[7]).toHaveTextContent("1 of 3 (33%)");
-    expect(cells(gita)[8]).toHaveTextContent("Follow upMissed Aug, Sep · attended Nov");
+    expect(cells(gita)[9]).toHaveTextContent("1 of 3 (33%)");
+    expect(cells(gita)[10]).toHaveTextContent("Follow upMissed Aug, Sep · attended Nov");
     expect(gita).toHaveClass("bg-danger-bg");
     expect(tile("Need follow-up")).toHaveTextContent("1 of 2");
     expect(
@@ -188,8 +199,8 @@ describe("AllYearPage — list", () => {
 
     const cards = within(screen.getByRole("list", { name: "All students" })).getAllByRole("listitem");
     expect(cards.map((card) => card.textContent)).toEqual([
-      "Asha BoseGrade 11 · EngineeringFollow upAugSepOctAttended 0 of 3 (0%)Missed Aug, Sep, Oct",
-      "Kiran DasGrade 12 · MedicalFollow upAugSepOctAttended 1 of 3 (33%)Missed Aug, Sep · attended Oct",
+      "Asha BoseStudent ID NVS4 · APAAR 444455556666Grade 11 · EngineeringFollow upAugSepOctAttended 0 of 3 (0%)Missed Aug, Sep, Oct",
+      "Kiran DasStudent ID NVS2 · APAAR —Grade 12 · MedicalFollow upAugSepOctAttended 1 of 3 (33%)Missed Aug, Sep · attended Oct",
     ]);
     expect(boxes(cards[1])).toEqual(["Aug: Absent", "Sep: Absent", "Oct: Submitted"]);
     expect(cards[0].querySelector(".bg-danger-bg")).not.toBeNull();

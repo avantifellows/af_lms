@@ -82,17 +82,24 @@ describe("testAttendanceSheet across a skipped month", () => {
     test("november", "November"),
     test("december", "December", [11, 12], "running"),
   ];
-  const student = (userId: string, name: string, grade: number, attendance: TestAttendanceStudent["attendance"]) => ({
+  const student = (
+    userId: string,
+    name: string,
+    grade: number,
+    attendance: TestAttendanceStudent["attendance"],
+    apaarId: string | null = `10000000000${userId}`,
+  ) => ({
     userId,
     name,
     studentId: `NVS${userId}`,
+    apaarId,
     grade,
     examPreparingFor: "Engineering" as const,
     attendance: { ...attendance, december: "not_opened" as const },
   });
   const students = [
-    student("1", "Gita Rao", 12, { august: "not_opened", september: "not_opened", november: "submitted" }),
-    student("2", "Hari Sen", 11, { august: "not_opened", september: "submitted", october: "submitted", november: "opened" }),
+    student("1", "Gita Rao", 12, { august: "not_opened", september: "not_opened", november: "submitted" }, "123456789012"),
+    student("2", "Hari Sen", 11, { august: "not_opened", september: "submitted", october: "submitted", november: "opened" }, null),
   ];
   const sheet = (period: string, list: string) =>
     testAttendanceSheet({ monthlyTests, students }, { period, filters: ALL_STUDENTS, list: list as never })!;
@@ -100,22 +107,24 @@ describe("testAttendanceSheet across a skipped month", () => {
   it("gives the All year sheet the union of the Students' windows as columns, blank outside a Student's window", () => {
     const { header, rows } = sheet("all", "all");
     expect(header).toEqual([
-      "Student Name", "Student ID", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Nov", "Attended", "Tag", "Follow-up",
+      "Student Name", "Student ID", "APAAR ID", "Grade", "Exam Preparing For", "Aug", "Sep", "Oct", "Nov", "Attended", "Tag", "Follow-up",
     ]);
     expect(rows).toEqual([
-      ["Gita Rao", "NVS1", 12, "Engineering", "Absent", "Absent", "", "Submitted", "1 of 3 (33%)", "Follow up", "Missed Aug, Sep · attended Nov"],
-      ["Hari Sen", "NVS2", 11, "Engineering", "", "Submitted", "Submitted", "Opened, not submitted", "3 of 3 (100%)", "", "Not submitted Nov"],
+      ["Gita Rao", "NVS1", "123456789012", 12, "Engineering", "Absent", "Absent", "", "Submitted", "1 of 3 (33%)", "Follow up", "Missed Aug, Sep · attended Nov"],
+      ["Hari Sen", "NVS2", "", 11, "Engineering", "", "Submitted", "Submitted", "Opened, not submitted", "3 of 3 (100%)", "", "Not submitted Nov"],
     ]);
   });
 
   it("takes the columns from the rows in the list", () => {
-    expect(sheet("all", "follow_up").header.slice(4, -3)).toEqual(["Aug", "Sep", "Nov"]);
+    expect(sheet("all", "follow_up").header.slice(5, -3)).toEqual(["Aug", "Sep", "Nov"]);
   });
 
-  it("gives the month sheet's Previous 3 tests each Student's own earlier counted tests", () => {
-    expect(sheet("december", "all").rows.map((row) => [row[0], row[5]])).toEqual([
-      ["Hari Sen", "Not submitted Nov"],
-      ["Gita Rao", "Missed Aug, Sep · attended Nov"],
+  it("gives the month sheet Student ID, APAAR ID and each Student's own earlier counted tests", () => {
+    const dec = sheet("december", "all");
+    expect(dec.header).toEqual(["Student Name", "Student ID", "APAAR ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"]);
+    expect(dec.rows).toEqual([
+      ["Hari Sen", "NVS2", "", 11, "Engineering", "Yet to start", "Not submitted Nov"],
+      ["Gita Rao", "NVS1", "123456789012", 12, "Engineering", "Yet to start", "Missed Aug, Sep · attended Nov"],
     ]);
   });
 });
@@ -125,10 +134,10 @@ describe("testAttendanceWorkbook", () => {
   const sheet = {
     name: "October",
     periodSlug: "october",
-    header: ["Student Name", "Student ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"],
+    header: ["Student Name", "Student ID", "APAAR ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"],
     rows: [
-      ["Asha Bose", "NVS4", 11, "Engineering", "Absent", "Missed Aug, Sep"],
-      ["Kiran Das", "", 12, "Not set", "Submitted", ""],
+      ["Asha Bose", "NVS4", "123456789012", 11, "Engineering", "Absent", "Missed Aug, Sep"],
+      ["Kiran Das", "", "", 12, "Not set", "Submitted", ""],
     ],
   };
 
@@ -144,9 +153,9 @@ describe("testAttendanceWorkbook", () => {
     expect(worksheet.getRow(2).values).toEqual([undefined, ...sheet.rows[0]]);
     // ExcelJS reads an empty string back as no value.
     expect(worksheet.getRow(3).getCell(1).value).toBe("Kiran Das");
-    expect(worksheet.getRow(3).getCell(3).value).toBe(12);
+    expect(worksheet.getRow(3).getCell(4).value).toBe(12);
     expect(worksheet.rowCount).toBe(3);
-    expect(worksheet.columns.map((column) => column.width)).toEqual([28, 16, 16, 16, 16, 28]);
+    expect(worksheet.columns.map((column) => column.width)).toEqual([28, 16, 16, 16, 16, 16, 28]);
   });
 });
 
@@ -155,8 +164,8 @@ describe("downloadTestAttendance", () => {
   const data = {
     monthlyTests: [october],
     students: [
-      { userId: "1", name: "Asha Bose", studentId: "NVS4", grade: 11, examPreparingFor: "Engineering" as const, attendance: { october: "not_opened" as const } },
-      { userId: "2", name: "Kiran Das", studentId: null, grade: 12, examPreparingFor: null, attendance: { october: "submitted" as const } },
+      { userId: "1", name: "Asha Bose", studentId: "NVS4", apaarId: "123456789012", grade: 11, examPreparingFor: "Engineering" as const, attendance: { october: "not_opened" as const } },
+      { userId: "2", name: "Kiran Das", studentId: null, apaarId: null, grade: 12, examPreparingFor: null, attendance: { october: "submitted" as const } },
     ],
   };
 

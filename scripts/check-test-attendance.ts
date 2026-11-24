@@ -7,14 +7,15 @@
  * Papers in `fact_student_test_results_overall`, and prints both difference
  * lists with their counts. It also reports listed Students with an
  * unrecognised Exam Preparing For value or no joining date, and whether every
- * quiz id in the PMU test set list has a `session` row with a grade and both
- * times. Reading this output is part of the release gate in #517.
+ * quiz id of each Monthly Test (from `session`) has a `session` row with a
+ * grade and both times. Reading this output is part of the release gate in #517.
  *
  * The tab's side comes from the tab's own loader (`loadTestAttendance`) and
  * rules module; the comparison lives in `src/lib/test-attendance-check.ts`.
  *
- * Read-only: Postgres runs with `default_transaction_read_only=on`; BigQuery
- * and Firestore are only queried. No DB Service endpoint is called. Students
+ * Read-only: Postgres runs with `default_transaction_read_only=on` and BigQuery
+ * is only queried (Monthly Tests come from Postgres `session`, not Firestore).
+ * No DB Service endpoint is called. Students
  * appear by LMS user id only, and the output goes to this terminal only. Don't
  * paste it anywhere public; the PR gets counts and explanations.
  *
@@ -23,8 +24,7 @@
  *     DATABASE_NAME (and DATABASE_SSL=false for a local database): the
  *     production LMS database, read access.
  *   - GOOGLE_SERVICE_ACCOUNT_JSON (or GOOGLE_APPLICATION_CREDENTIALS): the LMS
- *     service account, which reads the warehouse (`production_dbt_final`) and
- *     the PMU test set list in Firestore.
+ *     service account, which reads the warehouse (`production_dbt_final`).
  * They are read from --env-path (default `.env.production`); variables already
  * set in the shell win over the file.
  *

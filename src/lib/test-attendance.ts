@@ -1,5 +1,5 @@
 // Server loader for the Test Attendance tab (#517): the single entry point the
-// Test Attendance routes call. Server-only: it ties the PMU test set list, the
+// Test Attendance routes call. Server-only: it ties the NVS Monthly Tests, the
 // Paper windows (`session`), the School roster and the warehouse attendance
 // read to the client-safe `test-attendance-rules` module, which owns the
 // rules. The response shape lives in `@/types/test-attendance`.
@@ -24,7 +24,7 @@ import {
 import { readSchoolAttendance } from "@/lib/test-attendance-warehouse";
 import { getNvsTestSets } from "@/lib/test-set-list";
 
-/** The test set list and the windows of its Papers. Throws when a source fails. */
+/** The NVS Monthly Tests (from `session`) and the windows of their Papers. Throws when a source fails. */
 async function loadTestSets(): Promise<{ testSets: TestSet[]; papers: PaperWindow[] }> {
   const testSets = await getNvsTestSets();
   const papers = await readPaperWindows([...new Set(testSets.flatMap((set) => set.quizIds))]);
@@ -84,6 +84,7 @@ export async function loadSchoolTestAttendance(
     userId: String(student.user_id),
     name: [student.first_name, student.last_name].filter(Boolean).join(" "),
     studentId: student.student_id ?? null,
+    apaarId: student.apaar_id?.trim() || null,
     grade: Number(student.grade),
     examPreparingFor: examPreparingFor(student.stream),
   }));

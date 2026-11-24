@@ -4,8 +4,8 @@ import { CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID } from "@/lib/constants";
 import type { PaperWindow } from "@/types/test-attendance";
 
 // The loader with each source stubbed at its module edge: the roster, the
-// joining-date read (`query()`), the PMU test set list, the Paper windows and
-// the warehouse attendance read.
+// joining-date read (`query()`), the NVS Monthly Tests (`getNvsTestSets`),
+// the Paper windows and the warehouse attendance read.
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   getSchoolRoster: vi.fn(),
@@ -29,6 +29,7 @@ const rosterRow = (overrides: Record<string, unknown>) => ({
   first_name: "Nisha",
   last_name: "Rao",
   student_id: "NVS001",
+  apaar_id: "123456789012",
   grade: 11,
   stream: "Engineering",
   status: "enrolled",
@@ -38,8 +39,8 @@ const rosterRow = (overrides: Record<string, unknown>) => ({
 });
 
 const ROSTER = [
-  rosterRow({ user_id: "10", first_name: "Nisha", stream: "engineering" }),
-  rosterRow({ user_id: "11", first_name: "Ravi", last_name: null, student_id: null, grade: 12, stream: "Commerce" }),
+  rosterRow({ user_id: "10", first_name: "Nisha", apaar_id: " 123456789012 ", stream: "engineering" }),
+  rosterRow({ user_id: "11", first_name: "Ravi", last_name: null, student_id: null, apaar_id: "   ", grade: 12, stream: "Commerce" }),
   // Not listed: a CoE Student, an NVS dropout and a Grade 13 NVS Student.
   rosterRow({ user_id: "12", first_name: "Chetan", program_id: 1, student_program_ids: [1] }),
   rosterRow({ user_id: "13", first_name: "Deepa", status: "dropout" }),
@@ -99,16 +100,38 @@ describe("loadTestAttendance", () => {
         userId: "10",
         name: "Nisha Rao",
         studentId: "NVS001",
+        apaarId: "123456789012",
         grade: 11,
         examPreparingFor: "Engineering",
         attendance: { october: "submitted", november: "opened" },
       },
       // Joined NVS on 20 Oct, after October closed: counted for no Monthly
       // Test of Grade 12 (November has no Grade 12 Paper).
-      { userId: "11", name: "Ravi", studentId: null, grade: 12, examPreparingFor: null, attendance: {} },
+      { userId: "11", name: "Ravi", studentId: null, apaarId: null, grade: 12, examPreparingFor: null, attendance: {} },
     ]);
     expect(data.lastRefreshed).toBe("2026-11-18T08:00:00.000Z");
     expect(data.serverTime).toBe(NOW.toISOString());
+  });
+
+  it("trims APAAR IDs and maps empty or missing values to null", async () => {
+    mocks.getSchoolRoster.mockResolvedValue({
+      students: [
+        rosterRow({ user_id: "20", apaar_id: " 987654321098 " }),
+        rosterRow({ user_id: "21", apaar_id: "" }),
+        rosterRow({ user_id: "22", apaar_id: "   " }),
+        rosterRow({ user_id: "23", apaar_id: null }),
+      ],
+      issues: [],
+    });
+
+    const data = await loadTestAttendance("7", NOW);
+
+    expect(data.students.map((student) => [student.userId, student.apaarId])).toEqual([
+      ["20", "987654321098"],
+      ["21", null],
+      ["22", null],
+      ["23", null],
+    ]);
   });
 
   it("asks the warehouse only about the listed Students and the opened Monthly Tests' Papers", async () => {
@@ -119,7 +142,7 @@ describe("loadTestAttendance", () => {
   });
 
   it.each([
-    ["the PMU test set list", () => mocks.getNvsTestSets.mockRejectedValue(new Error("Firestore answered 403"))],
+    ["the Monthly Tests read", () => mocks.getNvsTestSets.mockRejectedValue(new Error("connection terminated unexpectedly"))],
     ["the session read", () => mocks.readPaperWindows.mockRejectedValue(new Error("statement timeout"))],
     ["the roster read", () => mocks.getSchoolRoster.mockRejectedValue(new Error("connection refused"))],
     ["the joining-date read", () => mocks.query.mockRejectedValue(new Error("canceling statement"))],

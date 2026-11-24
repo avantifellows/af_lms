@@ -38,7 +38,7 @@ const OCTOBER = {
 };
 
 function student(userId: string, attendance: TestAttendanceStudent["attendance"]): TestAttendanceStudent {
-  return { userId, name: `Student ${userId}`, studentId: null, grade: 11, examPreparingFor: "Engineering", attendance };
+  return { userId, name: `Student ${userId}`, studentId: null, apaarId: null, grade: 11, examPreparingFor: "Engineering", attendance };
 }
 
 function response(students: TestAttendanceStudent[]): TestAttendanceResponse {
@@ -181,18 +181,18 @@ describe("runTestAttendanceCheck: a source that cannot be read fails the run", (
     await expect(run).rejects.toThrow("Unrecognized name: has_submitted");
   });
 
-  it("fails when the PMU test set list is unavailable", async () => {
+  it("fails when the Monthly Tests cannot be read", async () => {
     const run = runTestAttendanceCheck(
       sources({
         testSets: async () => {
-          throw new Error("PMU test set list unavailable");
+          throw new Error("Monthly Tests unavailable");
         },
         schoolAttendance: okAttendance,
         submittedResults: async () => [],
       }),
       NOW,
     );
-    await expect(run).rejects.toThrow("PMU test set list unavailable");
+    await expect(run).rejects.toThrow("Monthly Tests unavailable");
   });
 
   it("fails when the Student listing cannot be read", async () => {
@@ -388,7 +388,7 @@ describe("formatCheckReport", () => {
         "Exam Preparing For: 3 listed Students have an unrecognised value (shown as Not set): Commerce 2, Arts 1",
         "No joining date: 2 listed Students (counted for every Monthly Test of their grade)",
         "",
-        "session rows: 5 quiz ids in the test set list",
+        "session rows: 5 quiz ids in Monthly Tests",
         "  Missing a session row, grade or time (1):",
         "    sep-g12 (September): opening time, closing time",
         "  Switched off, skipped by the tab (1): aug-g11 (August)",
@@ -415,7 +415,7 @@ describe("formatCheckReport", () => {
         "Exam Preparing For: 0 listed Students have an unrecognised value (shown as Not set)",
         "No joining date: 0 listed Students (counted for every Monthly Test of their grade)",
         "",
-        "session rows: 5 quiz ids in the test set list",
+        "session rows: 5 quiz ids in Monthly Tests",
         "  Every one has a session row with a grade and both times.",
         "  Switched off, skipped by the tab (0): none",
         "",

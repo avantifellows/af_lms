@@ -18,11 +18,11 @@ const november: TestAttendanceMonthlyTest = {
 const monthlyTests = [october, november];
 
 const students: TestAttendanceStudent[] = [
-  { userId: "1", name: "Zara Khan", studentId: "NVS1", grade: 11, examPreparingFor: "Engineering", attendance: { october: "submitted", november: "submitted" } },
-  { userId: "2", name: "Arun Mehta", studentId: "NVS2", grade: 11, examPreparingFor: null, attendance: { october: "not_opened", november: "not_opened" } },
-  { userId: "3", name: "Bina Shah", studentId: "NVS3", grade: 11, examPreparingFor: "Medical", attendance: { october: "opened", november: "opened" } },
-  { userId: "4", name: "Charu Pal", studentId: "NVS4", grade: 11, examPreparingFor: "NDA", attendance: { october: "submitted", november: "not_opened" } },
-  { userId: "5", name: "Ekta Jain", studentId: "NVS5", grade: 12, examPreparingFor: "CLAT", attendance: { october: "not_opened" } },
+  { userId: "1", name: "Zara Khan", studentId: "NVS1", apaarId: "111122223333", grade: 11, examPreparingFor: "Engineering", attendance: { october: "submitted", november: "submitted" } },
+  { userId: "2", name: "Arun Mehta", studentId: "NVS2", apaarId: null, grade: 11, examPreparingFor: null, attendance: { october: "not_opened", november: "not_opened" } },
+  { userId: "3", name: "Bina Shah", studentId: "NVS3", apaarId: "333344445555", grade: 11, examPreparingFor: "Medical", attendance: { october: "opened", november: "opened" } },
+  { userId: "4", name: "Charu Pal", studentId: null, apaarId: "444455556666", grade: 11, examPreparingFor: "NDA", attendance: { october: "submitted", november: "not_opened" } },
+  { userId: "5", name: "Ekta Jain", studentId: "NVS5", apaarId: "555566667777", grade: 12, examPreparingFor: "CLAT", attendance: { october: "not_opened" } },
 ];
 
 function renderMonth(test: TestAttendanceMonthlyTest, list: TestAttendanceStudent[] = students) {
@@ -102,8 +102,8 @@ describe("MonthPage — Students list", () => {
     ]);
     expect(listFilter("Yet to start")).toHaveAttribute("aria-pressed", "true");
     expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"],
-      ["Charu Pal", "11", "NDA", "Yet to start", ""],
+      ["Arun Mehta", "NVS2", "—", "11", "Not set", "Yet to start", "Missed Oct"],
+      ["Charu Pal", "—", "444455556666", "11", "NDA", "Yet to start", ""],
     ]);
   });
 
@@ -118,8 +118,8 @@ describe("MonthPage — Students list", () => {
     ]);
     expect(listFilter("Absent")).toHaveAttribute("aria-pressed", "true");
     expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Absent", ""],
-      ["Ekta Jain", "12", "CLAT", "Absent", ""],
+      ["Arun Mehta", "NVS2", "—", "11", "Not set", "Absent", ""],
+      ["Ekta Jain", "NVS5", "555566667777", "12", "CLAT", "Absent", ""],
     ]);
   });
 
@@ -128,7 +128,7 @@ describe("MonthPage — Students list", () => {
     await user.click(listFilter("In progress"));
 
     expect(listFilter("In progress")).toHaveAttribute("aria-pressed", "true");
-    expect(studentRows()).toEqual([["Bina Shah", "11", "Medical", "In progress", "Not submitted Oct"]]);
+    expect(studentRows()).toEqual([["Bina Shah", "NVS3", "333344445555", "11", "Medical", "In progress", "Not submitted Oct"]]);
   });
 
   it("shows every counted Student under All", async () => {
@@ -136,11 +136,11 @@ describe("MonthPage — Students list", () => {
     await user.click(listFilter("All"));
 
     expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Absent", ""],
-      ["Bina Shah", "11", "Medical", "Opened, not submitted", ""],
-      ["Charu Pal", "11", "NDA", "Submitted", ""],
-      ["Zara Khan", "11", "Engineering", "Submitted", ""],
-      ["Ekta Jain", "12", "CLAT", "Absent", ""],
+      ["Arun Mehta", "NVS2", "—", "11", "Not set", "Absent", ""],
+      ["Bina Shah", "NVS3", "333344445555", "11", "Medical", "Opened, not submitted", ""],
+      ["Charu Pal", "—", "444455556666", "11", "NDA", "Submitted", ""],
+      ["Zara Khan", "NVS1", "111122223333", "11", "Engineering", "Submitted", ""],
+      ["Ekta Jain", "NVS5", "555566667777", "12", "CLAT", "Absent", ""],
     ]);
   });
 
@@ -150,15 +150,25 @@ describe("MonthPage — Students list", () => {
     expect(screen.getByText("No Students in this list.")).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Students" })).not.toBeInTheDocument();
     await user.click(listFilter("Submitted"));
-    expect(studentRows()).toEqual([["Zara Khan", "11", "Engineering", "Submitted", ""]]);
+    expect(studentRows()).toEqual([["Zara Khan", "NVS1", "111122223333", "11", "Engineering", "Submitted", ""]]);
   });
 
-  it("has the columns Student, Grade, Exam Preparing For, Status and Previous 3 tests", () => {
+  it("has the columns Student, Student ID, APAAR ID, Grade, Exam Preparing For, Status and Previous 3 tests", () => {
     renderMonth(november);
 
-    expect(
-      within(screen.getByRole("table", { name: "Students" })).getAllByRole("columnheader").map((th) => th.textContent),
-    ).toEqual(["Student", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"]);
+    const table = screen.getByRole("table", { name: "Students" });
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "Student",
+      "Student ID",
+      "APAAR ID",
+      "Grade",
+      "Exam Preparing For",
+      "Status",
+      "Previous 3 tests",
+    ]);
+    const firstRowCells = within(within(table).getAllByRole("row")[1]).getAllByRole("cell");
+    expect(firstRowCells[1]).toHaveClass("font-mono", "whitespace-nowrap");
+    expect(firstRowCells[2]).toHaveClass("font-mono", "whitespace-nowrap");
   });
 
   it("notes the earlier tests a Student missed or did not submit, red with a miss and amber without", async () => {
@@ -167,10 +177,10 @@ describe("MonthPage — Students list", () => {
 
     // November's window is October, the one closed Monthly Test before it.
     expect(studentRows()).toEqual([
-      ["Arun Mehta", "11", "Not set", "Yet to start", "Missed Oct"],
-      ["Bina Shah", "11", "Medical", "In progress", "Not submitted Oct"],
-      ["Charu Pal", "11", "NDA", "Yet to start", ""],
-      ["Zara Khan", "11", "Engineering", "Submitted", ""],
+      ["Arun Mehta", "NVS2", "—", "11", "Not set", "Yet to start", "Missed Oct"],
+      ["Bina Shah", "NVS3", "333344445555", "11", "Medical", "In progress", "Not submitted Oct"],
+      ["Charu Pal", "—", "444455556666", "11", "NDA", "Yet to start", ""],
+      ["Zara Khan", "NVS1", "111122223333", "11", "Engineering", "Submitted", ""],
     ]);
     const table = screen.getByRole("table", { name: "Students" });
     expect(within(table).getByText("Missed Oct")).toHaveClass("text-danger");
@@ -181,7 +191,7 @@ describe("MonthPage — Students list", () => {
     const { user } = renderMonth(october);
     await user.click(listFilter("All"));
 
-    expect(studentRows().map((row) => row[4])).toEqual(["", "", "", "", ""]);
+    expect(studentRows().map((row) => row[6])).toEqual(["", "", "", "", ""]);
   });
 
   it("shows 25 rows, then all of them after Show all, and 25 again after the list filter changes", async () => {
@@ -189,6 +199,7 @@ describe("MonthPage — Students list", () => {
       userId: String(100 + i),
       name: `Student ${String(i + 1).padStart(2, "0")}`,
       studentId: null,
+      apaarId: null,
       grade: 11,
       examPreparingFor: "Engineering",
       attendance: { november: i < 28 ? "not_opened" : "submitted" },
@@ -213,10 +224,10 @@ describe("MonthPage — Students list", () => {
 
     const cards = within(screen.getByRole("list", { name: "Students" })).getAllByRole("listitem");
     expect(cards.map((card) => card.textContent)).toEqual([
-      "Arun MehtaYet to startGrade 11 · Not setPrevious 3 tests: Missed Oct",
-      "Bina ShahIn progressGrade 11 · MedicalPrevious 3 tests: Not submitted Oct",
-      "Charu PalYet to startGrade 11 · NDA",
-      "Zara KhanSubmittedGrade 11 · Engineering",
+      "Arun MehtaYet to startStudent ID NVS2 · APAAR —Grade 11 · Not setPrevious 3 tests: Missed Oct",
+      "Bina ShahIn progressStudent ID NVS3 · APAAR 333344445555Grade 11 · MedicalPrevious 3 tests: Not submitted Oct",
+      "Charu PalYet to startStudent ID — · APAAR 444455556666Grade 11 · NDA",
+      "Zara KhanSubmittedStudent ID NVS1 · APAAR 111122223333Grade 11 · Engineering",
     ]);
   });
 

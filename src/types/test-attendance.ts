@@ -58,6 +58,7 @@ export interface ListedStudent {
   userId: string;
   name: string;
   studentId: string | null;
+  apaarId: string | null;
   grade: number;
   examPreparingFor: ExamPreparingFor | null;
 }
@@ -81,7 +82,7 @@ export interface TestAttendanceResponse {
   serverTime: string;
 }
 
-/** One entry of the PMU test set list: a Monthly Test's name and its Papers. */
+/** One NVS Monthly Test: its name (the month it starts in) and its Papers (quiz ids). */
 export interface TestSet {
   label: string;
   quizIds: string[];

@@ -78,6 +78,7 @@ export function testAttendanceSheet(
       header: [
         "Student Name",
         "Student ID",
+        "APAAR ID",
         "Grade",
         "Exam Preparing For",
         ...columns.map((test) => test.shortName),
@@ -90,6 +91,7 @@ export function testAttendanceSheet(
         return [
           student.name,
           student.studentId ?? "",
+          student.apaarId ?? "",
           student.grade,
           examText(student.examPreparingFor),
           ...columns.map((test) => {
@@ -109,10 +111,11 @@ export function testAttendanceSheet(
   return {
     name: excelSheetName(test.name),
     periodSlug: test.key,
-    header: ["Student Name", "Student ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"],
+    header: ["Student Name", "Student ID", "APAAR ID", "Grade", "Exam Preparing For", "Status", "Previous 3 tests"],
     rows: monthStudents(students, test, list as MonthListFilter, data.monthlyTests).map(({ student, status, previous }) => [
       student.name,
       student.studentId ?? "",
+      student.apaarId ?? "",
       student.grade,
       examText(student.examPreparingFor),
       status,

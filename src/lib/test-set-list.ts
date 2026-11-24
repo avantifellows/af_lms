@@ -1,93 +1,87 @@
-// The PMU test set list (#517, ADR 0012): which Papers form each NVS Monthly
-// Test, and its name. Server-only. The PMU team keeps the list for Live
-// Tracking in Firestore (`pmu_live_tracking_sessions/nvs`, field
-// `test_sets: [{label, quiz_ids, current}]`); this is the only module that
-// knows that, so a future PMU calendar can replace it behind the same function.
-// Read through the Firestore REST API with the BigQuery service account; the
-// Firestore SDK is deliberately not a dependency.
+// NVS Monthly Tests (#517, ADR 0014): which Papers form each Monthly Test, and
+// its name. Server-only (Postgres). A Paper belongs to a Monthly Test when its
+// `session` row is a System-wide Mandated Test for Grade 11 or 12 in the NVS
+// auth group, switched on, and starts in the current academic year; Papers
+// are grouped by the IST calendar month they start in, and the Monthly Test is
+// named after that month. This is the only module that knows the rule, so a
+// future PMU calendar can replace it behind the same function.
+//
+// Checked on production, 20 Nov 2026: the rule finds exactly the switched-on
+// Papers of the PMU Firestore list it replaces (60 Papers, July to November),
+// each in the same month.
 
-import { GoogleAuth } from "google-auth-library";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { query } from "@/lib/db";
+import { TEST_ATTENDANCE_GRADES, type TestSet } from "@/types/test-attendance";
 
-import type { TestSet } from "@/types/test-attendance";
-import { ttlCache } from "@/lib/ttl-cache";
+/** `session.meta_data.group` of NVS sessions. */
+export const NVS_AUTH_GROUP = "EnableStudents";
+/** `session.meta_data.test_purpose` of a System-wide Mandated Test. */
+export const MANDATED_TEST_PURPOSE = "system_wide_mandated";
 
-const DOCUMENT_PATH = "pmu_live_tracking_sessions/nvs";
-const FIRESTORE_SCOPE = "https://www.googleapis.com/auth/datastore";
-const READ_TIMEOUT_MS = 10_000;
-
-// Live Tracking accepts the same 5-minute delay. A failed read is not kept.
-const cached = ttlCache<TestSet[]>(5 * 60 * 1000, 1);
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 /**
- * The service account from GOOGLE_SERVICE_ACCOUNT_JSON when set; otherwise
- * Google's default lookup, which reads GOOGLE_APPLICATION_CREDENTIALS itself.
+ * The academic year "2026-2027" as IST wall-clock bounds: 1 Apr 2026 (in) to
+ * 1 Apr 2027 (out). `session.start_time` holds IST wall clock, so the bounds
+ * are compared as wall clock too.
  */
-function googleAuth(): { auth: GoogleAuth; projectId?: string } {
-  const credentialsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!credentialsJson) return { auth: new GoogleAuth({ scopes: [FIRESTORE_SCOPE] }) };
-  let credentials;
-  try {
-    credentials = JSON.parse(credentialsJson);
-  } catch {
-    // Not the parser's message: it quotes the start of the value, a secret.
-    // The e2e server sets " ", so this is the path it takes.
-    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON");
+export function academicYearBounds(academicYear: string = CURRENT_ACADEMIC_YEAR): { from: string; to: string } {
+  const match = /^(\d{4})-(\d{4})$/.exec(academicYear);
+  if (!match || Number(match[2]) !== Number(match[1]) + 1) {
+    throw new Error(`Unexpected academic year: ${academicYear}`);
   }
-  return {
-    auth: new GoogleAuth({ credentials, scopes: [FIRESTORE_SCOPE] }),
-    projectId: credentials.project_id,
-  };
+  return { from: `${match[1]}-04-01 00:00:00`, to: `${match[2]}-04-01 00:00:00` };
 }
 
-type FirestoreValue = {
-  stringValue?: unknown;
-  arrayValue?: { values?: FirestoreValue[] };
-  mapValue?: { fields?: Record<string, FirestoreValue> };
-};
-
-const asString = (value: FirestoreValue | undefined) =>
-  typeof value?.stringValue === "string" ? value.stringValue.trim() : "";
-
-/** Trims labels and quiz ids, de-duplicates ids, drops empty sets; `current` is ignored. */
-function parseTestSets(body: unknown): TestSet[] {
-  const testSets = (body as { fields?: Record<string, FirestoreValue> } | null)?.fields?.test_sets;
-  if (!testSets?.arrayValue || typeof testSets.arrayValue !== "object") {
-    throw new Error("test_sets is missing or not a list");
-  }
-  const sets: TestSet[] = [];
-  for (const entry of testSets.arrayValue.values ?? []) {
-    const fields = entry?.mapValue?.fields;
-    const label = asString(fields?.label);
-    const quizIds = [...new Set((fields?.quiz_ids?.arrayValue?.values ?? []).map(asString).filter(Boolean))];
-    if (label && quizIds.length > 0) sets.push({ label, quizIds });
-  }
-  return sets;
-}
-
-async function readTestSets(): Promise<TestSet[]> {
-  const { auth, projectId: configuredProjectId } = googleAuth();
-  const projectId = configuredProjectId || (await auth.getProjectId()) || "avantifellows";
-  const token = await auth.getAccessToken();
-  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/${DOCUMENT_PATH}`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`Firestore answered ${response.status}`);
-  return parseTestSets(await response.json());
+interface PaperRow {
+  platform_id: string;
+  /** IST calendar month the Paper starts in, `YYYY-MM`. */
+  month: string;
 }
 
 /**
- * The NVS test sets as `{label, quizIds}` in list order. Throws when the list
- * cannot be read (logging only the error message). Cached in process for 5
- * minutes; a failed read is not kept.
+ * Groups Papers (already ordered by start time) into Monthly Tests, one per
+ * start month, oldest first. A quiz id goes to the month of its earliest row.
+ */
+export function testSetsFrom(rows: PaperRow[]): TestSet[] {
+  const byMonth = new Map<string, string[]>();
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const quizId = row.platform_id.trim();
+    if (!quizId || seen.has(quizId)) continue;
+    seen.add(quizId);
+    const list = byMonth.get(row.month) ?? [];
+    list.push(quizId);
+    byMonth.set(row.month, list);
+  }
+  return [...byMonth]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, quizIds]) => ({ label: MONTH_NAMES[Number(month.slice(5, 7)) - 1], quizIds }));
+}
+
+/**
+ * The NVS Monthly Tests of the current academic year as `{label, quizIds}`,
+ * oldest month first. Throws when the `session` read fails.
  */
 export async function getNvsTestSets(): Promise<TestSet[]> {
-  try {
-    return await cached("nvs", readTestSets);
-  } catch (error) {
-    console.error("PMU test set list unavailable:", error instanceof Error ? error.message : "unknown error");
-    throw error;
-  }
+  const { from, to } = academicYearBounds();
+  const rows = await query<PaperRow>(
+    `SELECT platform_id,
+            to_char(start_time, 'YYYY-MM') AS month
+       FROM session
+      WHERE meta_data->>'test_purpose' = $1
+        AND meta_data->>'group' = $2
+        AND meta_data->>'grade' = ANY($3::text[])
+        AND is_active = true
+        AND start_time >= $4::timestamp
+        AND start_time < $5::timestamp
+        AND COALESCE(btrim(platform_id), '') <> ''
+      ORDER BY start_time, platform_id`,
+    [MANDATED_TEST_PURPOSE, NVS_AUTH_GROUP, TEST_ATTENDANCE_GRADES.map(String), from, to],
+  );
+  return testSetsFrom(rows);
 }

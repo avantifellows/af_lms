@@ -222,7 +222,7 @@ function useTestAttendance(schoolUdise: string) {
   return { state, period, setPeriod, retry, refresh };
 }
 
-/** A School with no Monthly Tests in the PMU test set list yet: the Enrolled count only. */
+/** A School with no Monthly Test opened yet: the Enrolled count only. */
 function NoMonthlyTests({ enrolled }: { enrolled: number }) {
   return (
     <>

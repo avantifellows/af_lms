@@ -26,7 +26,7 @@ export interface SubmittedResult {
 export interface CheckSources {
   /** Every NVS (JNV) School. */
   nvsSchools(): Promise<Array<{ id: string; code: string }>>;
-  /** The PMU test set list. Throws when it cannot be read. */
+  /** The NVS Monthly Tests (from `session`). Throws when they cannot be read. */
   testSets(): Promise<TestSet[]>;
   /** Paper windows from `session` for these quiz ids. */
   paperWindows(quizIds: string[]): Promise<PaperWindow[]>;
@@ -71,7 +71,11 @@ export interface CheckReport {
   examPreparingFor: { unrecognised: number; values: Array<{ value: string; count: number }> };
   /** Listed Students with no NVS joining date (counted for every Monthly Test of their grade). */
   noJoiningDate: number;
-  /** The `session` rows of every quiz id in the test set list. */
+  /**
+   * The `session` rows of every quiz id in the Monthly Tests. Now that Monthly
+   * Tests come from active `session` rows (ADR 0014), this should always pass
+   * except if a Paper has no closing time; kept as a sanity check.
+   */
   papers: {
     quizIds: number;
     /** Quiz ids with no `session` row, or one without a grade or a time. */
@@ -175,6 +179,11 @@ function uniqueQuizIds(testSets: TestSet[]): { quizId: string; testSet: string }
   return [...seen].map(([quizId, testSet]) => ({ quizId, testSet }));
 }
 
+/**
+ * Checks `session` row completeness for the quiz ids in the Monthly Tests.
+ * Now that Monthly Tests come from active `session` rows (ADR 0014), this
+ * should always pass unless a row lacks a closing time.
+ */
 function paperRows(testSets: TestSet[], papers: PaperWindow[]): CheckReport["papers"] {
   const byQuizId = new Map(papers.map((paper) => [paper.quizId, paper]));
   const quizIds = uniqueQuizIds(testSets);
@@ -233,7 +242,7 @@ export function formatCheckReport(report: CheckReport): string {
     `Exam Preparing For: ${report.examPreparingFor.unrecognised} listed Students have an unrecognised value (shown as Not set)${values ? `: ${values}` : ""}`,
     `No joining date: ${report.noJoiningDate} listed Students (counted for every Monthly Test of their grade)`,
     "",
-    `session rows: ${report.papers.quizIds} quiz ids in the test set list`,
+    `session rows: ${report.papers.quizIds} quiz ids in Monthly Tests`,
   );
   if (report.papers.incomplete.length === 0) {
     lines.push("  Every one has a session row with a grade and both times.");

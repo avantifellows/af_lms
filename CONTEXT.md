@@ -823,7 +823,7 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A new mention of an existing **Visit Concern** attaches to it rather than creating a new one, so its **Concern Resolution** history stays with it
 - A resolved **Visit Concern** reopens automatically when a **Visit** dated after its resolution mentions it again; a Visit dated on or before the resolution never reopens it
 - The **Test Attendance Tab** is for JNV NVS only; a **PMU Manager**, a **PMU Govt School User**, and an **Admin** can view it, and nobody edits anything on it
-- A **Monthly Test** has many **Papers**; which Papers belong to it and its name come from the PMU's test set list, while each Paper's grade and opening and closing times come from the LMS `session` table
+- A **Monthly Test** has many **Papers**; both which Papers belong to it (switched-on System-wide Mandated Test sessions in the `EnableStudents` auth group for grades 11 and 12 in the current academic year, grouped by IST start month and named after that month) and each Paper's grade and opening and closing times come from the LMS `session` table
 - A **Monthly Test** is running from the earliest opening time to the latest closing time among its **Papers**
 - **Exam Preparing For** does not decide which **Paper** a Student sits: a Student may open any Paper of the **Monthly Test**, and more than one
 - A Student has one **Test Attendance Status** per **Monthly Test**, the furthest state reached on any of its **Papers**; Submitted on one Paper makes the Student Submitted
@@ -833,7 +833,7 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A grade that had no **Paper** in a **Monthly Test** is left out of that Monthly Test
 - A Student is counted for a **Monthly Test** only if they joined JNV NVS on or before the day it closed (IST); a Student who joined while it was still running is counted for it, and one with no joining date on record is counted
 - A Student's joining date for this rule is their earliest JNV NVS batch enrollment in the academic year, so a later move between NVS batches does not remove earlier **Monthly Tests**
-- A **Monthly Test** appears on the **Test Attendance Tab** only once it is in the PMU's test set list; the list's "current" mark is ignored, and a switched-off **Paper** in a set is skipped
+- A **Monthly Test** appears on the **Test Attendance Tab** once at least one of its switched-on **Papers** has opened; switched-off sessions are skipped, and two rounds starting in the same month appear as one Monthly Test
 - The **Test Attendance Tab** covers grades 11 and 12; a Student with no **Exam Preparing For** is grouped under "Not set"
 - A **Follow Up Tag** or **Not Submitting Tag** always needs 2 misses; a Student counted for only one **Monthly Test** is never tagged, and a running Monthly Test never counts towards a tag
 - The submitted state on the **Test Attendance Tab** is read from the warehouse attendance table at the 15-minute cadence (etl-next#238); the tab launches only once that is in production

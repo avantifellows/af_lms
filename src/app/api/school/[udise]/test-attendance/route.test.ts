@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 // The read route through the real gate and permission layer: only the session,
-// the Postgres `query()` boundary, the PMU test set list (Firestore) and the
-// BigQuery client are stubbed, so the matrix, read_only, the PMU pin (ADR 0007),
-// School scope, the roster loader, the Paper windows read, the attendance read
-// and the rules run as in production.
+// the Postgres `query()` boundary, the NVS Monthly Tests reader (`getNvsTestSets`)
+// and the BigQuery client are stubbed, so the matrix, read_only, the PMU pin
+// (ADR 0007), School scope, the roster loader, the Paper windows read, the
+// attendance read and the rules run as in production.
 const { mockQuery, mockGetServerSession, mockGetNvsTestSets, mockBigQuery } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockGetServerSession: vi.fn(),
@@ -40,6 +40,7 @@ const rosterRow = (overrides: Record<string, unknown>) => ({
   last_name: "Rao",
   phone: "9876543210",
   student_id: "NVS001",
+  apaar_id: null,
   grade: 11,
   stream: "Engineering",
   status: "enrolled",
@@ -53,9 +54,9 @@ const rosterRow = (overrides: Record<string, unknown>) => ({
 // A mixed JNV School: NVS Students alongside CoE, Nodal, unassigned, NVS
 // dropouts and a Grade 13 NVS Student. Rows in the roster's grade/name order.
 const mixedRoster = [
-  rosterRow({ group_user_id: "gu-1", user_id: "10", first_name: "Nisha", last_name: "Rao", student_id: "NVS001", grade: 11, stream: "engineering" }),
+  rosterRow({ group_user_id: "gu-1", user_id: "10", first_name: "Nisha", last_name: "Rao", student_id: "NVS001", apaar_id: " 123456789012 ", grade: 11, stream: "engineering" }),
   rosterRow({ group_user_id: "gu-2", user_id: "11", first_name: "Chetan", last_name: "Coe", student_id: "COE001", grade: 11, program_id: 1, program_name: "JNV CoE", student_program_ids: [1] }),
-  rosterRow({ group_user_id: "gu-3", user_id: "12", first_name: "Ravi", last_name: "Das", student_id: "NVS003", grade: 11, stream: "Science" }),
+  rosterRow({ group_user_id: "gu-3", user_id: "12", first_name: "Ravi", last_name: "Das", student_id: "NVS003", apaar_id: "   ", grade: 11, stream: "Science" }),
   rosterRow({ group_user_id: "gu-4", user_id: "13", first_name: "Deepa", last_name: "Drop", student_id: "NVS004", grade: 12, status: "dropout", student_program_ids: [], dropout_program_ids: [64] }),
   // Marked dropout while an NVS batch is still current: the Active sheet drops them.
   rosterRow({ group_user_id: "gu-9", user_id: "18", first_name: "Arjun", last_name: "Stale", student_id: "NVS009", grade: 12, status: "dropout", student_program_ids: [64] }),
@@ -209,9 +210,9 @@ describe("GET /api/school/[udise]/test-attendance — success", () => {
     expect(await response.json()).toEqual({
       monthlyTests: [],
       students: [
-        { userId: "10", name: "Nisha Rao", studentId: "NVS001", grade: 11, examPreparingFor: "Engineering", attendance: {} },
-        { userId: "12", name: "Ravi Das", studentId: "NVS003", grade: 11, examPreparingFor: null, attendance: {} },
-        { userId: "14", name: "Maya Iyer", studentId: "NVS002", grade: 12, examPreparingFor: "Medical", attendance: {} },
+        { userId: "10", name: "Nisha Rao", studentId: "NVS001", apaarId: "123456789012", grade: 11, examPreparingFor: "Engineering", attendance: {} },
+        { userId: "12", name: "Ravi Das", studentId: "NVS003", apaarId: null, grade: 11, examPreparingFor: null, attendance: {} },
+        { userId: "14", name: "Maya Iyer", studentId: "NVS002", apaarId: null, grade: 12, examPreparingFor: "Medical", attendance: {} },
       ],
       lastRefreshed: null,
       serverTime: "2026-11-18T08:30:00.000Z",
@@ -352,9 +353,9 @@ describe("GET /api/school/[udise]/test-attendance — Monthly Tests", () => {
     ]);
   });
 
-  it("answers 500 when the PMU test set list is unavailable", async () => {
+  it("answers 500 when the Monthly Tests cannot be read", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockGetNvsTestSets.mockRejectedValue(new Error("Firestore answered 403"));
+    mockGetNvsTestSets.mockRejectedValue(new Error("connection terminated unexpectedly"));
 
     const response = await get();
 
