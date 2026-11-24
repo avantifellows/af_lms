@@ -834,7 +834,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Audience:** every Student in an active current-year Blended Learning Mapping (all
   programs). One exam is hard-coded: JEE Main 2027 = the `exam` row named "JEE Mains" +
   `exam_year` 2027 (`JEE_FORM_EXAM` in the client-safe `src/lib/blended-learning-jee-form-input.ts`).
-- **Tables:** db-service `20261110120000_add_blended_learning_jee_form_updates` (branch
+- **Tables:** db-service `20261124122211_add_blended_learning_jee_form_updates` (branch
   `feat/bl-jee-form`; deploy it before this code): append-only
   `blended_learning_jee_form_updates` (latest row per Student + exam + year is the status, the
   rest is history; `filled` carries `application_number` and an optional
@@ -843,7 +843,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `blended_learning_mentor_flags.jee_form_update_id` (recipient `jee_form`, no Conversation;
   `bl_mentor_flags_source_check`) and `blended_learning_action_items.completed_by_jee_form_update_id`
   (a done item is completed by a Conversation XOR a JEE form update). Mirrored for e2e by
-  `e2e/fixtures/migrations/20261110120000_add_blended_learning_jee_form_updates.sql`, with
+  `e2e/fixtures/migrations/20261124122211_add_blended_learning_jee_form_updates.sql`, with
   `20260528120000_add_lms_student_documents.sql`, `20261015120000_…exam_details.sql` and
   `20261019120000_…sessions_applied.sql` for the tables db-dump.sql predates (all pg_dump-identical),
   and `20261116090707_add_exam_password_ciphertext_and_reveals.sql` (db-service `20261116085521` +
