@@ -929,7 +929,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   legacy key only as the literal null) and never
   read the DB Service's response body (it contains the legacy password); failures log the status
   only. Nothing logs a password or ciphertext (error names only). E2E encrypts against a fake KMS in
-  the DB Service stub (`EXAM_PASSWORD_KMS_ENDPOINT`, e2e only).
+  the DB Service stub (`EXAM_PASSWORD_KMS_ENDPOINT`, e2e only; in production only a localhost
+  endpoint is honoured, see `context/student-addition.md`).
 - **Current number from the exam record:** for a Filled current status, the tab's rows, the
   Student's form (the POST's `form`, `getJeeForm`) and the Mentee page's status line show the
   application number of the Student's JEE Mains 2027 `student_exam_record` (`listSavedRecords`, one
