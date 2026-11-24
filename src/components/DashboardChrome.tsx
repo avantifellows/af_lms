@@ -17,6 +17,8 @@ export type DashboardFeatures = {
   hasPMAccess: boolean;
   canViewVisitSummary: boolean;
   showCurriculumSummary: boolean;
+  /** The alumni feature (admins); opens /alumni (ADR 0008). */
+  showAlumni: boolean;
   canViewHolisticAdmin: boolean;
 };
 
@@ -34,12 +36,13 @@ export function DashboardHeader({ email, permission, totalCount, features }: {
   features: DashboardFeatures;
 }) {
   return <header className="bg-bg-card border-b border-border shadow-sm">
-    <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center gap-y-2">
-      <div className="flex items-center gap-3 sm:gap-6 min-w-0">
+    {/* One row on a wide screen (a long email is cut short); wraps on smaller ones. */}
+    <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap lg:flex-nowrap justify-between items-center gap-x-4 gap-y-2">
+      <div className="flex items-center gap-3 sm:gap-5 min-w-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10 shrink-0" />
         <div className="hidden sm:block border-l border-border pl-4">
-          <p className="text-xs text-text-muted uppercase tracking-wide">{permissionLabel(permission, totalCount)}</p>
+          <p className="text-xs text-text-muted uppercase tracking-wide whitespace-nowrap">{permissionLabel(permission, totalCount)}</p>
         </div>
         <DashboardNavigation features={features} />
       </div>
@@ -49,8 +52,8 @@ export function DashboardHeader({ email, permission, totalCount, features }: {
 }
 
 function DashboardNavigation({ features }: { features: DashboardFeatures }) {
-  if (!features.hasPMAccess && !features.canViewVisitSummary && !features.showCurriculumSummary) return null;
-  return <nav className="flex gap-3 sm:gap-4">
+  if (!features.hasPMAccess && !features.canViewVisitSummary && !features.showCurriculumSummary && !features.showAlumni) return null;
+  return <nav className="flex gap-3 sm:gap-4 whitespace-nowrap">
     <Link href="/dashboard" className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1">
       Home
     </Link>
@@ -62,6 +65,10 @@ function DashboardNavigation({ features }: { features: DashboardFeatures }) {
       className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1">
       Curriculum Summary
     </Link>}
+    {features.showAlumni && <Link href="/alumni"
+      className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1">
+      Alumni
+    </Link>}
   </nav>;
 }
 
@@ -70,12 +77,12 @@ function DashboardAccountLinks({ email, isAdmin, canViewHolisticAdmin }: {
   isAdmin: boolean;
   canViewHolisticAdmin: boolean;
 }) {
-  return <div className="flex items-center gap-3 sm:gap-4">
+  return <div className="flex items-center gap-3 sm:gap-4 min-w-0 whitespace-nowrap">
     {canViewHolisticAdmin && <Link href="/admin/holistic-mentorship" className="text-sm font-bold text-accent hover:text-accent-hover">
       Holistic Mentorship
     </Link>}
     {isAdmin && <Link href="/admin" className="text-sm font-bold text-accent hover:text-accent-hover uppercase">Admin</Link>}
-    <span className="text-sm text-text-muted font-mono hidden sm:inline">{email}</span>
+    <span className="text-sm text-text-muted font-mono hidden sm:inline truncate max-w-[14rem]" title={email}>{email}</span>
     <Link href="/api/auth/signout" className="text-sm font-bold text-danger hover:text-danger/80">Sign out</Link>
   </div>;
 }

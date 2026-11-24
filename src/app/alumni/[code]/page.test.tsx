@@ -51,7 +51,8 @@ describe("Alumni school page", () => {
 
   it("shows the school's alumni lists to an alumni manager in scope", async () => {
     render(await open());
-    expect(screen.getByRole("heading", { name: "RSMS Bathinda · Alumni" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "RSMS Bathinda" })).toBeInTheDocument();
+    expect(screen.getByText("School 1 · Alumni")).toBeInTheDocument();
     expect(screen.getByTestId("alumni-tab")).toHaveTextContent("tab for 1");
     expect(screen.getByRole("link", { name: /All schools/ })).toHaveAttribute("href", "/alumni");
     expect(screen.getByTestId("alumni-tab")).toHaveAttribute("data-can-edit", "true");

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import AlumniForm from "./AlumniForm";
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), info: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 // The college/branch search has its own test; here it's a plain text box.
 vi.mock("./ReferencePicker", () => ({
   default: ({ id, code, onChange }: { id: string; code: string; onChange: (code: string, name: string) => void }) => (
@@ -13,6 +13,8 @@ vi.mock("./ReferencePicker", () => ({
 import { toast } from "sonner";
 
 const fetchMock = vi.fn();
+/** The history panel's load while history is off (it then renders nothing). */
+const HISTORY_OFF = { enabled: false, entries: [] };
 type Ctx = Record<string, unknown>;
 
 function context(overrides: Ctx = {}): Ctx {
@@ -38,7 +40,8 @@ const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json:
 
 /** GET returns `ctx`; each POST takes the next reply from `posts`. */
 function server(ctx: Ctx, posts: Array<ReturnType<typeof json> | Error> = []) {
-  fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/journey")) return json(HISTORY_OFF);
     if (init?.method !== "POST") return json(ctx);
     const next = posts.shift();
     if (next instanceof Error) throw next;
@@ -190,6 +193,84 @@ describe("AlumniForm", () => {
     expect(postedBody().version).toBe("v1");
   });
 
+  it("has no call remark while alumni history is off", async () => {
+    server(context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version: "v1" }));
+    render(<AlumniForm entry={ALUMNUS} />);
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+    expect(screen.queryByLabelText("Call remark")).not.toBeInTheDocument();
+  });
+
+  it("sends a call remark; Other needs its text first", async () => {
+    server(
+      context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version: "v1", journeyEnabled: true }),
+      [json({ ok: true, action: "updated", alumniId: "8340", changed: [], notCleared: [], version: "v2", remark: "Other: Moved abroad" })],
+    );
+    render(<AlumniForm entry={ALUMNUS} />);
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+
+    select("Call remark", "Other");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Write the remark.")).toBeInTheDocument();
+    expect(posts()).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Remark"), { target: { value: "Moved abroad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(postedBody().remark).toEqual({ option: "Other", details: "Moved abroad" });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/Remark saved/), expect.anything()));
+    // A remark alone leaves the record's version as it was; the history still reloads.
+    const historyLoads = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/journey")).length;
+    await waitFor(() => expect(historyLoads()).toBe(2));
+  });
+
+  it("version history: opens on the right, shows an old version read-only with its changes marked, and restores it", async () => {
+    const edit = context({
+      kind: "edit",
+      ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" },
+      version: "v2",
+      journeyEnabled: true,
+      alumni: { ug_status: "Graduated", current_status: "Employed" },
+    });
+    const entries = [
+      {
+        id: "9", reportedOn: "2026-11-20", recordedAt: "2026-11-20T05:00:00Z", source: "call", recordedBy: "b@x", notes: "",
+        changes: [{ column: "ug_status", label: "Undergraduate (UG) status", before: "Studying", after: "Graduated" }],
+        matchesCurrent: true, values: { ug_status: "Graduated", current_status: "Employed" }, names: {},
+      },
+      {
+        id: "4", reportedOn: "2026-06-10", recordedAt: "2026-06-10T05:00:00Z", source: "call", recordedBy: "a@x", notes: "Updated by student",
+        changes: [{ column: "ug_status", label: "Undergraduate (UG) status", before: "", after: "Studying" }],
+        matchesCurrent: false, values: { ug_status: "Studying", current_status: "Studying" }, names: {},
+      },
+    ];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/journey/revert")) return json({ ok: true, changed: ["Undergraduate (UG) status"] });
+      if (url.endsWith("/journey")) return json({ enabled: true, entries });
+      return init?.method === "POST" ? json({ error: "no" }, 500) : json(edit);
+    });
+    render(<AlumniForm entry={ALUMNUS} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /History/ }));
+    expect(screen.getByRole("dialog", { name: "Version history" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("“Updated by student”").closest("button")!);
+
+    // The form now shows that version, read-only, with its change marked.
+    expect(await screen.findByText(/Viewing the record as it was on/)).toBeInTheDocument();
+    const ug = screen.getByLabelText<HTMLSelectElement>(/Undergraduate \(UG\) status/);
+    expect(ug.value).toBe("Studying");
+    expect(ug).toBeDisabled();
+    expect(screen.getByText("changed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Restore this version/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/Restored the record of/), expect.anything()));
+    const [, init] = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/journey/revert"))!;
+    expect(JSON.parse(init.body)).toEqual({ journeyId: "4", version: "v2" });
+    // Back on the current record.
+    expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
+  });
+
   it("sends the reloaded version after a save, not its own (someone may have saved since)", async () => {
     const edit = (version: string) =>
       context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version });
@@ -198,9 +279,10 @@ describe("AlumniForm", () => {
       json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v2" }),
       json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v4" }),
     ];
-    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
-      init?.method === "POST" ? replies.shift() : json(loads.shift()),
-    );
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/journey")) return json(HISTORY_OFF);
+      return init?.method === "POST" ? replies.shift() : json(loads.shift());
+    });
     render(<AlumniForm entry={ALUMNUS} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
 
@@ -225,7 +307,8 @@ describe("AlumniForm", () => {
       json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v2" }),
       json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v3" }),
     ];
-    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/journey")) return json(HISTORY_OFF);
       if (init?.method === "POST") return replies.shift();
       // The first load answers at once; the reload after the save hangs.
       return gets++ === 0 ? json(edit) : new Promise((resolve) => (finishReload = resolve));

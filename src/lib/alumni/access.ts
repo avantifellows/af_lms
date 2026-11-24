@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import {
+  canAccessAlumni,
   canAccessSchoolSync,
   getAlumniPermission,
   getFeatureAccess,
@@ -20,7 +21,7 @@ export type AlumniAuth =
   | { ok: true; email: string; permission: UserPermission }
   | { ok: false; response: NextResponse };
 
-const deny = (status: 401 | 403, error: string): AlumniAuth => ({
+const deny = (status: 401 | 403, error: string): Extract<AlumniAuth, { ok: false }> => ({
   ok: false,
   response: NextResponse.json({ error }, { status }),
 });
@@ -42,6 +43,24 @@ export async function authorizeAlumni(options: {
     return deny(403, "Access denied");
   }
   return { ok: true, email, permission };
+}
+
+/**
+ * The gate for routes about one existing alumnus (by alumni.id): signed in,
+ * a valid id, and canAccessAlumni — never canAccessStudent (ADR 0008).
+ */
+export async function authorizeAlumnus(
+  alumniId: string,
+  requireEdit: boolean,
+): Promise<{ ok: true; email: string; role: string } | { ok: false; response: NextResponse }> {
+  const session = await getServerSession(authOptions);
+  const email = session?.user?.email;
+  if (!session || !email) return deny(401, "Unauthorized");
+  if (!/^\d+$/.test(alumniId)) return { ok: false, response: NextResponse.json({ error: "Invalid alumnus." }, { status: 400 }) };
+  if (!(await canAccessAlumni(session, alumniId, { requireEdit }))) return deny(403, "Access denied");
+  // Who is acting, for the alumni history (actor_role).
+  const role = requireEdit ? (await getAlumniPermission(email))?.role ?? "" : "";
+  return { ok: true, email, role };
 }
 
 /** Is this school in the person's alumni scope? Region users need the school's region. */

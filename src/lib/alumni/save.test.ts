@@ -103,6 +103,65 @@ describe("saveAlumni", () => {
     expect(sent().body).not.toHaveProperty("degree_ug");
   });
 
+  describe("with alumni history on (ALUMNI_JOURNEY=on)", () => {
+    beforeEach(() => vi.stubEnv("ALUMNI_JOURNEY", "on"));
+    afterEach(() => vi.unstubAllEnvs());
+    const NOTE = { source: "call" as const, actorEmail: "a@avantifellows.org", actorRole: "alumni_manager" };
+
+    it("an edit is one call to the journey endpoint (answers + history together), not a PATCH", async () => {
+      mockQuery.mockResolvedValue([{ id: "8340", version: "v2" }]);
+      const result = await saveAlumni(EDIT, { ...EDIT.alumni, current_status: "Seeking Work" }, [], EDIT.version, NOTE);
+      expect(result).toMatchObject({ ok: true, action: "updated", alumniId: "8340" });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(sent()).toMatchObject({
+        url: "https://db.test/api/alumni/8340/journey",
+        method: "POST",
+        body: { source: "call", data: { current_status: "Seeking Work" }, actor_email: "a@avantifellows.org", actor_role: "alumni_manager" },
+      });
+    });
+
+    it("a new alumnus is created empty, then its answers go through the journey endpoint", async () => {
+      dbServiceAnswers(201, { id: 9001 });
+      const result = await saveAlumni(NEW, { current_status: "Studying", ug_status: "Studying", start_year_ug: "2026" }, [], undefined, NOTE);
+      expect(result).toMatchObject({ ok: true, action: "inserted", alumniId: "9001" });
+      const [[createUrl, create], [callUrl, call]] = mockFetch.mock.calls;
+      expect(createUrl).toBe("https://db.test/api/alumni");
+      expect(JSON.parse(create.body)).toEqual({ student_id: 86544 });
+      expect(callUrl).toBe("https://db.test/api/alumni/9001/journey");
+      expect(JSON.parse(call.body).data).toEqual({ current_status: "Studying", ug_status: "Studying", start_year_ug: 2026 });
+    });
+
+    it("says so when a new alumnus was added but its answers weren't saved", async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 9001 }), text: async () => "" })
+        .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({}), text: async () => "bad" });
+      const result = await saveAlumni(NEW, { current_status: "Studying", ug_status: "Studying" }, [], undefined, NOTE);
+      expect(result).toMatchObject({ ok: false, status: 502, error: expect.stringMatching(/added without these answers/) });
+    });
+
+    it("saves a remark alone as a call with no answers", async () => {
+      mockQuery.mockResolvedValue([{ id: "8340", version: "v2" }]);
+      const result = await saveAlumni(EDIT, EDIT.alumni, [], EDIT.version, { ...NOTE, notes: "Wrong Phone number" });
+      expect(result).toMatchObject({ ok: true, changed: [], remark: "Wrong Phone number" });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(sent()).toMatchObject({ url: "https://db.test/api/alumni/8340/journey", body: { data: {}, notes: "Wrong Phone number" } });
+    });
+
+    it("without a remark, nothing changed is still refused", async () => {
+      expect(await saveAlumni(EDIT, EDIT.alumni, [], EDIT.version, NOTE)).toMatchObject({ ok: false, nothing: true });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it("with history off, an edit is a plain PATCH even when a note is given", async () => {
+    mockQuery.mockResolvedValue([{ id: "8340" }]);
+    await saveAlumni(EDIT, { ...EDIT.alumni, current_status: "Seeking Work" }, [], EDIT.version, {
+      source: "call",
+      actorEmail: "a@avantifellows.org",
+    });
+    expect(sent()).toMatchObject({ url: "https://db.test/api/alumni/8340", method: "PATCH" });
+  });
+
   it("refuses an edit made on an older version of the record (409), without writing", async () => {
     const result = await saveAlumni(EDIT, { ...EDIT.alumni, current_status: "Employed" }, [], "2026-09-01 08:00:00+00");
     expect(result).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/Someone else saved/) });

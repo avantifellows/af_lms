@@ -31,6 +31,9 @@ export function currentAcademicYear(now = new Date()): string {
   return `${start}-${start + 1}`;
 }
 
+/** Today's date in India, "YYYY-MM-DD". */
+export const istDate = (now = new Date()) => new Date(now.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+
 /** "2025-2026" → "2026". */
 export const academicYearEnd = (academicYear: string) => academicYear.split("-")[1] ?? "";
 

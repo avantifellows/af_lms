@@ -1,45 +1,33 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { authorizeAlumnus } from "@/lib/alumni/access";
 import { getAlumnusContext } from "@/lib/alumni/entry";
+import { journeyEnabled } from "@/lib/alumni/journey";
 import { readSaveBody, respondWithSave } from "@/lib/alumni/save-request";
-import { canAccessAlumni } from "@/lib/permissions";
 
 // One existing alumnus, addressed by alumni.id — alumni are not Students
 // (ADR 0008), so the gate is canAccessAlumni, never canAccessStudent.
 
 type Params = { params: Promise<{ alumniId: string }> };
 
-/** 401 / 400 / 403, or null when the person may go on. */
-async function refuse(alumniId: string, requireEdit: boolean): Promise<NextResponse | null> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!/^\d+$/.test(alumniId)) return NextResponse.json({ error: "Invalid alumnus." }, { status: 400 });
-  if (!(await canAccessAlumni(session, alumniId, { requireEdit }))) {
-    return NextResponse.json({ error: "Access denied" }, { status: 403 });
-  }
-  return null;
-}
-
 const notFound = () => NextResponse.json({ error: "No such alumnus." }, { status: 404 });
 
 /** Everything the alumni form needs for this alumnus (profile, alumni record, ids). */
 export async function GET(_request: Request, { params }: Params) {
   const { alumniId } = await params;
-  const refused = await refuse(alumniId, false);
-  if (refused) return refused;
+  const auth = await authorizeAlumnus(alumniId, false);
+  if (!auth.ok) return auth.response;
   const context = await getAlumnusContext(alumniId);
-  return context ? NextResponse.json(context) : notFound();
+  return context ? NextResponse.json({ ...context, journeyEnabled: journeyEnabled() }) : notFound();
 }
 
 /** Update this alumnus through the DB Service: { values, confirmed? }. */
 export async function POST(request: Request, { params }: Params) {
   const { alumniId } = await params;
-  const refused = await refuse(alumniId, true);
-  if (refused) return refused;
+  const auth = await authorizeAlumnus(alumniId, true);
+  if (!auth.ok) return auth.response;
   const body = await readSaveBody(request);
   if (body instanceof NextResponse) return body;
   const context = await getAlumnusContext(alumniId);
   if (!context) return notFound();
-  return respondWithSave(context, body);
+  return respondWithSave(context, body, auth);
 }

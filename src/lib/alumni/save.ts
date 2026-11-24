@@ -4,6 +4,7 @@ import { needsConfirm, type Issue } from "./checks";
 import { CODE_COLUMNS, type EntryContext } from "./entry";
 import { ALUMNI_FIELDS, type Values } from "./fields";
 import { lookupCodes, type CodeLookup } from "./reference";
+import { journeyEnabled, postJourney, type JourneyNote } from "./journey";
 import { checkContext, reviewSave } from "./validation";
 
 // Saving one student's alumni answers. Nothing from the browser is trusted
@@ -13,6 +14,10 @@ import { checkContext, reviewSave } from "./validation";
 // The write goes to the DB Service (never Postgres directly):
 //   - no alumni row yet → POST  {DB_SERVICE_URL}/alumni      { student_id, ...fields }
 //   - row exists        → PATCH {DB_SERVICE_URL}/alumni/:id  { ...fields }
+// With alumni history on (journey.ts), every save is a call instead:
+//   - no alumni row yet → POST {DB_SERVICE_URL}/alumni { student_id } (empty),
+//                         then the answers as below, so the history says who added them
+//   - row exists        → POST {DB_SERVICE_URL}/alumni/:id/journey { data: fields, ... }
 // Only fields that are filled in and differ from the record are sent, so a
 // blank never erases a saved value. Nothing is ever deleted.
 
@@ -25,8 +30,18 @@ export type SaveResult =
       notCleared: string[];
       /** The record's new version, for the form's next save. */
       version: string;
+      /** The call remark saved with the history row. */
+      remark?: string;
     }
-  | { ok: false; status: number; error: string; fieldErrors?: Record<string, string>; warnings?: Issue[] };
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      fieldErrors?: Record<string, string>;
+      warnings?: Issue[];
+      /** Nothing to write: every answer is already on record (or blank). */
+      nothing?: true;
+    };
 
 const FIELD = new Map(ALUMNI_FIELDS.map((f) => [f.column, f]));
 
@@ -52,7 +67,7 @@ function nothingToSave(context: EntryContext, notCleared: string[]): Failure {
   const error = notCleared.length
     ? "Clearing a saved value isn't allowed here — nothing else changed."
     : context.kind === "edit" ? "Nothing changed from the alumni record." : "Nothing filled in yet.";
-  return { ok: false, status: 400, error };
+  return { ok: false, status: 400, error, nothing: true };
 }
 
 /** DB Service payload: the form's (full) field names; college/branch as ids, years/numbers as numbers. */
@@ -67,11 +82,14 @@ function toDbFields(changed: string[], values: Values, codes: CodeLookup): Recor
   return fields;
 }
 
+type Sent = { ok: true; alumniId: string; action: "inserted" | "updated" } | Failure;
+
 /** POST a new alumni row or PATCH the existing one (looked up fresh — it may be new since the form opened). */
 async function sendToDbService(
   context: EntryContext,
   fields: Record<string, string | number>,
-): Promise<{ ok: true; alumniId: string; action: "inserted" | "updated" } | Failure> {
+  journey?: JourneyNote,
+): Promise<Sent> {
   const dbService = getDbServiceConfig();
   if (!dbService) return { ok: false, status: 503, error: "DB Service is not configured." };
 
@@ -84,6 +102,7 @@ async function sendToDbService(
   // way round): writing now would merge these answers, unchecked, into a
   // record the person never saw.
   if (Boolean(existing) !== (context.kind === "edit")) return CONFLICT;
+  if (journey && journeyEnabled()) return sendAsCall(context, existing?.id, fields, journey);
   const request = existing
     ? { url: `${dbService.baseUrl}/alumni/${existing.id}`, method: "PATCH", body: fields }
     : { url: `${dbService.baseUrl}/alumni`, method: "POST", body: { student_id: Number(studentId), ...fields } };
@@ -102,6 +121,41 @@ async function sendToDbService(
   return { ok: true, alumniId: String(saved.id), action: existing ? "updated" : "inserted" };
 }
 
+/** The save as a call through the journey endpoint (alumni history on). */
+async function sendAsCall(
+  context: EntryContext,
+  existingId: string | undefined,
+  fields: Record<string, string | number>,
+  journey: JourneyNote,
+): Promise<Sent> {
+  let alumniId = existingId;
+  if (!alumniId) {
+    const created = await createEmptyAlumni(context.ids.studentId);
+    if (!created.ok) return created;
+    alumniId = created.alumniId;
+  }
+  const written = await postJourney(alumniId, fields, journey);
+  if (written.ok) return { ok: true, alumniId, action: existingId ? "updated" : "inserted" };
+  if (existingId) return written;
+  // The record exists now, without the answers: a reload shows it to edit.
+  return { ...written, error: `${written.error} The alumnus was added without these answers — reload and save them again.` };
+}
+
+/** A new alumni row with no answers yet (the DB Service writes no history for it). */
+async function createEmptyAlumni(studentId: string): Promise<{ ok: true; alumniId: string } | Failure> {
+  const dbService = getDbServiceConfig()!;
+  const response = await fetch(`${dbService.baseUrl}/alumni`, {
+    method: "POST",
+    headers: dbService.headers,
+    body: JSON.stringify({ student_id: Number(studentId) }),
+  });
+  if (!response.ok) {
+    console.error("[alumni] DB service error:", response.status, (await response.text()).slice(0, 500));
+    return { ok: false, status: 502, error: `Couldn't save — the DB Service answered ${response.status}.` };
+  }
+  return { ok: true, alumniId: String(((await response.json()) as { id: number | string }).id) };
+}
+
 /** The record's version as the form sees it (see EntryContext.version). */
 async function currentVersion(alumniId: string): Promise<string> {
   const [row] = await query<{ version: string | null }>(`SELECT updated_at::text AS version FROM alumni WHERE id = $1`, [alumniId]);
@@ -115,18 +169,21 @@ const CONFLICT: Failure = {
   error: "Someone else saved changes to this alumnus after you opened it. Reload to see them, then make your changes again.",
 };
 
+/** What a save would send: the checked values and the fields that change. */
+export type PreparedSave =
+  | { ok: true; values: Values; changed: string[]; notCleared: string[]; codes: CodeLookup }
+  | Failure;
+
 /**
- * `context` must be the student's entry context (already loaded by the route
- * to check school access). `confirmed`: ids of the unusual-answer warnings the
- * person has accepted; any other warning stops the save and is sent back.
- * `version`: the record's version when the form loaded it (edits must send it).
+ * Every check a save runs, without writing anything (the bulk preview uses
+ * this alone). `confirmed`: ids of the unusual-answer warnings accepted.
  */
-export async function saveAlumni(
+export async function prepareSave(
   context: EntryContext,
   submitted: Values,
   confirmed: string[] = [],
   version?: string,
-): Promise<SaveResult> {
+): Promise<PreparedSave> {
   if (context.kind === "edit" && version !== context.version) return CONFLICT;
   const previous = context.alumni;
   const review = reviewSave(submitted, previous, checkContext(context.profile));
@@ -144,13 +201,57 @@ export async function saveAlumni(
   const changed = Object.keys(values).filter((c) => values[c] && values[c] !== (previous[c] ?? ""));
   const notCleared = Object.keys(values).filter((c) => !values[c] && previous[c]);
   if (!changed.length) return nothingToSave(context, notCleared);
+  return { ok: true, values, changed, notCleared, codes };
+}
 
-  const sent = await sendToDbService(context, toDbFields(changed, values, codes));
+/** Field labels, for messages. */
+export const fieldLabels = (columns: string[]) => columns.map((c) => FIELD.get(c)?.label ?? c);
+
+/**
+ * `context` must be the student's entry context (already loaded by the route
+ * to check school access). `confirmed`: ids of the unusual-answer warnings the
+ * person has accepted; any other warning stops the save and is sent back.
+ * `version`: the record's version when the form loaded it (edits must send it).
+ * `journey`: who is saving and how, for the history row (when it's on).
+ */
+export async function saveAlumni(
+  context: EntryContext,
+  submitted: Values,
+  confirmed: string[] = [],
+  version?: string,
+  journey?: JourneyNote,
+): Promise<SaveResult> {
+  const prepared = await prepareSave(context, submitted, confirmed, version);
+  if (!prepared.ok) {
+    // A call where nothing changed but something happened ("Wrong phone number").
+    if (prepared.nothing && journey?.notes && journeyEnabled() && context.kind === "edit") return saveRemarkOnly(context, journey);
+    return prepared;
+  }
+  const { values, changed, notCleared, codes } = prepared;
+
+  const sent = await sendToDbService(context, toDbFields(changed, values, codes), journey);
   if (!sent.ok) return sent;
   return {
     ...sent,
+    ...(journey?.notes ? { remark: journey.notes } : {}),
     version: await currentVersion(sent.alumniId),
-    changed: changed.map((c) => FIELD.get(c)!.label),
-    notCleared: notCleared.map((c) => FIELD.get(c)!.label),
+    changed: fieldLabels(changed),
+    notCleared: fieldLabels(notCleared),
+  };
+}
+
+/** Only the call remark: a history row with no field changes (the alumni row is untouched). */
+async function saveRemarkOnly(context: EntryContext, journey: JourneyNote): Promise<SaveResult> {
+  const alumniId = context.ids.alumniId;
+  const written = await postJourney(alumniId, {}, journey);
+  if (!written.ok) return { ...written, error: "Couldn't save the remark. Try again." };
+  return {
+    ok: true,
+    alumniId,
+    action: "updated",
+    changed: [],
+    notCleared: [],
+    version: await currentVersion(alumniId),
+    remark: journey.notes,
   };
 }

@@ -3,6 +3,8 @@
 // The Alumni tab on the school page: pass-outs still to add (any year) and the
 // school's existing alumni. Talks only to /api/alumni/*.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import AlumniDataTable from "./AlumniDataTable";
 import { CheckCircle2, MousePointerClick, Pencil, Search, UserPlus } from "lucide-react";
 import { Badge, Card, Input, Select } from "@/components/ui";
 import AlumniForm, { type AlumniEntryRef } from "./AlumniForm";
@@ -113,7 +115,28 @@ function filterRows<T extends { name: string; afid: string; cohortYear: string }
   );
 }
 
-export default function AlumniTab({ schoolCode, initialStudentId, canEdit = true }: Props) {
+/**
+ * The school's Alumni tab: the two lists with the record form beside them, or
+ * the "missing data" table (filters for what's filled or missing, download).
+ */
+export default function AlumniTab(props: Props) {
+  const [mode, setMode] = useState<"lists" | "table">("lists");
+  return (
+    <div className="space-y-4">
+      <SegmentedControl
+        label="View"
+        value={mode}
+        onChange={setMode}
+        options={[{ value: "lists", label: "Lists" }, { value: "table", label: "Table · missing data" }]}
+      />
+      {mode === "lists"
+        ? <AlumniLists {...props} />
+        : <AlumniDataTable schoolCode={props.schoolCode} canEdit={props.canEdit ?? true} />}
+    </div>
+  );
+}
+
+function AlumniLists({ schoolCode, initialStudentId, canEdit = true }: Props) {
   /** Bumped after a save to reload the lists (a new alumnus moves to "Existing alumni"). */
   const [refresh, setRefresh] = useState(0);
   const [view, setView] = useState<View>("pending");

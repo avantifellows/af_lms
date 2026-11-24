@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, BookOpen, Briefcase, CheckCircle2, ChevronDown, Compass, GraduationCap, Info, Loader2, Sparkles, X,
+  AlertTriangle, BookOpen, Briefcase, CheckCircle2, ChevronDown, Compass, GraduationCap, Info, Loader2, RotateCcw, Sparkles, X,
 } from "lucide-react";
 import { Badge, Button, Card, FormLabel, Input, Select } from "@/components/ui";
+import HistoryPanel, { HistoryButton, formatDate, restoreVersion, useJourney, type JourneyEntry } from "./AlumniHistory";
 import Initials from "./Initials";
 import ReferencePicker from "./ReferencePicker";
 import {
@@ -13,6 +14,7 @@ import {
   type FieldDef, type SectionDef, type Values,
 } from "@/lib/alumni/fields";
 import { needsConfirm, type Issue } from "@/lib/alumni/checks";
+import { MAX_REMARK_DETAILS, REMARK_OPTIONS, remarkNote, type Remark } from "@/lib/alumni/remarks";
 import { allowedDegrees, isDegreeCompatible } from "@/lib/alumni/compat";
 import {
   MAX_YEAR, MIN_YEAR, checkContext, degreeMismatchMessage, reviewSave,
@@ -31,6 +33,8 @@ interface EntryContext {
   codeNames: Record<string, string>;
   /** The record's version; sent back on save so another person's save isn't overwritten. */
   version: string;
+  /** Alumni history is on: saves get a history row, and a call remark can be added. */
+  journeyEnabled?: boolean;
 }
 
 interface SavedEntry {
@@ -40,6 +44,8 @@ interface SavedEntry {
   notCleared: string[];
   /** The record's version after this save. */
   version: string;
+  /** The call remark saved with it. */
+  remark?: string;
 }
 
 /**
@@ -123,12 +129,12 @@ type SaveOutcome =
   | { kind: "failed"; error: string; fieldErrors: Record<string, string> };
 
 /** Sends the answers; the server re-checks everything and saves through the DB Service. */
-async function postSave(url: string, values: Values, confirmed: string[], version: string): Promise<SaveOutcome> {
+async function postSave(url: string, values: Values, confirmed: string[], version: string, remark: Remark): Promise<SaveOutcome> {
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values, confirmed, version }),
+      body: JSON.stringify({ values, confirmed, version, ...(remark.option ? { remark } : {}) }),
     });
     const body = await res.json();
     if (res.status === 409 && body?.warnings) return { kind: "confirm", warnings: body.warnings };
@@ -140,10 +146,14 @@ async function postSave(url: string, values: Values, confirmed: string[], versio
 }
 
 function savedToast(name: string, entry: SavedEntry) {
+  if (!entry.changed.length && entry.remark) {
+    toast.success(`Remark saved — ${name || "student"}`, { description: entry.remark, duration: 8000 });
+    return;
+  }
   const fields = `${entry.changed.length} field${entry.changed.length === 1 ? "" : "s"} written.`;
   const kept = entry.notCleared.length ? `Kept on record (blank in form): ${entry.notCleared.join(", ")}.` : "";
   toast.success(`${entry.action === "inserted" ? "Added to" : "Updated in"} the alumni table — ${name || "student"}`, {
-    description: [`alumni_id ${entry.alumniId} · ${fields}`, kept].filter(Boolean).join(" "),
+    description: [`alumni_id ${entry.alumniId} · ${fields}`, entry.remark && `Remark: ${entry.remark}.`, kept].filter(Boolean).join(" "),
     duration: 8000,
   });
 }
@@ -249,6 +259,9 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
   const { review, warningsByField } = useReview(values, context);
   const flow = useSaveFlow();
   const { errors, dirty, saving, justSaved, formError, confirming, confirmed } = flow;
+  /** This call's remark; starts empty for every call. */
+  const [remark, setRemark] = useState<Remark>(NO_REMARK);
+  const history = useHistoryView(context, version);
 
   const visibleSections = useMemo(
     () => ALUMNI_SECTIONS.filter((s) => s.fields.some((f) => isFieldShown(s, f, values))),
@@ -271,8 +284,9 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
 
   const submit = async (ids: string[]) => {
     flow.start(ids);
-    const saved = flow.finish(await postSave(url, values, ids, flow.versionFor(context)), context);
+    const saved = flow.finish(await postSave(url, values, ids, flow.versionFor(context), remark), context);
     if (!saved) return;
+    setRemark(NO_REMARK);
     // Reload what's now in the database, as the alumnus (a saved pass-out now is one).
     setRef({ kind: "alumnus", id: saved.alumniId });
     setVersion((v) => v + 1);
@@ -282,13 +296,41 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
 
   const save = () => {
     // Same review the server runs — catch problems without a round trip.
-    flow.reviewed(review.errors);
-    runStep(nextStep(review), { fix: scrollToField, confirm: flow.setConfirming, send: () => submit([]) });
+    const note = remarkNote(remark);
+    const fieldErrors = "error" in note ? { ...review.errors, remark: note.error } : review.errors;
+    flow.reviewed(fieldErrors);
+    runStep(nextStep({ ...review, errors: fieldErrors }), { fix: scrollToField, confirm: flow.setConfirming, send: () => submit([]) });
   };
+
+  const reload = () => {
+    history.select(null);
+    setVersion((v) => v + 1);
+    onSaved?.();
+  };
+
+  if (history.preview) {
+    return (
+      <div className="space-y-5">
+        <FormHeader context={context} actions={<HistoryButton count={history.count} onClick={history.show} />} />
+        <VersionPreview
+          entry={history.preview}
+          alumniId={context.ids.alumniId}
+          version={context.version}
+          canEdit={canEdit}
+          onRestored={reload}
+          onBack={() => history.select(null)}
+        />
+        {history.panel}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
-      <FormHeader context={context} />
+      <FormHeader
+        context={context}
+        actions={history.journey && <HistoryButton count={history.count} onClick={history.show} />}
+      />
 
       <EditNote kind={context.kind} />
 
@@ -308,6 +350,18 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
           onName={(column, name) => setNames((prev) => ({ ...prev, [column]: name }))}
         />
       ))}
+
+      {context.journeyEnabled && canEdit && (
+        <RemarkBlock
+          remark={remark}
+          isNew={context.kind === "new"}
+          error={errors.remark}
+          onChange={(next) => {
+            setRemark(next);
+            flow.edited("remark");
+          }}
+        />
+      )}
 
       <SaveBar canEdit={canEdit}>
         <Button type="button" onClick={save} disabled={saving} className="min-w-[140px]">
@@ -330,7 +384,62 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
           onConfirm={() => submit(withConfirmed(confirmed, confirming))}
         />
       )}
+
+      {history.panel}
     </div>
+  );
+}
+
+const NO_REMARK: Remark = { option: "", details: "" };
+
+/** What happened on this call (saved with the call's history row, not on the alumni record). */
+function RemarkBlock({
+  remark, isNew, error, onChange,
+}: { remark: Remark; isNew: boolean; error?: string; onChange: (r: Remark) => void }) {
+  const option = REMARK_OPTIONS.find((o) => o.label === remark.option);
+  return (
+    <section className="rounded-xl border border-border bg-bg-card px-4 py-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <FormLabel htmlFor="f-remark">Call remark</FormLabel>
+          <Select
+            id="f-remark"
+            value={remark.option}
+            onChange={(e) => onChange({ option: e.target.value, details: "" })}
+            aria-invalid={!!error && !option?.details}
+          >
+            <option value="">— No remark —</option>
+            {REMARK_OPTIONS.map((o) => (
+              <option key={o.label} value={o.label}>{o.label}</option>
+            ))}
+          </Select>
+          {option?.hint && <p className="mt-1.5 text-xs text-text-muted">{option.hint}</p>}
+        </div>
+        {option?.details && (
+          <div>
+            <FormLabel htmlFor="f-remark-details">{option.details.required ? "Remark" : "Details"}</FormLabel>
+            <Input
+              id="f-remark-details"
+              value={remark.details}
+              maxLength={MAX_REMARK_DETAILS}
+              placeholder={option.details.placeholder}
+              onChange={(e) => onChange({ ...remark, details: e.target.value })}
+              aria-invalid={!!error}
+            />
+          </div>
+        )}
+      </div>
+      {error ? (
+        <p className="mt-1.5 flex items-start gap-1 text-xs text-danger">
+          <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden /> {error}
+        </p>
+      ) : (
+        <p className="mt-1.5 text-xs text-text-muted">
+          Saved in this alumnus&apos;s history with today&apos;s call.
+          {!isNew && " You can save a remark even if nothing else changed."}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -370,7 +479,7 @@ function EditNote({ kind }: { kind: EntryContext["kind"] }) {
   );
 }
 
-function FormHeader({ context }: { context: EntryContext }) {
+function FormHeader({ context, actions }: { context: EntryContext; actions?: ReactNode }) {
   return (
     <header className="flex flex-wrap items-start gap-4">
       <Initials name={context.name || "?"} size="lg" />
@@ -392,7 +501,117 @@ function FormHeader({ context }: { context: EntryContext }) {
           {context.kind === "edit" && <IdChip label="alumni_id" value={context.ids.alumniId} />}
         </div>
       </div>
+      {actions && <div className="shrink-0">{actions}</div>}
     </header>
+  );
+}
+
+/**
+ * Version history: the panel on the right, and the version picked there,
+ * which the form shows in place of the current record. Closing the panel
+ * goes back to the current record.
+ */
+function useHistoryView(context: EntryContext | null, reloadKey: number) {
+  const alumniId = context?.kind === "edit" && context.journeyEnabled ? context.ids.alumniId : null;
+  const journey = useJourney(alumniId, reloadKey);
+  const [open, setOpen] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const preview = journey?.entries.find((e) => e.id === previewId) ?? null;
+  const select = (entry: JourneyEntry | null) => setPreviewId(entry?.id ?? null);
+  const close = () => {
+    setOpen(false);
+    setPreviewId(null);
+  };
+  return {
+    journey,
+    preview,
+    select,
+    count: journey?.entries.length ?? 0,
+    show: () => setOpen(true),
+    panel: open && journey ? <HistoryPanel journey={journey} selectedId={previewId} onSelect={select} onClose={close} /> : null,
+  };
+}
+
+const noop = () => {};
+
+/** One version of the record, read-only, with the fields it changed highlighted; it can be restored from here. */
+function VersionPreview({
+  entry, alumniId, version, canEdit, onRestored, onBack,
+}: {
+  entry: JourneyEntry;
+  alumniId: string;
+  version: string;
+  canEdit: boolean;
+  onRestored: () => void;
+  onBack: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const sections = ALUMNI_SECTIONS.filter((s) => s.fields.some((f) => isFieldShown(s, f, entry.values)));
+  const changed = entry.changes.map((c) => c.column);
+
+  const restore = async () => {
+    setRestoring(true);
+    const result = await restoreVersion(alumniId, entry, version);
+    setRestoring(false);
+    if ("error" in result) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success(`Restored the record of ${formatDate(entry.reportedOn)}`, { description: `Changed: ${result.changed.join(", ")}` });
+    onRestored();
+  };
+
+  return (
+    <>
+      <p className="flex items-start gap-2 rounded-lg bg-info-bg px-3 py-2 text-sm text-text-secondary">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden />
+        <span>
+          Viewing the record as it was on <strong>{formatDate(entry.reportedOn)}</strong>
+          {entry.notes && <> · “{entry.notes}”</>}. Read-only
+          {changed.length > 0 && "; highlighted fields changed in this version"}.
+        </span>
+      </p>
+      <fieldset disabled className="min-w-0 space-y-5">
+        {sections.map((section, i) => (
+          <FormSectionBlock
+            key={section.id}
+            step={i + 1}
+            section={section}
+            values={entry.values}
+            previous={entry.values}
+            names={entry.names}
+            errors={{}}
+            warnings={{}}
+            highlight={changed}
+            onValue={noop}
+            onName={noop}
+          />
+        ))}
+      </fieldset>
+      <SaveBar canEdit>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={restoring}>
+          Back to current
+        </Button>
+        {canEdit && !entry.matchesCurrent && !confirming && (
+          <Button type="button" onClick={() => setConfirming(true)}>
+            <RotateCcw className="h-4 w-4" aria-hidden /> Restore this version
+          </Button>
+        )}
+        {confirming && (
+          <span className="flex flex-wrap items-center gap-2 text-sm text-warning-text">
+            Put the record back to this version? Newer versions stay in the history.
+            <Button type="button" size="sm" onClick={restore} disabled={restoring}>
+              {restoring && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />} Restore
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setConfirming(false)} disabled={restoring}>
+              Cancel
+            </Button>
+          </span>
+        )}
+        {entry.matchesCurrent && <span className="text-sm text-text-muted">The record already matches this version.</span>}
+      </SaveBar>
+    </>
   );
 }
 
@@ -558,11 +777,14 @@ interface SectionProps {
   names: Record<string, string>;
   errors: Record<string, string>;
   warnings: Record<string, Issue[]>;
+  /** Fields to mark (a version's changes, in version history). */
+  highlight?: readonly string[];
   onValue: (column: string, value: string) => void;
   onName: (column: string, name: string) => void;
 }
 
-function FormSectionBlock({ step, section, values, previous, names, errors, warnings, onValue, onName }: SectionProps) {
+/** One form section with its fields; bulk edit (BulkEditPanel) uses it too. */
+export function FormSectionBlock({ step, section, values, previous, names, errors, warnings, highlight, onValue, onName }: SectionProps) {
   const fields = section.fields.filter((f) => isFieldShown(section, f, values));
   const body = (
     <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
@@ -580,6 +802,7 @@ function FormSectionBlock({ step, section, values, previous, names, errors, warn
             hint={degree?.hint}
             options={degree?.options}
             stale={isFieldStale(section, field, values)}
+            highlighted={highlight?.includes(field.column)}
             onRecord={!!value && value === (previous[field.column] ?? "")}
             onValue={(v) => onValue(field.column, v)}
             onName={(n) => onName(field.column, n)}
@@ -598,7 +821,7 @@ function FormSectionBlock({ step, section, values, previous, names, errors, warn
   );
 
   if (section.collapsed) {
-    const hasValue = fields.some((f) => values[f.column]);
+    const hasValue = fields.some((f) => values[f.column] || highlight?.includes(f.column));
     return (
       <details className="group rounded-xl border border-border" open={hasValue}>
         <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3">
@@ -648,6 +871,8 @@ interface FieldProps {
   /** Overrides the field's full option list (e.g. degrees filtered by branch). */
   options?: readonly string[];
   stale: boolean;
+  /** Changed in the version being viewed (version history). */
+  highlighted?: boolean;
   /** The value is what's already saved in the database. */
   onRecord: boolean;
   onValue: (value: string) => void;
@@ -660,11 +885,20 @@ function FieldControl(props: FieldProps) {
   const wide = field.type === "college" || field.type === "branch" || field.label.length > 40;
   const live = (warnings ?? []).filter((w) => !w.onRecord);
   const noted = (warnings ?? []).filter((w) => w.onRecord);
-  const ring = error ? "rounded-lg ring-2 ring-danger" : live.length ? "rounded-lg ring-2 ring-warning-border/50" : "";
+  const ring = error
+    ? "rounded-lg ring-2 ring-danger"
+    : props.highlighted
+      ? "rounded-lg ring-2 ring-blue-700"
+      : live.length ? "rounded-lg ring-2 ring-warning-border/50" : "";
 
   return (
     <div className={wide ? "sm:col-span-2" : ""}>
-      <FormLabel htmlFor={id}>{field.label}</FormLabel>
+      <FormLabel htmlFor={id}>
+        {field.label}
+        {props.highlighted && (
+          <span className="ml-1.5 rounded bg-blue-700 px-1.5 py-px text-[10px] font-bold normal-case text-white">changed</span>
+        )}
+      </FormLabel>
       <div className={ring}>
         <FieldInput {...props} id={id} />
       </div>
