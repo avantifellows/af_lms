@@ -56,6 +56,17 @@ export function tableQuery(filters: Filters, fixedSchool: string | undefined, pa
   return p.toString();
 }
 
+/** One page of the table, or why it couldn't load. */
+async function fetchTable(query: string): Promise<{ ok: true; data: TableData } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(`/api/alumni/table?${query}`);
+    const body = await res.json();
+    return res.ok ? { ok: true, data: body } : { ok: false, error: body?.error || "Couldn't load the table." };
+  } catch {
+    return { ok: false, error: "Couldn't load the table." };
+  }
+}
+
 /**
  * Loads a page; `reload` refetches (after a save). The search box waits for
  * typing to pause. `schools` is kept from the last load not narrowed to one
@@ -71,19 +82,16 @@ function useTableData(query: string) {
     let cancelled = false;
     const timer = setTimeout(async () => {
       setLoading(true);
-      try {
-        const res = await fetch(`/api/alumni/table?${query}`);
-        const body = await res.json();
-        if (cancelled) return;
-        if (!res.ok) throw new Error(body?.error || "Couldn't load the table.");
-        setData(body);
-        if (!new URLSearchParams(query).has("school")) setSchools(body.schools ?? []);
+      const result = await fetchTable(query);
+      if (cancelled) return;
+      if (result.ok) {
+        setData(result.data);
+        if (!new URLSearchParams(query).has("school")) setSchools(result.data.schools ?? []);
         setError("");
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Couldn't load the table.");
-      } finally {
-        if (!cancelled) setLoading(false);
+      } else {
+        setError(result.error);
       }
+      setLoading(false);
     }, 300);
     return () => {
       cancelled = true;
@@ -114,91 +122,127 @@ function useSelection() {
   };
 }
 
-export default function AlumniDataTable({ schoolCode, canEdit = true }: Props) {
+/** Filters and page; changing a filter goes back to page 1. */
+function useFilters(schoolCode: string | undefined) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [page, setPage] = useState(1);
+  const query = useMemo(() => tableQuery(filters, schoolCode, page), [filters, schoolCode, page]);
+  return {
+    filters,
+    query,
+    setPage,
+    /** The filters' query without the page (download, "select all"). */
+    allPages: tableQuery(filters, schoolCode),
+    change: (next: Partial<Filters>) => {
+      setFilters((f) => ({ ...f, ...next }));
+      setPage(1);
+    },
+  };
+}
+
+/** Ticks every student matching the filters (all pages). */
+async function selectAllMatching(allPages: string, replace: (list: BulkStudent[]) => void) {
+  try {
+    const res = await fetch(`/api/alumni/table?${allPages}&refs=1`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body?.error);
+    replace(body.refs);
+  } catch {
+    toast.error("Couldn't select everyone. Try again.");
+  }
+}
+
+export default function AlumniDataTable({ schoolCode, canEdit = true }: Props) {
+  const view = useFilters(schoolCode);
   const [open, setOpen] = useState<AlumniEntryRef | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const selection = useSelection();
   const selectedStudents = useMemo(() => [...selection.selected.values()], [selection.selected]);
-  const query =useMemo(() => tableQuery(filters, schoolCode, page), [filters, schoolCode, page]);
-  const { data, schools, error, loading, reload } = useTableData(query);
-
-  const selectAllMatching = async () => {
-    try {
-      const res = await fetch(`/api/alumni/table?${tableQuery(filters, schoolCode)}&refs=1`);
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error);
-      selection.replace(body.refs);
-    } catch {
-      toast.error("Couldn't select everyone. Try again.");
-    }
-  };
-
-  const change = (next: Partial<Filters>) => {
-    setFilters((f) => ({ ...f, ...next }));
-    setPage(1);
-  };
+  const table = useTableData(view.query);
+  const { data, reload } = table;
 
   return (
     <div className="space-y-4">
       <FilterBar
-        filters={filters}
+        filters={view.filters}
         years={data?.years ?? []}
-        schools={schoolCode ? [] : schools}
-        onChange={change}
-        downloadHref={`/api/alumni/table/export?${tableQuery(filters, schoolCode)}`}
+        schools={schoolCode ? [] : table.schools}
+        onChange={view.change}
+        downloadHref={`/api/alumni/table/export?${view.allPages}`}
       />
-      {data && <SummaryChips summary={data.summary} filters={filters} onChange={change} />}
-      {error && <p className="rounded-lg bg-danger-bg p-3 text-sm text-danger">{error}</p>}
-      <Card elevation="sm" className="overflow-hidden rounded-xl">
-        <TableHeaderRow total={data?.total} loading={loading} />
-        {canEdit && (
-          <SelectionBar
-            count={selection.selected.size}
-            total={data?.total ?? 0}
-            onSelectAll={selectAllMatching}
-            onClear={selection.clear}
-            onEdit={() => setBulkOpen(true)}
+      {data && <SummaryChips summary={data.summary} filters={view.filters} onChange={view.change} />}
+      {table.error && <p className="rounded-lg bg-danger-bg p-3 text-sm text-danger">{table.error}</p>}
+      <TableCard
+        table={table}
+        showSchool={!schoolCode}
+        selection={canEdit ? selection : undefined}
+        onSelectAll={() => selectAllMatching(view.allPages, selection.replace)}
+        onEditSelected={() => setBulkOpen(true)}
+        onOpen={setOpen}
+        onPage={view.setPage}
+      />
+      <ClosableModal open={open !== null} onClose={() => setOpen(null)}>
+        {open && <AlumniForm entry={open} canEdit={canEdit} onSaved={reload} />}
+      </ClosableModal>
+      <ClosableModal open={bulkOpen} onClose={() => setBulkOpen(false)}>
+        {bulkOpen && (
+          <BulkEditPanel
+            students={selectedStudents}
+            onDone={() => {
+              setBulkOpen(false);
+              selection.clear();
+              reload();
+            }}
           />
         )}
-        <RowsTable
-          rows={data?.rows ?? []}
-          showSchool={!schoolCode}
-          onOpen={setOpen}
-          select={canEdit ? { selected: selection.selected, toggle: selection.toggle, setMany: selection.setMany } : undefined}
-          onSaved={reload}
-        />
-        {data && data.pageCount > 1 && <Pager page={data.page} pageCount={data.pageCount} onPage={setPage} />}
-      </Card>
-      <Modal open={open !== null} onClose={() => setOpen(null)} className="max-w-4xl p-6">
-        {open && (
-          <>
-            <button type="button" onClick={() => setOpen(null)} aria-label="Close" className="absolute right-3 top-3 rounded p-1 text-text-muted hover:bg-hover-bg">
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-            <AlumniForm entry={open} canEdit={canEdit} onSaved={reload} />
-          </>
-        )}
-      </Modal>
-      <Modal open={bulkOpen} onClose={() => setBulkOpen(false)} className="max-w-4xl p-6">
-        {bulkOpen && (
-          <>
-            <button type="button" onClick={() => setBulkOpen(false)} aria-label="Close" className="absolute right-3 top-3 rounded p-1 text-text-muted hover:bg-hover-bg">
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-            <BulkEditPanel
-              students={selectedStudents}
-              onDone={() => {
-                setBulkOpen(false);
-                selection.clear();
-                reload();
-              }}
-            />
-          </>
-        )}
-      </Modal>
+      </ClosableModal>
     </div>
+  );
+}
+
+/** The rows: count, the selection bar (people who can edit), the table and its pages. */
+function TableCard({ table, showSchool, selection, onSelectAll, onEditSelected, onOpen, onPage }: {
+  table: ReturnType<typeof useTableData>;
+  showSchool: boolean;
+  /** Absent for view-only access: no ticking. */
+  selection?: ReturnType<typeof useSelection>;
+  onSelectAll: () => void;
+  onEditSelected: () => void;
+  onOpen: (ref: AlumniEntryRef) => void;
+  onPage: (page: number) => void;
+}) {
+  const { data } = table;
+  return (
+    <Card elevation="sm" className="overflow-hidden rounded-xl">
+      <TableHeaderRow total={data?.total} loading={table.loading} />
+      {selection && (
+        <SelectionBar
+          count={selection.selected.size}
+          total={data?.total ?? 0}
+          onSelectAll={onSelectAll}
+          onClear={selection.clear}
+          onEdit={onEditSelected}
+        />
+      )}
+      <RowsTable rows={data?.rows ?? []} showSchool={showSchool} onOpen={onOpen} select={selection} onSaved={table.reload} />
+      {data && data.pageCount > 1 && <Pager page={data.page} pageCount={data.pageCount} onPage={onPage} />}
+    </Card>
+  );
+}
+
+/** A wide modal with a close button in its corner. */
+function ClosableModal({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <Modal open={open} onClose={onClose} className="max-w-4xl p-6">
+      {open && (
+        <>
+          <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded p-1 text-text-muted hover:bg-hover-bg">
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+          {children}
+        </>
+      )}
+    </Modal>
   );
 }
 

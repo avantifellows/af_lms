@@ -12,8 +12,8 @@ import { visibleValues } from "./validation";
 // Read-only (Postgres). Filters run here, on the server, so the counts and the
 // download always match what the table shows.
 
-export { TABLE_FIELDS, isTableField } from "./table-fields";
-export type { AlumniTableRow, FieldFilter, TableField, TableFilters, TableSummary } from "./table-fields";
+export { TABLE_FIELDS } from "./table-fields";
+export type { AlumniTableRow, TableFilters, TableSummary } from "./table-fields";
 import { TABLE_FIELDS, type AlumniTableRow, type TableField, type TableFilters, type TableSummary } from "./table-fields";
 
 const clean = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();

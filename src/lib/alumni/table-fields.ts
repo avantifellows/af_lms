@@ -13,8 +13,6 @@ export const TABLE_FIELDS = [
 ] as const;
 
 export type TableField = (typeof TABLE_FIELDS)[number]["key"];
-const FIELD_KEYS = new Set<string>(TABLE_FIELDS.map((f) => f.key));
-export const isTableField = (key: string): key is TableField => FIELD_KEYS.has(key);
 
 export interface AlumniTableRow {
   /** "alumnus" (has an alumni row, addressed by alumni.id) or "pass-out" (not added yet, by user id). */

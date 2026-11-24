@@ -37,43 +37,63 @@ function readMoment(at: unknown): Date | null {
   return date.getTime() <= Date.now() && date.getUTCFullYear() >= 2000 ? date : null;
 }
 
-export async function POST(request: Request) {
-  let body: Body;
+/** The request body, or null when it isn't JSON. */
+async function readBody(request: Request): Promise<Body | null> {
   try {
-    body = await request.json();
+    return await request.json();
   } catch {
-    return bad("Invalid request.");
+    return null;
   }
+}
+
+/** 401/403 for this scope, or the person (who must also reach every school for "all"). */
+async function authorize(scope: RestoreScope) {
+  const auth = await authorizeAlumni({ requireEdit: true, ...(scope.kind === "school" ? { schoolCode: scope.code } : {}) });
+  if (!auth.ok) return auth;
+  if (scope.kind === "all" && !reachesAllSchools(auth.permission)) {
+    return { ok: false as const, response: NextResponse.json({ error: "Restoring all alumni needs access to every school." }, { status: 403 }) };
+  }
+  return auth;
+}
+
+/** The alumni ids to restore: 1 to RESTORE_CHUNK numeric ids, else null. */
+function readIds(value: unknown): string[] | null {
+  const ids = Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && /^\d+$/.test(id)) : [];
+  return ids.length && ids.length <= RESTORE_CHUNK ? ids : null;
+}
+
+/** Runs a step, turning a thrown error into a 500 with `message`. */
+async function guarded(label: string, message: string, run: () => Promise<NextResponse>): Promise<NextResponse> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error(label, error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  const body = await readBody(request);
+  if (!body) return bad("Invalid request.");
   const scope = readScope(body);
   if (!scope) return bad("Invalid scope.");
 
-  const auth = await authorizeAlumni({ requireEdit: true, ...(scope.kind === "school" ? { schoolCode: scope.code } : {}) });
+  const auth = await authorize(scope);
   if (!auth.ok) return auth.response;
-  if (scope.kind === "all" && !reachesAllSchools(auth.permission)) {
-    return NextResponse.json({ error: "Restoring all alumni needs access to every school." }, { status: 403 });
-  }
   if (!journeyEnabled()) return NextResponse.json({ error: "Alumni history is not turned on." }, { status: 404 });
 
   if (body.history === true) {
-    try {
-      return NextResponse.json({ groups: await listHistory(scope) });
-    } catch (error) {
-      console.error("[alumni/history]", error);
-      return NextResponse.json({ error: "Couldn't load the history." }, { status: 500 });
-    }
+    return guarded("[alumni/history]", "Couldn't load the history.", async () => NextResponse.json({ groups: await listHistory(scope) }));
   }
-
   const at = readMoment(body.at);
   if (!at) return bad("Pick a date and time in the past.");
-
-  try {
-    if (body.dryRun === true) return NextResponse.json(await planRestore(scope, at));
-    const ids = Array.isArray(body.alumniIds) ? body.alumniIds.filter((id): id is string => typeof id === "string" && /^\d+$/.test(id)) : [];
-    if (!ids.length || ids.length > RESTORE_CHUNK) return bad(`Send 1 to ${RESTORE_CHUNK} alumni at a time.`);
-    const results = await runRestore(scope, at, ids, { actorEmail: auth.email, actorRole: auth.permission.role });
-    return NextResponse.json({ results });
-  } catch (error) {
-    console.error("[alumni/restore]", error);
-    return NextResponse.json({ error: "Couldn't restore. Try again." }, { status: 500 });
+  if (body.dryRun === true) {
+    return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () => NextResponse.json(await planRestore(scope, at)));
   }
+  const ids = readIds(body.alumniIds);
+  if (!ids) return bad(`Send 1 to ${RESTORE_CHUNK} alumni at a time.`);
+  const actor = { actorEmail: auth.email, actorRole: auth.permission.role };
+  return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () =>
+    NextResponse.json({ results: await runRestore(scope, at, ids, actor) }),
+  );
 }

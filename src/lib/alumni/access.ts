@@ -72,3 +72,16 @@ export async function reachesSchool(permission: UserPermission, schoolCode: stri
   }
   return canAccessSchoolSync(permission, schoolCode, region);
 }
+
+/** authorizeAlumni with edit access, then the request's JSON body (400 when it isn't JSON). */
+export async function authorizeEditWithBody(
+  request: Request,
+): Promise<{ ok: true; email: string; permission: UserPermission; body: unknown } | Extract<AlumniAuth, { ok: false }>> {
+  const auth = await authorizeAlumni({ requireEdit: true });
+  if (!auth.ok) return auth;
+  try {
+    return { ...auth, body: await request.json() };
+  } catch {
+    return { ok: false, response: NextResponse.json({ error: "Invalid request." }, { status: 400 }) };
+  }
+}

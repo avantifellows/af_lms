@@ -169,35 +169,50 @@ export default function BulkEditPanel({ students, onDone }: Props) {
   return <BulkEditor students={students} start={start} startError={startError} onDone={onDone} />;
 }
 
-function BulkEditor({ students, start, startError, onDone }: Props & { start: BulkCommon; startError: string }) {
+/** The answers being filled in, and what they mean for each student. `onEdit`: an answer changed. */
+function useBulkAnswers(start: BulkCommon, onEdit: () => void) {
   const common = start.common;
   /** What the person typed or picked (shared answers aren't in here unless changed). */
   const [typed, setTyped] = useState<Values>({});
   const [reopened, setReopened] = useState<Set<string>>(new Set());
   const [names, setNames] = useState<Record<string, string>>(start.names);
-  const [overwrite, setOverwrite] = useState(false);
+  const [overwrite, setOverwriteState] = useState(false);
+
+  const values = useMemo(() => ({ ...common, ...typed }), [common, typed]);
+  const views = useMemo(() => studentViews(start.gates, typed, overwrite, reopened), [start.gates, typed, overwrite, reopened]);
+  const errors = useMemo(() => reviewValues(typed, common, checkContext({})).errors, [typed, common]);
+  const { answers, replace } = useMemo(() => answersToSend(typed, common, views), [typed, common, views]);
+  const sections = ALUMNI_SECTIONS.map((s) => ({ section: s, ...splitSection(s, views, start, typed, reopened) }));
+
+  return {
+    common, values, names, overwrite, errors, answers, replace, sections,
+    folded: sections.flatMap((s) => s.folded),
+    setValue: (column: string, value: string) => {
+      setTyped((prev) => ({ ...prev, [column]: value }));
+      onEdit();
+    },
+    setName: (column: string, name: string) => setNames((prev) => ({ ...prev, [column]: name })),
+    setOverwrite: (on: boolean) => {
+      setOverwriteState(on);
+      onEdit();
+    },
+    reopen: (column: string) => setReopened((prev) => new Set(prev).add(column)),
+  };
+}
+
+type Answers = Pick<ReturnType<typeof useBulkAnswers>, "answers" | "replace" | "overwrite">;
+
+/** Check (nothing written), then save the students the check says can be saved. */
+function useBulkRun(students: BulkStudent[]) {
   const [stage, setStage] = useState<Stage>("edit");
   const [progress, setProgress] = useState(0);
   const [preview, setPreview] = useState<BulkResult[]>([]);
   const [saved, setSaved] = useState<BulkResult[]>([]);
   const [acceptWarnings, setAcceptWarnings] = useState(false);
-
-  const values = useMemo(() => ({ ...common, ...typed }), [common, typed]);
-  const views = useMemo(() => studentViews(start.gates, typed, overwrite, reopened), [start.gates, typed, overwrite, reopened]);
-  const newCount = students.filter((s) => s.kind === "pass-out").length;
-  const errors = useMemo(() => reviewValues(typed, common, checkContext({})).errors, [typed, common]);
-  const { answers, replace } = useMemo(() => answersToSend(typed, common, views), [typed, common, views]);
-  const sections = ALUMNI_SECTIONS.map((s) => ({ section: s, ...splitSection(s, views, start, typed, reopened) }));
-  const folded = sections.flatMap((s) => s.folded);
   const warnings = distinctWarnings(preview);
+  const toSave = preview.filter((r) => r.result === "create" || r.result === "update" || (acceptWarnings && r.result === "confirm"));
 
-  const setValue = (column: string, value: string) => {
-    setTyped((prev) => ({ ...prev, [column]: value }));
-    setStage("edit");
-  };
-  const reopen = (column: string) => setReopened((prev) => new Set(prev).add(column));
-
-  const check = async () => {
+  const check = async ({ answers, replace, overwrite }: Answers) => {
     setStage("checking");
     setProgress(0);
     setAcceptWarnings(false);
@@ -205,9 +220,7 @@ function BulkEditor({ students, start, startError, onDone }: Props & { start: Bu
     setStage("preview");
   };
 
-  const toSave = preview.filter((r) => r.result === "create" || r.result === "update" || (acceptWarnings && r.result === "confirm"));
-
-  const save = async () => {
+  const save = async ({ answers, replace, overwrite }: Answers) => {
     const keys = new Set(toSave.map((r) => `${r.target.kind}-${r.target.id}`));
     const chosen = students.filter((s) => keys.has(`${s.kind}-${s.id}`));
     setStage("saving");
@@ -217,13 +230,58 @@ function BulkEditor({ students, start, startError, onDone }: Props & { start: Bu
     setStage("done");
   };
 
-  if (stage === "done") return <DoneView results={saved} onClose={onDone} />;
+  return {
+    stage, progress, preview, saved, warnings, toSave, acceptWarnings, setAcceptWarnings, check, save,
+    edited: () => setStage("edit"),
+    busy: stage === "checking" || stage === "saving",
+    /** Students in the step running now. */
+    total: stage === "saving" ? toSave.length : students.length,
+  };
+}
 
-  const busy = stage === "checking" || stage === "saving";
-  const total = stage === "saving" ? toSave.length : students.length;
+function BulkEditor({ students, start, startError, onDone }: Props & { start: BulkCommon; startError: string }) {
+  const run = useBulkRun(students);
+  const form = useBulkAnswers(start, run.edited);
+
+  if (run.stage === "done") return <DoneView results={run.saved} onClose={onDone} />;
 
   return (
     <div className="space-y-5">
+      <BulkHeader students={students} />
+      {startError && <p className="text-xs text-warning-text">{startError}</p>}
+      <SharedAnswers columns={form.folded} values={form.values} names={form.names} onReopen={form.reopen} total={start.total} />
+      <MixedAnswers mixed={start.mixed} total={start.total} shown={form.sections.flatMap((s) => s.open.fields.map((f) => f.column))} />
+
+      {form.sections.filter((s) => s.hasOpen).map(({ section, open }, i) => (
+        <FormSectionBlock
+          key={section.id}
+          step={i + 1}
+          section={open}
+          values={form.values}
+          previous={form.common}
+          names={form.names}
+          errors={form.errors}
+          warnings={{}}
+          onValue={form.setValue}
+          onName={form.setName}
+        />
+      ))}
+
+      <OverwriteToggle checked={form.overwrite} disabled={run.busy} onChange={form.setOverwrite} />
+
+      {(run.stage === "preview" || run.stage === "saving") && (
+        <PreviewSummary results={run.preview} warnings={run.warnings} accept={run.acceptWarnings} onAccept={run.setAcceptWarnings} />
+      )}
+
+      <BulkActions run={run} form={form} students={students.length} />
+    </div>
+  );
+}
+
+function BulkHeader({ students }: { students: BulkStudent[] }) {
+  const newCount = students.filter((s) => s.kind === "pass-out").length;
+  return (
+    <>
       <header className="flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-coral-bg text-accent">
           <Users className="h-5 w-5" aria-hidden />
@@ -236,73 +294,74 @@ function BulkEditor({ students, start, startError, onDone }: Props & { start: Bu
           </p>
         </div>
       </header>
-
       <p className="flex items-start gap-2 rounded-lg bg-info-bg px-3 py-2 text-xs text-text-secondary">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
         Fill in only what&apos;s the same for everyone. Blank answers leave each student&apos;s record as it is. Branches
         usually differ — leave Branch empty here and pick it per student in the table.
       </p>
+    </>
+  );
+}
 
-      {startError && <p className="text-xs text-warning-text">{startError}</p>}
-      <SharedAnswers columns={folded} values={values} names={names} onReopen={reopen} total={start.total} />
-      <MixedAnswers mixed={start.mixed} total={start.total} shown={sections.flatMap((s) => s.open.fields.map((f) => f.column))} />
+function OverwriteToggle({ checked, disabled, onChange }: { checked: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 text-sm text-text-primary">
+      <input type="checkbox" className="mt-1" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        Also replace answers already on record
+        <span className="block text-xs text-text-muted">Off: only blanks are filled — a different value a student already has is kept.</span>
+      </span>
+    </label>
+  );
+}
 
-      {sections.filter((s) => s.hasOpen).map(({ section, open }, i) => (
-        <FormSectionBlock
-          key={section.id}
-          step={i + 1}
-          section={open}
-          values={values}
-          previous={common}
-          names={names}
-          errors={errors}
-          warnings={{}}
-          onValue={setValue}
-          onName={(column, name) => setNames((prev) => ({ ...prev, [column]: name }))}
-        />
-      ))}
-
-      <label className="flex items-start gap-2 text-sm text-text-primary">
-        <input type="checkbox" className="mt-1" checked={overwrite} disabled={busy}
-          onChange={(e) => { setOverwrite(e.target.checked); setStage("edit"); }} />
-        <span>
-          Also replace answers already on record
-          <span className="block text-xs text-text-muted">Off: only blanks are filled — a different value a student already has is kept.</span>
-        </span>
-      </label>
-
-      {(stage === "preview" || stage === "saving") && (
-        <PreviewSummary results={preview} warnings={warnings} accept={acceptWarnings} onAccept={setAcceptWarnings} />
-      )}
-
-      <div className="sticky bottom-0 z-10 -mx-6 -mb-6 flex flex-wrap items-center gap-3 rounded-b-xl border-t border-border bg-bg-card/95 px-6 py-4 backdrop-blur">
-        {busy ? (
-          <span className="inline-flex items-center gap-2 text-sm text-text-secondary">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            {stage === "checking" ? "Checking" : "Saving"} {progress} of {total}…
-          </span>
-        ) : stage === "preview" ? (
-          <>
-            <Button type="button" onClick={save} disabled={!toSave.length}>
-              Save {toSave.length} {toSave.length === 1 ? "student" : "students"}
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setStage("edit")}>Change answers</Button>
-          </>
-        ) : (
-          <>
-            <Button type="button" onClick={check} disabled={!Object.keys(answers).length || Object.keys(errors).length > 0}>
-              Check {students.length} students
-            </Button>
-            <span className="text-sm text-text-muted">
-              {Object.keys(errors).length
-                ? `${Object.keys(errors).length} field${Object.keys(errors).length === 1 ? " needs" : "s need"} fixing.`
-                : !Object.keys(answers).length ? "Fill in at least one answer." : "Nothing is saved until you confirm."}
-            </span>
-          </>
-        )}
-      </div>
+/** The sticky bar: progress while running, Save after a check, else Check. */
+function BulkActions({ run, form, students }: {
+  run: ReturnType<typeof useBulkRun>;
+  form: ReturnType<typeof useBulkAnswers>;
+  students: number;
+}) {
+  return (
+    <div className="sticky bottom-0 z-10 -mx-6 -mb-6 flex flex-wrap items-center gap-3 rounded-b-xl border-t border-border bg-bg-card/95 px-6 py-4 backdrop-blur">
+      <ActionsContent run={run} form={form} students={students} />
     </div>
   );
+}
+
+function ActionsContent({ run, form, students }: Parameters<typeof BulkActions>[0]) {
+  if (run.busy) {
+    return (
+      <span className="inline-flex items-center gap-2 text-sm text-text-secondary">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        {run.stage === "checking" ? "Checking" : "Saving"} {run.progress} of {run.total}…
+      </span>
+    );
+  }
+  if (run.stage === "preview") {
+    return (
+      <>
+        <Button type="button" onClick={() => run.save(form)} disabled={!run.toSave.length}>
+          Save {run.toSave.length} {run.toSave.length === 1 ? "student" : "students"}
+        </Button>
+        <Button type="button" variant="secondary" onClick={run.edited}>Change answers</Button>
+      </>
+    );
+  }
+  const errorCount = Object.keys(form.errors).length;
+  const answerCount = Object.keys(form.answers).length;
+  return (
+    <>
+      <Button type="button" onClick={() => run.check(form)} disabled={!answerCount || errorCount > 0}>
+        Check {students} students
+      </Button>
+      <span className="text-sm text-text-muted">{checkHint(errorCount, answerCount)}</span>
+    </>
+  );
+}
+
+function checkHint(errorCount: number, answerCount: number): string {
+  if (errorCount) return `${errorCount} field${errorCount === 1 ? " needs" : "s need"} fixing.`;
+  return answerCount ? "Nothing is saved until you confirm." : "Fill in at least one answer.";
 }
 
 /** Answers every selected student already has: folded away, each with a pencil to change it. */

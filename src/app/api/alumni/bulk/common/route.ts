@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authorizeAlumni } from "@/lib/alumni/access";
+import { authorizeEditWithBody } from "@/lib/alumni/access";
 import { COMMON_MAX, loadCommonAnswers } from "@/lib/alumni/bulk";
 import { readBulkTargets } from "@/lib/alumni/bulk-types";
 
@@ -8,15 +8,9 @@ import { readBulkTargets } from "@/lib/alumni/bulk-types";
  * on record, the same for all (prefilled) or differing.
  */
 export async function POST(request: Request) {
-  const auth = await authorizeAlumni({ requireEdit: true });
+  const auth = await authorizeEditWithBody(request);
   if (!auth.ok) return auth.response;
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
-  }
-  const targets = readBulkTargets(body, COMMON_MAX);
+  const targets = readBulkTargets(auth.body, COMMON_MAX);
   if (typeof targets === "string") return NextResponse.json({ error: targets }, { status: 400 });
   try {
     return NextResponse.json(await loadCommonAnswers(targets, auth.permission));
