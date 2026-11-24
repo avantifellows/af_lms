@@ -836,8 +836,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   programs). One exam is hard-coded: JEE Main 2027 = the `exam` row named "JEE Mains" +
   `exam_year` 2027 (`JEE_FORM_EXAM` in the client-safe `src/lib/blended-learning-jee-form-input.ts`).
 - **Tables:** db-service #856 (branch `feat/bl-jee-form`; deploy all of its migrations before this
-  code): `20261124122211_add_blended_learning_jee_form_updates` and
-  `20261124142920_add_key_to_blended_learning_common_action_items` (below). The first adds append-only
+  code): `20261124122211_add_blended_learning_jee_form_updates`,
+  `20261124142920_add_key_to_blended_learning_common_action_items` and
+  `20261124143246_tie_jee_form_confirmation_to_same_student` (below). The first adds append-only
   `blended_learning_jee_form_updates` (latest row per Student + exam + year is the status, the
   rest is history; `filled` carries `application_number` and an optional
   `confirmation_document_id` → `lms_student_documents`; `not_filled` carries `reasons` (fixed
@@ -856,6 +857,13 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   "jee form filling (reminder)" as `jee_form_reminder`; mirrored by
   `e2e/fixtures/migrations/20261124142920_add_key_to_blended_learning_common_action_items.sql`
   (pg_dump- and row-identical against the `.exs` on two scratch DBs, re-runnable).
+  `20261124143246` makes `confirmation_document_id` a composite FK, `(confirmation_document_id,
+  student_id)` → `lms_student_documents(id, student_id)` (same constraint name, backed by the new
+  unique index `lms_student_documents_id_student_unique`), so an update's confirmation must be a
+  document of the same Student; mirrored by
+  `e2e/fixtures/migrations/20261124143246_tie_jee_form_confirmation_to_same_student.sql`
+  (pg_dump-identical, re-runnable; `lms_student_documents` comes from the earlier
+  `20260528120000` mirror).
 - **Write:** `POST /api/blended-learning/students/[id]/jee-form` (multipart) → `recordJeeForm` in
   `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (a Mentor mutation: only the
   Mentor of the active Mapping, never read-only; Blended Learning Admins and LMS admins get 403 and
