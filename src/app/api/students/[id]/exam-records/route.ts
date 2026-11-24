@@ -146,6 +146,10 @@ async function applyRemovals(
  * An application number the Student already carries on an exam that is staying
  * put would be hijacked by the DB Service's upsert, so the whole save is
  * refused rather than another registration silently moving.
+ *
+ * The Blended Learning JEE form has its own copy of this check
+ * (`planExamRecordWrite` in lib/blended-learning-jee-form.ts); af_lms#544
+ * tracks sharing one.
  */
 function clashingApplicationNumber(
   exams: CanonicalExamRecordInput[],

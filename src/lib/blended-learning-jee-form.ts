@@ -376,7 +376,9 @@ const sameNumber = (a: string | null, b: string) => (a ?? "").trim().toLowerCase
 // the exam, so a number the Student already holds on another record would
 // move that record. Such a number is refused instead, except on the
 // Student's yearless "JEE Mains" record (as the Exams tab saves them), which
-// is taken to be this registration and given the year.
+// is taken to be this registration and given the year. The Exams tab has its
+// own copy of this clash check (`clashingApplicationNumber` in
+// app/api/students/[id]/exam-records/route.ts); af_lms#544 tracks sharing one.
 export function planExamRecordWrite(
   rows: ExamRecordRow[],
   examId: number,
