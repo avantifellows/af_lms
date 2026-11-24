@@ -121,7 +121,9 @@ async function fakeQuery(text: string, params?: unknown[]) {
   }
   if (text.includes("FROM blended_learning_action_items item")) {
     const [studentId] = params?.[0] as number[];
-    return [{ student_id: studentId, id: 81, text: "JEE Form Filling (Reminder)", status: updates.some((u) => u.status === "filled") ? "done" : "open" }];
+    // Done once a save has ticked it.
+    const ticked = writesTo("UPDATE blended_learning_action_items").length > 0;
+    return [{ student_id: studentId, id: 81, text: "JEE Form Filling (Reminder)", status: ticked ? "done" : "open" }];
   }
   return [];
 }
@@ -388,6 +390,44 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     expect(res.body.form.passwordSaved).toBe(true);
   });
 
+  it("saves the same Filled form again as no change (200), but still ticks an open reminder by the latest update", async () => {
+    signedInAs(MENTOR_A);
+    expect((await record("501", FILLED)).status).toBe(201);
+    // The reminder was pushed after Filled was recorded, so it is open again.
+    txWrites = [];
+    examRecords = [
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+    ];
+
+    const again = await record("501", FILLED_KEEP);
+    expect(again.status).toBe(200);
+    expect(writesTo("INSERT INTO blended_learning_jee_form_updates")).toEqual([]);
+    const [tick] = writesTo("UPDATE blended_learning_action_items");
+    expect(tick.sql).toContain("item.status = 'open'");
+    // Done by the latest update (900), which is Filled.
+    expect(tick.params).toEqual([501, "JEE Form Filling (Reminder)", 900, MENTOR_A]);
+    expect(again.body.form.current).toMatchObject({ id: 900, status: "filled" });
+    expect(again.body.form.reminderItems).toEqual([{ id: 81, text: "JEE Form Filling (Reminder)", status: "done" }]);
+  });
+
+  it("counts a typed password as a change: the same number with a password records a new update (201) and ticks", async () => {
+    signedInAs(MENTOR_A);
+    expect((await record("501", FILLED, PDF)).status).toBe(201);
+    examRecords = [
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
+    ];
+
+    const again = await record("501", FILLED);
+    expect(again.status).toBe(201);
+    const inserts = writesTo("INSERT INTO blended_learning_jee_form_updates");
+    expect(inserts).toHaveLength(2);
+    // The same number, keeping the confirmation already uploaded.
+    expect(inserts[1].params.slice(3, 6)).toEqual(["filled", "270310000001", 4401]);
+    expect(writesTo("UPDATE blended_learning_action_items").map((write) => write.params[2])).toEqual([900, 901]);
+    expect(again.text).not.toContain(TYPED_PASSWORD);
+    expect(again.body.form.current).toMatchObject({ id: 901, status: "filled" });
+  });
+
   it("refuses (409) a number the Student holds on another exam, writing nothing", async () => {
     examRecords = [{ id: 60, exam_id: 7, exam_name: "JEE Advanced", exam_year: 2027, application_number: "270310000001" }];
     signedInAs(MENTOR_A);
@@ -589,6 +629,9 @@ describe("POST /api/blended-learning/students/[id]/jee-form: not filled", () => 
     expect(again.status).toBe(200);
     expect(writesTo("INSERT INTO blended_learning_jee_form_updates")).toHaveLength(1);
     expect(writesTo("INSERT INTO blended_learning_mentor_flags")).toHaveLength(1);
+    // Not filled never ticks the reminder, saved again or not.
+    expect(writesTo("UPDATE blended_learning_action_items")).toEqual([]);
+    expect(again.body.form.reminderItems).toEqual([{ id: 81, text: "JEE Form Filling (Reminder)", status: "open" }]);
   });
 
   it("can change a not-filled status to filled later, keeping the earlier one as history", async () => {

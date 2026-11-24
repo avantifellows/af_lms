@@ -10,7 +10,11 @@ import { recordJeeForm, type ConfirmationFile } from "@/lib/blended-learning-jee
 // Mapping records it; Blended Learning Admins and read-only accounts get 403
 // (they may still reveal the password, through ./password). The
 // password is stored only as KMS ciphertext, and the response carries only
-// whether one is saved (`passwordSaved`), never the password.
+// whether one is saved (`passwordSaved`), never the password. 201 when an
+// update is recorded; 200 when the same form is saved again (no password
+// typed, no new PDF), which records nothing new but still ticks an open
+// "JEE Form Filling (Reminder)" when Filled. Either way `form` is read after
+// the save, so its `reminderItems` show the tick.
 export const POST = withBlendedLearning("record_jee_form", async (request, { access, id }) => {
   let form: FormData;
   try {

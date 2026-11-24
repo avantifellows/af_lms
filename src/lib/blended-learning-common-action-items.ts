@@ -16,6 +16,8 @@ import {
   type CommonTarget,
   type FieldErrors,
 } from "./blended-learning-manage-input";
+import { JEE_FORM_EXAM, JEE_FORM_REMINDER_TEXT } from "./blended-learning-jee-form-input";
+import { jeeReminderMatchSql, latestFilledJeeUpdateSql } from "./blended-learning-jee-reminder";
 import { currentGradeLateralSql } from "./blended-learning-mentees";
 
 // Common Action Items (server-only): an Action Item a Blended Learning Admin
@@ -26,7 +28,9 @@ import { currentGradeLateralSql } from "./blended-learning-mentees";
 // Action Item per targeted Student (conversation_id NULL); Students mapped
 // later get it only when it is pushed again, which adds it to targeted
 // Students who don't have it yet (the partial unique index makes that
-// idempotent). Mentors tick these off like any open Action Item. Editing
+// idempotent). Mentors tick these off like any open Action Item, except the
+// "JEE Form Filling (Reminder)", which only the JEE form ticks: a push adds it
+// done to a Student whose latest JEE form update is already Filled. Editing
 // updates the still-open rows; removing deletes them, keeps done ones and
 // soft-removes the Common Action Item. Every call needs `manage`.
 
@@ -237,17 +241,33 @@ export async function listCommonActionItems(access: BlendedLearningAccess): Prom
 }
 
 // Add the Common Action Item, as an open Action Item, to every targeted
-// Student who doesn't have it yet. Returns how many were added.
+// Student who doesn't have it yet. Returns how many were added (open or done).
+//
+// The JEE reminder (matched as jeeReminderMatchSql does) is the exception: a
+// Student whose latest JEE form update for JEE_FORM_EXAM is already Filled
+// gets it done by that update, as if saving Filled had ticked it, with the
+// update's recorder as `completed_by_email`. Added open, nothing could close
+// it: a Conversation can't tick it, and saving the same Filled form again
+// records nothing new. Every other Common Action Item, and the reminder for
+// a Student Not filled or not recorded, is added open as before.
 async function materialise(client: PoolClient, commonId: number): Promise<number> {
   const result = await client.query(
-    `INSERT INTO blended_learning_action_items (common_action_item_id, student_id, position, owner, text)
-     SELECT common.id, targeted.student_id, 1, common.owner, common.text
+    `INSERT INTO blended_learning_action_items
+       (common_action_item_id, student_id, position, owner, text,
+        status, completed_by_jee_form_update_id, completed_at, completed_by_email)
+     SELECT common.id, targeted.student_id, 1, common.owner, common.text,
+            CASE WHEN filled.id IS NULL THEN 'open' ELSE 'done' END,
+            filled.id,
+            CASE WHEN filled.id IS NULL THEN NULL ELSE now() END,
+            filled.recorded_by_email
      FROM blended_learning_common_action_items common
      CROSS JOIN LATERAL (${targetedStudentsSql(COMMON_TARGET_COLUMNS, "$2")}) targeted
+     LEFT JOIN LATERAL (${latestFilledJeeUpdateSql("targeted.student_id", "$4", "$5")}) filled
+       ON ${jeeReminderMatchSql("common", "$3")}
      WHERE common.id = $1 AND common.removed_at IS NULL
      ON CONFLICT (common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING
      RETURNING id`,
-    [commonId, CURRENT_ACADEMIC_YEAR]
+    [commonId, CURRENT_ACADEMIC_YEAR, JEE_FORM_REMINDER_TEXT, JEE_FORM_EXAM.examName, JEE_FORM_EXAM.examYear]
   );
   return result.rowCount ?? result.rows.length;
 }

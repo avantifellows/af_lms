@@ -55,7 +55,9 @@ import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type U
 //   replace after), the optional confirmation PDF
 //   goes to S3 and `lms_student_documents` through the existing document
 //   upload, and the Student's open "JEE Form Filling (Reminder)" Common
-//   Action Item is ticked done.
+//   Action Item is ticked done. Saving the same Filled form again adds no
+//   update but still ticks an open reminder (by the latest update); a typed
+//   password always counts as a change.
 // - Not filled: the reasons and details are stored and a Mentor Flag with
 //   recipient `jee_form` is raised for the program team's Flags feed.
 //
@@ -501,10 +503,15 @@ type LatestRow = {
   details: string | null;
 };
 
-// The same status and values as the latest update, with no new PDF.
+// The same status and values as the latest update, with no new PDF and, for
+// Filled, no password typed: a typed password can't be compared with the
+// saved ciphertext (and is written to the exam record before this runs), so
+// it always counts as a change and records a new update.
 function unchanged(latest: LatestRow | undefined, input: JeeFormInput, newDocument: boolean): boolean {
   if (!latest || latest.status !== input.status || newDocument) return false;
-  if (input.status === "filled") return latest.application_number === input.applicationNumber;
+  if (input.status === "filled") {
+    return input.password === null && latest.application_number === input.applicationNumber;
+  }
   return (latest.reasons ?? []).join(",") === input.reasons.join(",") && latest.details === input.details;
 }
 
@@ -597,7 +604,11 @@ async function latestUpdate(client: PoolClient, studentId: number, examId: numbe
 }
 
 // The update, its flag or tick, in one transaction. False when nothing
-// changed (the same status and values were saved again).
+// changed (the same status and values were saved again): no update is added
+// then, but saving Filled again still ticks an open reminder, done by the
+// latest (Filled) update. That closes a reminder left open while the Student
+// was already Filled (a push that ran alongside the save, or one made before
+// pushes added it done), which nothing else can tick.
 function saveUpdate(
   access: BlendedLearningAccess,
   studentId: number,
@@ -609,7 +620,10 @@ function saveUpdate(
     const mapping = await lockMappingInScope(client, access, studentId);
     if (!mapping) throw new OutOfScope();
     const latest = await latestUpdate(client, studentId, examId);
-    if (unchanged(latest, input, stored !== null)) return false;
+    if (unchanged(latest, input, stored !== null)) {
+      if (latest?.status === "filled") await tickReminder(client, access, studentId, Number(latest.id));
+      return false;
+    }
 
     const updateId = await insertUpdate(client, access, {
       studentId,
@@ -704,7 +718,9 @@ async function writeApplication(
 // (including a Filled form without a password while none is saved), 409 an
 // application number held by another record, 502 when KMS, S3 or the DB
 // Service fails (nothing is recorded then), 503 without a "JEE Mains" exam
-// row.
+// row. On success `created` is false when the same form was saved again
+// (nothing new recorded, though an open reminder is still ticked); `form` is
+// read after the save, so it shows the reminder as it now is.
 export async function recordJeeForm(
   access: BlendedLearningAccess,
   studentId: number,

@@ -748,7 +748,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   target, lists the pasted IDs not found and those found with no active Mapping (`unmatchedStudentIds`).
   The IDs are stored so Push again reaches the same list. `createCommonActionItem` inserts the item
   and materialises it in one transaction (`INSERT … SELECT … ON CONFLICT (common_action_item_id,
-  student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`); a target with no Students (or
+  student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`; open, except the JEE reminder
+  for a Student already Filled, added done: see "Blended Learning JEE form"); a target with no Students (or
   an unknown Mentor, 23503) rolls back as a 422. `pushCommonActionItem` locks the item `FOR UPDATE`
   (removed → 404) and runs the same insert, so it adds only targeted Students who don't have it
   (done included) and a repeat adds 0. `updateCommonActionItem` updates the item and its rows
@@ -861,8 +862,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   picker). Then one transaction appends the update (Mapping's Mentor/program/year, actor as
   `recorded_by_email`) and either raises the `jee_form` flag (comment = exam + reason labels +
   details) or ticks the Student's open Action Items whose Common Action Item text is "JEE Form
-  Filling (Reminder)" (case and spacing ignored; no id is hard-coded). Re-saving the same values is
-  a 200 no-op. A failed DB Service/S3 call is a 502 and withdraws the stored PDF.
+  Filling (Reminder)" (case and spacing ignored; no id is hard-coded). Re-saving the same values
+  (no new PDF, no password typed) appends nothing (200), but a Filled re-save still ticks an open
+  reminder, done by the latest update; the POST's `form` is read after the save, so the tab's
+  "Reminder" line shows Done. A typed password can't be compared with the saved ciphertext, so it
+  always counts as a change (201, a new update that keeps the PDF). A failed DB Service/S3 call is
+  a 502 and withdraws the stored PDF.
 - **Exam-portal password (write-only):** Filled also takes `password`. It is required (422
   `fieldErrors.password`, also checked in the browser through `validateJeeForm(…, { requirePassword })`)
   while the record being written has no `application_password_ciphertext`; once one is saved, a
@@ -905,8 +910,15 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Reminder rule:** `src/lib/blended-learning-jee-reminder.ts` holds the reminder's text match.
   `getMenteeDetail` marks the open item `jeeReminder`, so the Mentee page and the log form show a
   "Fill in JEE tab" link instead of a tick; `completeActionItems` (the only manual tick path, used
-  by the log form and draft saves) answers 409 when a ticked id is the reminder. Only a Filled
-  save ticks it; it is never unticked.
+  by the log form and draft saves) answers 409 when a ticked id is the reminder. Only the JEE form
+  ticks it, so it must never be left open for a Student already Filled: a Filled save or re-save
+  ticks an open one, and `materialise` in `blended-learning-common-action-items.ts` (first push and
+  Push again; the only path that creates pushed rows: a new Mapping gets nothing until Push again)
+  adds it done for a Student whose latest JEE Mains 2027 update is Filled
+  (`latestFilledJeeUpdateSql`: `completed_by_jee_form_update_id` = that update, `completed_by_email`
+  = its `recorded_by_email`, `completed_at` = now), open for everyone else; every other Common
+  Action Item is added open as before. It is never unticked. (Editing another Common Action Item's
+  text into the reminder's leaves its open rows open; a Filled re-save ticks them.)
   `GET …/jee-form/confirmation` redirects to a 5-minute presigned GET (anyone who can view the
   Mentee). The Flags feed shows `jee_form` flags as "JEE form (program team)": `listFlags` and
   `listFlagMentors` LEFT JOIN the Conversation and the JEE form update and COALESCE Mentor,
@@ -916,8 +928,11 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `lms_student_documents` as the DB Service does and lists requests at `/__requests`.
   `blended-learning-jee-form.spec.ts` (the tab, the status line and the reminder rule) uses Mentor
   C's `JEE_FORM_MENTEES` (K1–K3, seeded last, with
-  the reminder pushed to them and K2's yearless JEE Mains record). E2E has no S3, so the PDF upload
-  is route-tested only.
+  the reminder pushed to them and K2's yearless JEE Mains record). `blended-learning-jee-reminder.spec.ts`
+  (a push and Push again to a Filled / Not filled / not-recorded mix; a reminder left open for a
+  Filled Student ticked by a re-save) uses `JEE_REMINDER_MENTEES` (L1–L7, seeded with no Mapping):
+  it maps them to Mentor C, then removes its Common Action Items and ends those Mappings
+  (`ended_by_email` `e2e-cleanup@example.com`). E2E has no S3, so the PDF upload is route-tested only.
 - **Not built:** a write-only encrypted application password (the panel leaves a row for it), other
   exams, any import or prefill. The Exams tab keeps one record per exam, so a Student with both a
   yearless and a 2027 JEE Mains record shows only one there.

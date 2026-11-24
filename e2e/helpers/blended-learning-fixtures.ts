@@ -194,6 +194,30 @@ export const JEE_FORM_MENTEES = {
   admin: { key: "K3", firstName: "Lata", lastName: "Jee", gender: "Female", grade: 12, programId: 80 },
 } as const satisfies Record<string, FixtureMentee>;
 export const JEE_REMINDER_TEXT = "JEE Form Filling (Reminder)";
+// Students for the JEE reminder spec (blended-learning-jee-reminder.spec.ts),
+// seeded with no Mapping: the spec maps them to Mentor C, the push ones
+// before the first push and the pushAgain ones after it, and ends those
+// Mappings when it is done, so no other spec lists them. In each set the
+// spec records "filled" as Filled and "notFilled" as Not filled, and leaves
+// "notRecorded" alone. "raced" is recorded Filled and then given an open
+// reminder, as a push that ran alongside that save would leave it.
+export const JEE_REMINDER_MENTEES = {
+  push: {
+    filled: { key: "L1", firstName: "Leela", lastName: "Pushfilled", gender: "Female", grade: 12, programId: 80 },
+    notFilled: { key: "L2", firstName: "Lalit", lastName: "Pushnotfilled", gender: "Male", grade: 12, programId: 80 },
+    notRecorded: { key: "L3", firstName: "Lina", lastName: "Pushnotrecorded", gender: "Female", grade: 13, programId: 90 },
+  },
+  pushAgain: {
+    filled: { key: "L4", firstName: "Lakshya", lastName: "Againfilled", gender: "Male", grade: 12, programId: 80 },
+    notFilled: { key: "L5", firstName: "Lavanya", lastName: "Againnotfilled", gender: "Female", grade: 13, programId: 90 },
+    notRecorded: { key: "L6", firstName: "Lokesh", lastName: "Againnotrecorded", gender: "Male", grade: 12, programId: 80 },
+  },
+  raced: { key: "L7", firstName: "Latika", lastName: "Raced", gender: "Female", grade: 12, programId: 80 },
+} as const satisfies {
+  push: Record<string, FixtureMentee>;
+  pushAgain: Record<string, FixtureMentee>;
+  raced: FixtureMentee;
+};
 // Synthetic only. The password is seeded to prove the card never reads,
 // changes or shows it.
 export const JEE_EXISTING_RECORD = { applicationNumber: "E2E-JEE-0002", password: "e2e-not-for-display" } as const;
@@ -681,6 +705,12 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   ];
   // Seeded after the Screener Mentees for the same reason.
   const jeeFormMentees = Object.values(JEE_FORM_MENTEES);
+  // Seeded last for the same reason, with no Mapping (the spec maps them).
+  const jeeReminderMentees = [
+    ...Object.values(JEE_REMINDER_MENTEES.push),
+    ...Object.values(JEE_REMINDER_MENTEES.pushAgain),
+    JEE_REMINDER_MENTEES.raced,
+  ];
   for (const [index, mentee] of [
     ...Object.values(MENTEES),
     ...Object.values(OTHER_STUDENTS),
@@ -690,6 +720,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     DROPOUT_MENTEE,
     SUPERVISOR_MENTEE,
     ...jeeFormMentees,
+    ...jeeReminderMentees,
   ].entries()) {
     ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
