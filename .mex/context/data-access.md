@@ -878,6 +878,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   from Postgres (`confirmCiphertextStored`) because an old DB Service drops the unknown key with a
   2xx. A KMS failure is a 502 before any write. Page data carries only `JeeFormView.passwordSaved`
   (ciphertext IS NOT NULL on the 2027 record), never the password or the ciphertext.
+  So a JNV NVS-only Student can't be recorded as Filled (422 without a password, 403 with one);
+  Not filled still works. Accepted on review of #507 (Blended Learning has no NVS Students); if
+  NVS Students are ever mapped, don't offer Filled for them or drop the password requirement.
 - **Reveal:** `POST /api/blended-learning/students/[id]/jee-form/password` (`reveal_exam_password`:
   not read-only, Mentor or admin, as the Exams tab needs edit rights; a read-only account gets 403
   before anything is decrypted or logged, and `JeePasswordReveal` renders "Show password" disabled

@@ -675,6 +675,10 @@ async function passwordCiphertext(
   }
   // A safety net: exam registrations are a physical-centre feature, never
   // collected for a JNV NVS-only Student (as on the Exams tab).
+  // So such a Student can't be recorded as Filled (Not filled still works).
+  // Accepted on review of #507: Blended Learning has no NVS Students. If NVS
+  // Students are ever mapped, don't offer Filled for them or drop the password
+  // requirement.
   if (await isPmuOnlyStudent(studentId)) return { ok: false, result: NVS_REFUSED };
   try {
     return { ok: true, ciphertext: await encryptExamPassword(password, studentId) };

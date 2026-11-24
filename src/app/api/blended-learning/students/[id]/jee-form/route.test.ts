@@ -538,6 +538,32 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  // Accepted on review of #507 (Blended Learning has no NVS Students): Filled
+  // needs a password, which is refused for an NVS-only Student.
+  it("can't record a JNV NVS-only Student without a saved password as Filled, but records Not filled", async () => {
+    MAPPINGS[502] = 9001;
+    try {
+      signedInAs(MENTOR_A);
+      const blank = await record("502", FILLED_KEEP);
+      expect(blank.status).toBe(422);
+      expect(blank.body.fieldErrors).toEqual({ password: "Enter the exam portal password." });
+
+      const typed = await record("502", FILLED);
+      expect(typed.status).toBe(403);
+      expect(typed.body.error).toBe("Exam registrations are not collected for JNV NVS Students");
+      expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+      expect(fetchCalls).toEqual([]);
+      expect(txWrites).toEqual([]);
+
+      const notFilled = await record("502", NOT_FILLED);
+      expect(notFilled.status).toBe(201);
+      expect(writesTo("INSERT INTO blended_learning_jee_form_updates")).toHaveLength(1);
+      expect(updates.map((update) => update.status)).toEqual(["not_filled"]);
+    } finally {
+      delete MAPPINGS[502];
+    }
+  });
+
   it("records nothing (502) when KMS fails, logging only the error's name", async () => {
     kms.on(EncryptCommand).rejects(Object.assign(new Error("arn:aws:kms:fake-key-arn denied for fake-iam-user"), { name: "AccessDeniedException" }));
     signedInAs(MENTOR_A);
