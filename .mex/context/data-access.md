@@ -916,8 +916,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   not read-only, Mentor or admin, as the Exams tab needs edit rights; a read-only account gets 403
   before anything is decrypted or logged, and `JeePasswordReveal` renders "Show password" disabled
   as "View only" from the tab's `canReveal`; `Cache-Control: no-store`) → `revealJeeFormPassword` in
-  `src/lib/blended-learning-jee-password.ts`: `canAccessBlendedStudent` (403 otherwise: a Mentor,
-  team leads included, only their own Mentees; admins any mapped Student), not JNV NVS-only (403), the 2027 record's
+  `src/lib/blended-learning-jee-password.ts`: `canAccessBlendedStudent` (404 `Not found` otherwise,
+  as the form's save and confirmation answer: a Mentor, team leads included, only their own Mentees,
+  never a supervised Mentor's; admins any mapped Student; the read-only 403 comes first, from the
+  guard), not JNV NVS-only (403), the 2027 record's
   ciphertext (404 without one), `decryptExamPassword`, then Aman's `recordExamPasswordReveal` (viewer
   email + BL role) before the password is returned; a failed log is a 500 and no reveal. The Exams
   tab's `exam-records-gate` can't be used here (it denies Blended roles). UI: `jee-form/JeePassword.tsx`.

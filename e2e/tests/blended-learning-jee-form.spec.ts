@@ -577,10 +577,10 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     const res = await page.request.post(jeeFormUrl(mentee), { multipart: { status: "not_filled", reasons: "not_aware" } });
     expect(res.status()).toBe(404);
     expect((await updates(studentIds[mentee.key])).length).toBe(2);
-    // Nor reveal their password: refused, and nothing logged.
+    // Nor reveal their password: not found, as the save is, and nothing logged.
     const logged = (await reveals(studentIds[mentee.key])).length;
     const reveal = await page.request.post(passwordUrl(mentee));
-    expect(reveal.status()).toBe(403);
+    expect(reveal.status()).toBe(404);
     expect(await reveal.text()).not.toContain(MENTOR_PASSWORD);
     expect((await reveals(studentIds[mentee.key])).length).toBe(logged);
   });

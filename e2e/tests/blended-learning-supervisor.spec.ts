@@ -321,7 +321,7 @@ test.describe("Blended Learning supervisor view", () => {
     });
     expect(jee.status()).toBe(404);
     const reveal = await page.request.post(`/api/blended-learning/students/${taraId}/jee-form/password`);
-    expect(reveal.status()).toBe(403);
+    expect(reveal.status()).toBe(404);
     const confirmation = await page.request.get(`/api/blended-learning/students/${taraId}/jee-form/confirmation`, {
       maxRedirects: 0,
     });

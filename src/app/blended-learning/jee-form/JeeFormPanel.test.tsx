@@ -248,11 +248,16 @@ describe("JeeFormPanel with a password already saved", () => {
     expect(screen.queryByText("fake-revealed-3")).not.toBeInTheDocument();
   });
 
-  it("says so when the reveal is refused", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }));
+  it.each([
+    [403, "Forbidden"],
+    // Out of scope (the Mapping ended since the page loaded): as any other failure.
+    [404, "Not found"],
+  ])("says so when the reveal is refused (%i)", async (status, error) => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error }), { status }));
     panel(SAVED_FILLED, false);
     await userEvent.click(screen.getByRole("button", { name: "Show password" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Forbidden");
+    expect(await screen.findByRole("alert")).toHaveTextContent(error);
+    expect(screen.getByRole("button", { name: "Show password" })).toBeInTheDocument();
   });
 });
 

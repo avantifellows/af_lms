@@ -134,20 +134,23 @@ describe("POST /api/blended-learning/students/[id]/jee-form/password: who may re
     expect(events).toEqual(["decrypt", "log", "response"]);
   });
 
-  it("refuses (403) another Mentor's Mentee and an unmapped Student, revealing nothing", async () => {
+  it("answers 404 for another Mentor's Mentee and an unmapped Student, as the form's other routes do, revealing nothing", async () => {
     signedInAs(MENTOR_A);
     for (const id of ["601", "503"]) {
       const res = await reveal(id);
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Not found" });
       expect(res.cacheControl).toBe("no-store");
     }
     expectNothingRevealed();
+    expect(sql.some((text) => text.includes("FROM student_exam_record"))).toBe(false);
   });
 
-  it("lets a team lead reveal only their own Mentee's password, never a supervised Mentor's (403, nothing read)", async () => {
+  it("lets a team lead reveal only their own Mentee's password, never a supervised Mentor's (404, nothing read)", async () => {
     signedInAs(SUPERVISOR);
     const refused = await reveal("601");
-    expect(refused.status).toBe(403);
+    expect(refused.status).toBe(404);
+    expect(refused.body).toEqual({ error: "Not found" });
     expect(refused.text).not.toContain(PASSWORD);
     expectNothingRevealed();
     expect(sql.some((text) => text.includes("FROM student_exam_record"))).toBe(false);
@@ -156,10 +159,13 @@ describe("POST /api/blended-learning/students/[id]/jee-form/password: who may re
     expect(reveals).toEqual([[701, 77, 1, SUPERVISOR, "blended_mentor"]]);
   });
 
-  it("refuses (403) read-only accounts, Mentor or admin, even in scope: nothing decrypted or logged", async () => {
+  it("refuses (403) read-only accounts, Mentor or admin, in scope or not: nothing decrypted or logged", async () => {
     for (const [email, id] of [
       [MENTOR_READ_ONLY, "501"],
       [ADMIN_READ_ONLY, "601"],
+      // Out of scope too: the read-only refusal comes first, so never a 404.
+      [MENTOR_READ_ONLY, "601"],
+      [ADMIN_READ_ONLY, "503"],
     ] as const) {
       signedInAs(email);
       const res = await reveal(id);
@@ -182,7 +188,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form/password: who may re
     ]);
 
     signedInAs(ADMIN);
-    expect((await reveal("503")).status).toBe(403);
+    expect((await reveal("503")).status).toBe(404);
   });
 
   it("refuses (403) a JNV NVS-only Student, as the Exams tab does", async () => {

@@ -31,6 +31,8 @@ export type RevealJeePasswordResult =
   | { ok: false; status: 403 | 404; error: string };
 
 const FORBIDDEN: RevealJeePasswordResult = { ok: false, status: 403, error: "Forbidden" };
+// Out of scope: the same answer the JEE form's save and confirmation give.
+const NOT_FOUND: RevealJeePasswordResult = { ok: false, status: 404, error: "Not found" };
 const NONE_SAVED: RevealJeePasswordResult = { ok: false, status: 404, error: "No password saved" };
 
 type CiphertextRow = { id: number | string; exam_id: number | string; application_password_ciphertext: string };
@@ -48,14 +50,18 @@ async function jeeCiphertext(studentId: number, examId: number): Promise<Ciphert
   return rows[0];
 }
 
-// 403 out of scope (or a JNV NVS-only Student), 404 with no password saved.
+// 404 out of scope (another Mentor's Mentee, a supervised Mentor's Mentee,
+// no active Mapping), as the JEE form's other routes answer; 403 for a JNV
+// NVS-only Student; 404 with no password saved. (403 for a read-only account
+// or a role without reveal_exam_password comes from the route's guard,
+// before this runs.)
 // Throws when KMS or the reveal log fails; the caller logs only the error's
 // name, never the ciphertext or the password.
 export async function revealJeeFormPassword(
   access: BlendedLearningAccess,
   studentId: number
 ): Promise<RevealJeePasswordResult> {
-  if (!(await canAccessBlendedStudent(access, studentId))) return FORBIDDEN;
+  if (!(await canAccessBlendedStudent(access, studentId))) return NOT_FOUND;
   // A safety net, as on the Exams tab: exam registrations aren't collected
   // for a JNV NVS-only Student.
   if (await isPmuOnlyStudent(studentId)) return FORBIDDEN;

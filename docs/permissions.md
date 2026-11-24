@@ -214,8 +214,9 @@ may reveal it for a Student in their scope, a Mentor (team leads included) only 
 active Mentees, a `blended_admin` or LMS `admin` for any Student with an active Mapping. A team
 lead sees only the JEE status of a supervised Mentor's Mentees (view only: Filled or Not filled,
 the Not filled reasons and the date recorded), never the application number, the details, the
-confirmation PDF or the password, and can't record or reveal for them (404 / 403).
-Read-only accounts, Mentor or admin, can't reveal it (403, nothing decrypted or logged; "Show
+confirmation PDF or the password, and can't record or reveal for them (404 for both, as for any
+Student out of their scope, such as another Mentor's Mentee).
+Read-only accounts, Mentor or admin, can't reveal it (403 for any Student, nothing decrypted or logged; "Show
 password" is disabled as "View only"). Those reveals are logged to `lms_exam_password_reveals`
 too.
 
