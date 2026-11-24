@@ -37,7 +37,12 @@ describe("listTeamLeadLinks", () => {
       {
         id: "4", supervisor_user_id: "9003", supervisor_name: "Synthetic Lead", supervisor_email: "lead@test.local",
         mentor_user_id: 9001, mentor_name: "Synthetic Reportee", mentor_email: "reportee@test.local",
-        supervisor_is_mentor: true, mentor_is_mentor: true, started_on: "2026-11-12",
+        supervisor_is_mentor: true, mentor_is_mentor: true, started_on: "2026-11-12", ended_on: null,
+      },
+      {
+        id: 5, supervisor_user_id: 9003, supervisor_name: "Synthetic Lead", supervisor_email: "lead@test.local",
+        mentor_user_id: 9002, mentor_name: "Synthetic Second", mentor_email: null,
+        supervisor_is_mentor: true, mentor_is_mentor: true, started_on: "2026-11-01", ended_on: "2026-12-31",
       },
     ]);
 
@@ -47,10 +52,21 @@ describe("listTeamLeadLinks", () => {
         teamLead: { userId: 9003, name: "Synthetic Lead", email: "lead@test.local", isMentor: true },
         reportee: { userId: 9001, name: "Synthetic Reportee", email: "reportee@test.local", isMentor: true },
         startedOn: "2026-11-12",
+        endsOn: null,
+      },
+      {
+        id: 5,
+        teamLead: { userId: 9003, name: "Synthetic Lead", email: "lead@test.local", isMentor: true },
+        reportee: { userId: 9002, name: "Synthetic Second", email: null, isMentor: true },
+        startedOn: "2026-11-01",
+        endsOn: "2026-12-31",
       },
     ]);
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("supervision.academic_year = $1 AND supervision.ended_at IS NULL");
+    // Running, or given a future end (it still grants until then, so it must
+    // be visible and endable); an end already past is history.
+    expect(sql).toContain("supervision.academic_year = $1 AND (supervision.ended_at IS NULL OR supervision.ended_at > (now() AT TIME ZONE 'UTC'))");
+    expect(sql).toContain("AS ended_on");
     // A future-dated link (import sheet only) grants nothing yet but holds the
     // pair's slot, so it is still listed and can be ended.
     expect(sql).not.toContain("started_at <=");
@@ -112,16 +128,31 @@ describe("listBlendedMentorOptions", () => {
 });
 
 // A fake blended_learning_mentor_supervisions table for the end UPDATE: it
-// applies the statement's own WHERE (id, year, running) to these rows.
-type SupervisionRow = { id: number; supervisor_user_id: number; mentor_user_id: number; academic_year: string; ended_at: string | null };
+// applies the statement's own WHERE (id, year, not yet ended at NOW) to these
+// rows, and its SET (end now, the admin as who ended it).
+const NOW = "2026-11-19T00:00:00Z";
+type SupervisionRow = {
+  id: number;
+  supervisor_user_id: number;
+  mentor_user_id: number;
+  academic_year: string;
+  ended_at: string | null;
+  ended_by_email?: string | null;
+  end_source?: string | null;
+};
 function givenSupervisions(table: SupervisionRow[]) {
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (!sql.startsWith("UPDATE blended_learning_mentor_supervisions")) return [];
-    expect(sql).toContain("WHERE id = $1 AND academic_year = $2 AND ended_at IS NULL");
+    expect(sql).toContain(
+      "WHERE id = $1 AND academic_year = $2 AND (blended_learning_mentor_supervisions.ended_at IS NULL OR blended_learning_mentor_supervisions.ended_at > (now() AT TIME ZONE 'UTC'))"
+    );
+    expect(sql).toContain("ended_by_user_id = NULL, ended_by_email = $3, end_source = $4, end_reason = $5");
     // A link that has not started yet can still be ended (at its started_at).
     expect(sql).not.toContain("started_at <=");
-    const hit = table.filter((row) => row.id === params?.[0] && row.academic_year === params?.[1] && row.ended_at === null);
-    for (const row of hit) row.ended_at = "2026-11-19T00:00:00Z";
+    const hit = table.filter(
+      (row) => row.id === params?.[0] && row.academic_year === params?.[1] && (row.ended_at === null || row.ended_at > NOW)
+    );
+    for (const row of hit) Object.assign(row, { ended_at: NOW, ended_by_email: params?.[2], end_source: params?.[3] });
     return hit.map((row) => ({ id: row.id }));
   });
 }
@@ -141,6 +172,26 @@ describe("endTeamLeadLink", () => {
     expect(await endTeamLeadLink(ADMIN, 5)).toEqual({ ok: true });
     expect(table.find((row) => row.id === 5)?.ended_at).not.toBeNull();
     expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("cuts a link given a future end short, recording the admin, and never touches one already ended", async () => {
+    const table: SupervisionRow[] = [
+      {
+        id: 8, supervisor_user_id: 9003, mentor_user_id: 9001, academic_year: "2026-2027",
+        ended_at: "2026-12-31T00:00:00Z", ended_by_email: "planner@test.local", end_source: "db_service_import",
+      },
+      {
+        id: 9, supervisor_user_id: 9003, mentor_user_id: 9002, academic_year: "2026-2027",
+        ended_at: "2026-11-10T00:00:00Z", ended_by_email: "earlier@test.local", end_source: "db_service_import",
+      },
+    ];
+    givenSupervisions(table);
+
+    expect(await endTeamLeadLink(ADMIN, 8)).toEqual({ ok: true });
+    expect(table[0]).toMatchObject({ ended_at: NOW, ended_by_email: "admin@test.local", end_source: "af_lms_manage_ui" });
+
+    expect(await endTeamLeadLink(ADMIN, 9)).toMatchObject({ status: 404 });
+    expect(table[1]).toMatchObject({ ended_at: "2026-11-10T00:00:00Z", ended_by_email: "earlier@test.local" });
   });
 
   it("is a 404 for another year's running row", async () => {
@@ -187,16 +238,45 @@ describe("writes", () => {
     });
   });
 
+  const overlap = (constraint = "blm_supervisions_no_overlapping_periods") =>
+    Object.assign(new Error("conflicting key value violates exclusion constraint"), { code: "23P01", constraint });
+
   it("is the same 409 when a racing add for the pair wins and this insert breaks the no-overlap constraint", async () => {
-    const overlap = Object.assign(new Error("conflicting key value violates exclusion constraint"), {
-      code: "23P01", constraint: "blm_supervisions_no_overlapping_periods",
-    });
-    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockRejectedValueOnce(overlap);
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockRejectedValueOnce(overlap());
+    // The winner's link runs until it is ended.
+    mockQuery.mockResolvedValueOnce([{ ended_on: null }]);
     // The real withTransaction rolls back and rethrows; the mock rethrows too.
     expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).toEqual({
       ok: false, status: 409, error: "This team lead already leads this mentor.",
     });
     expect(clientQuery.mock.calls[1][0]).toContain("INSERT INTO blended_learning_mentor_supervisions");
+    const [lookup, params] = mockQuery.mock.calls[0];
+    expect(lookup).toContain("supervision.supervisor_user_id = $1 AND supervision.mentor_user_id = $2");
+    expect(lookup).toContain("(supervision.ended_at IS NULL OR supervision.ended_at > (now() AT TIME ZONE 'UTC'))");
+    expect(params).toEqual([9003, 9002, "2026-2027"]);
+  });
+
+  it("says when the clashing link ends when it was given a future end", async () => {
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockRejectedValueOnce(overlap());
+    mockQuery.mockResolvedValueOnce([{ ended_on: "2026-12-31" }]);
+    expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).toEqual({
+      ok: false, status: 409, error: "This team lead already leads this mentor until 31 Dec 2026.",
+    });
+  });
+
+  it("keeps the plain 409 when the clashing link has ended meanwhile", async () => {
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockRejectedValueOnce(overlap());
+    mockQuery.mockResolvedValueOnce([]);
+    expect(await createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).toMatchObject({
+      status: 409, error: "This team lead already leads this mentor.",
+    });
+  });
+
+  it("throws an exclusion violation on any other constraint", async () => {
+    const other = overlap("some_future_exclusion");
+    clientQuery.mockResolvedValueOnce({ rows: [{ id: 9003 }, { id: 9002 }] }).mockRejectedValueOnce(other);
+    await expect(createTeamLeadLink(ADMIN, { supervisorUserId: 9003, mentorUserId: 9002 })).rejects.toBe(other);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("still throws any other insert error", async () => {

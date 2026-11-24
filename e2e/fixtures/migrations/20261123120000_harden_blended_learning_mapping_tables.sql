@@ -4,7 +4,8 @@
 -- tables, academic_year must be YYYY-YYYY with consecutive years, source and
 -- reason text can't be whitespace only, an ended row names who ended it (except
 -- a Mapping the db-service dropout cleanup ends), [started_at, ended_at)
--- periods can't overlap, and updated_at moves on every UPDATE.
+-- periods can't overlap, and updated_at moves on every UPDATE that changes the
+-- row. Every statement is re-runnable.
 -- Re-diff with .mex/patterns/mirror-db-service-schema-in-e2e.md if that
 -- migration changes.
 
@@ -20,6 +21,7 @@ ALTER TABLE blended_learning_mentor_mentee_mappings ADD CONSTRAINT blm_mappings_
   END
 );
 
+ALTER TABLE blended_learning_mentor_supervisions DROP CONSTRAINT IF EXISTS blm_supervisions_academic_year_format_check;
 ALTER TABLE blended_learning_mentor_supervisions ADD CONSTRAINT blm_supervisions_academic_year_format_check CHECK (
   CASE
     WHEN academic_year ~ '^[0-9]{4}-[0-9]{4}$'
@@ -41,7 +43,7 @@ ALTER TABLE blended_learning_mentor_mentee_mappings ADD CONSTRAINT blm_mappings_
   )
 );
 
-ALTER TABLE blended_learning_mentor_supervisions DROP CONSTRAINT blm_supervisions_lifecycle_check;
+ALTER TABLE blended_learning_mentor_supervisions DROP CONSTRAINT IF EXISTS blm_supervisions_lifecycle_check;
 ALTER TABLE blended_learning_mentor_supervisions ADD CONSTRAINT blm_supervisions_lifecycle_check CHECK (
   assignment_source ~ '[^[:space:]]' AND
   (
@@ -59,6 +61,7 @@ ALTER TABLE blended_learning_mentor_mentee_mappings ADD CONSTRAINT blm_mappings_
   end_source = 'db_service_student_eligibility'
 );
 
+ALTER TABLE blended_learning_mentor_supervisions DROP CONSTRAINT IF EXISTS blm_supervisions_ended_by_check;
 ALTER TABLE blended_learning_mentor_supervisions ADD CONSTRAINT blm_supervisions_ended_by_check CHECK (
   ended_at IS NULL OR ended_by_user_id IS NOT NULL OR ended_by_email IS NOT NULL
 );
@@ -67,6 +70,7 @@ ALTER TABLE blended_learning_mentor_mentee_mappings DROP CONSTRAINT IF EXISTS bl
 ALTER TABLE blended_learning_mentor_mentee_mappings ADD CONSTRAINT blm_mappings_no_overlapping_periods
   EXCLUDE USING gist (student_id WITH =, academic_year WITH =, tsrange(started_at, ended_at, '[)') WITH &&);
 
+ALTER TABLE blended_learning_mentor_supervisions DROP CONSTRAINT IF EXISTS blm_supervisions_no_overlapping_periods;
 ALTER TABLE blended_learning_mentor_supervisions ADD CONSTRAINT blm_supervisions_no_overlapping_periods
   EXCLUDE USING gist (supervisor_user_id WITH =, mentor_user_id WITH =, academic_year WITH =, tsrange(started_at, ended_at, '[)') WITH &&);
 
@@ -83,8 +87,9 @@ $$;
 DROP TRIGGER IF EXISTS blm_mappings_touch_updated_at ON blended_learning_mentor_mentee_mappings;
 CREATE TRIGGER blm_mappings_touch_updated_at
 BEFORE UPDATE ON blended_learning_mentor_mentee_mappings
-FOR EACH ROW EXECUTE FUNCTION blended_learning_touch_updated_at();
+FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION blended_learning_touch_updated_at();
 
+DROP TRIGGER IF EXISTS blm_supervisions_touch_updated_at ON blended_learning_mentor_supervisions;
 CREATE TRIGGER blm_supervisions_touch_updated_at
 BEFORE UPDATE ON blended_learning_mentor_supervisions
-FOR EACH ROW EXECUTE FUNCTION blended_learning_touch_updated_at();
+FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION blended_learning_touch_updated_at();

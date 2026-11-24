@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-23
+last_updated: 2026-11-24
 ---
 
 # Data Access
@@ -377,8 +377,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   Item targets (count, preview, Mentor "(N students)", push and push again never reach a
   dropout; a pasted dropout ID is listed as "found but with no active mentor"). Mapping rows
   are never changed, so a Student whose status changes back reappears. Only the links import
-  reads the raw rows (`currentBlendedMappingRowSql`: not ended, started or not), so a dropout's
-  and a future-dated Mapping's links stay loaded.
+  reads the raw rows (`currentBlendedMappingRowSql`: not yet ended, i.e. running or ending in the
+  future, started or not), so a dropout's, a future-dated Mapping's and a future-ended Mapping's
+  links stay loaded. It reads Students through `EXISTS`, so one mid-handover (old row ending as its
+  successor starts) is matched once.
   Already-materialised Common Action Items on a dropout keep counting in the item's Open/Done.
 - **Read model:** `listMentees({ access, mentorUserId?, studentId?, today })` in
   `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
@@ -637,7 +639,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Links load script (#455):** `blended_learning_student_links` is filled outside the app by the
   operator script `npm run blended:import-links` (`runBlendedLinksImport` in
   `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the raw
-  not-ended Mapping rows (`currentBlendedMappingRowSql`), the existing links (`student_id = ANY($1::bigint[])`), and
+  not-yet-ended Mapping rows (`currentBlendedMappingRowSql`, one row per Student), the existing links (`student_id = ANY($1::bigint[])`), and
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
@@ -681,9 +683,11 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `started_at`, then the Mapping table's audit and lifecycle columns and CHECKs. One running row per
   (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
   `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings
-  (period contains now). The Manage list and End still use `ended_at IS NULL` alone, matching
-  the index, so a future-dated link is listed and can be ended (at its `started_at`); a link
-  given a future `ended_at` outside the app is off the list but grants until then.
+  (period contains now). The Manage list and End take every link not yet ended (`ended_at IS NULL
+  OR ended_at > now`): a future-dated link is listed and can be ended (at its `started_at`), and
+  one given a future `ended_at` outside the app is listed with "ending on <date>" and End cuts it
+  short. The team-lead INSERT's `ON CONFLICT` still matches the partial unique index (`ended_at IS
+  NULL`).
 - Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
   `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
   filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an
@@ -697,9 +701,15 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `supervision_ended`). Add: both people must hold a live `blended_mentor` permission (Mappings alone
   do not count), checked inside the insert's transaction with their permission rows locked
   `FOR SHARE`, then `INSERT … ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; self-supervision is a
-  422, a running pair a 409 (also when a racing add for the pair wins and this insert hits db-service's
-  `blm_supervisions_no_overlapping_periods` exclusion constraint, `23P01`; other errors still throw). End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND ended_at IS
-  NULL`, a 404 when nothing matched (so a pair ended and re-added meanwhile keeps its new row).
+  422, a running pair a 409 (also when the insert hits db-service's
+  `blm_supervisions_no_overlapping_periods` exclusion constraint, `23P01` with that constraint name:
+  a racing add won, or the pair has a link given a future end, and then the message says "until
+  <date>" from a lookup after the rollback; other errors, other constraints included, still throw).
+  End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND (ended_at IS NULL OR ended_at > now)`
+  setting `ended_at = GREATEST(started_at, now)` and the admin as ender (`ended_by_user_id` cleared,
+  `ended_by_email`, `end_source`, `end_reason` overwritten for a link cut short), a 404 when nothing
+  matched (an end already past is never touched; a pair ended and re-added meanwhile keeps its new
+  row).
 - Flags tab Mentor filter: for a team lead ("My students" or a reportee) it matches the Student's
   current active Mapping's Mentor (dropouts left out), not who logged the flagged Conversation; an
   admin's filter still matches the Conversation's Mentor.

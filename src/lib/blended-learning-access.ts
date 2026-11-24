@@ -138,12 +138,14 @@ export function notBlendedDropoutSql(studentIdSql: string): string {
             WHERE dropout_student.id = ${studentIdSql} AND dropout_student.status = 'dropout')`;
 }
 
-// Mapping rows as stored: not ended (`ended_at IS NULL`) for
-// CURRENT_ACADEMIC_YEAR, whatever the Student's status and whether or not
-// their period has started. Only operator data loads (the links import) use
-// it; everything Mentors and admins see goes through activeBlendedMappingSql.
+// Mapping rows as stored, not yet ended, for CURRENT_ACADEMIC_YEAR: running
+// (`ended_at IS NULL`) or given a future end (still in force until then),
+// whatever the Student's status and whether or not their period has started.
+// A Student mid-handover can have two such rows (the old one ending as the
+// new one starts). Only operator data loads (the links import) use it;
+// everything Mentors and admins see goes through activeBlendedMappingSql.
 export function currentBlendedMappingRowSql(alias: string, yearParam: string): string {
-  return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL`;
+  return `${alias}.academic_year = ${yearParam} AND (${alias}.ended_at IS NULL OR ${alias}.ended_at > (now() AT TIME ZONE 'UTC'))`;
 }
 
 // The Mapping or Supervision row's (`alias`) period [started_at, ended_at)

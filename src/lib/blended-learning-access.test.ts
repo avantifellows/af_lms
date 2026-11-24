@@ -457,8 +457,10 @@ describe("the Mapping source SQL", () => {
     expect(notBlendedDropoutSql("own.student_id")).not.toMatch(/<>|!=|IS DISTINCT/);
   });
 
-  it("keeps the stored Mapping rows, dropouts and later starts included, for operator data loads", () => {
-    expect(currentBlendedMappingRowSql("mapping", "$1")).toBe("mapping.academic_year = $1 AND mapping.ended_at IS NULL");
+  it("keeps the stored Mapping rows not yet ended, dropouts, later starts and future ends included, for operator data loads", () => {
+    expect(currentBlendedMappingRowSql("mapping", "$1")).toBe(
+      "mapping.academic_year = $1 AND (mapping.ended_at IS NULL OR mapping.ended_at > (now() AT TIME ZONE 'UTC'))"
+    );
   });
 });
 
