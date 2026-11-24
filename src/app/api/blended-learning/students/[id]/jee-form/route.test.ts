@@ -73,7 +73,15 @@ type Update = {
 let examRecords: ExamRecord[];
 let updates: Update[];
 let sql: string[];
+// Statements on the save's transaction client, in order, and how each
+// transaction ended.
+let txSql: string[];
 let txWrites: { sql: string; params: unknown[] }[];
+let txOutcomes: ("committed" | "rolled back")[];
+// Students whose Mapping ends between the scope pre-check and the lock.
+let endedBeforeLock: Set<number>;
+// An error the update's INSERT throws (a constraint, a lost connection).
+let insertError: Error | null;
 let fetchCalls: { url: string; method: string; body: string | undefined }[];
 let fetchStatus: Record<string, number>;
 // The ciphertext the (fake) DB Service holds on the Student's JEE record, and
@@ -128,18 +136,24 @@ async function fakeQuery(text: string, params?: unknown[]) {
   return [];
 }
 
-// The transaction client: the Mapping lock, the latest update, and the writes.
+// The transaction client: the per-Student lock, the Mapping lock, the latest
+// update, the exam record reads, and the writes.
 function fakeClient() {
   return {
     query: vi.fn(async (text: string, params: unknown[] = []) => {
+      txSql.push(text);
+      if (text.includes("FROM student_exam_record")) return { rows: await fakeQuery(text, params) };
       sql.push(text);
+      if (text.includes("pg_advisory_xact_lock")) return { rows: [] };
       if (text.includes("FROM blended_learning_mentor_mentee_mappings")) {
-        const mentor = MAPPINGS[Number(params[0])];
+        const studentId = Number(params[0]);
+        const mentor = endedBeforeLock.has(studentId) ? undefined : MAPPINGS[studentId];
         return { rows: mentor ? [{ mentor_user_id: mentor, program_id: 80, academic_year: "2026-2027" }] : [] };
       }
       if (text.includes("FROM blended_learning_jee_form_updates")) return { rows: updates.slice(-1) };
       txWrites.push({ sql: text, params });
       if (text.includes("INSERT INTO blended_learning_jee_form_updates")) {
+        if (insertError) throw insertError;
         const update: Update = {
           id: 900 + updates.length,
           status: params[3] as string,
@@ -223,13 +237,27 @@ beforeEach(() => {
   examRecords = [];
   updates = [];
   sql = [];
+  txSql = [];
   txWrites = [];
+  txOutcomes = [];
+  endedBeforeLock = new Set();
+  insertError = null;
   fetchCalls = [];
   fetchStatus = {};
   storedCiphertext = null;
   dbServiceStoresCiphertext = true;
   mockQuery.mockImplementation(fakeQuery as typeof query);
-  mockWithTransaction.mockImplementation(async (fn) => fn(fakeClient() as never));
+  // As withTransaction does: COMMIT after the callback, ROLLBACK when it throws.
+  mockWithTransaction.mockImplementation(async (fn) => {
+    try {
+      const result = await fn(fakeClient() as never);
+      txOutcomes.push("committed");
+      return result;
+    } catch (error) {
+      txOutcomes.push("rolled back");
+      throw error;
+    }
+  });
   s3.reset();
   s3.on(PutObjectCommand).resolves({});
   kms.reset();
@@ -395,12 +423,16 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     expect((await record("501", FILLED)).status).toBe(201);
     // The reminder was pushed after Filled was recorded, so it is open again.
     txWrites = [];
+    fetchCalls = [];
     examRecords = [
       { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001", has_password: true },
     ];
 
     const again = await record("501", FILLED_KEEP);
     expect(again.status).toBe(200);
+    // The record already holds the number and a password: nothing is sent.
+    expect(fetchCalls).toEqual([]);
+    expect(kms.commandCalls(EncryptCommand)).toHaveLength(1);
     expect(writesTo("INSERT INTO blended_learning_jee_form_updates")).toEqual([]);
     const [tick] = writesTo("UPDATE blended_learning_action_items");
     expect(tick.sql).toContain("item.status = 'open'");
@@ -438,7 +470,9 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       applicationNumber: "This application number is already saved for JEE Advanced 2027.",
     });
     expect(fetchCalls).toEqual([]);
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back"]);
   });
 
   it("stores a confirmation PDF as an lms_student_documents row and links it to the update", async () => {
@@ -486,7 +520,9 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       "POST /api/student-exam-record",
       "DELETE /api/lms-student-document/4401",
     ]);
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    // Inside the save's transaction: rolled back with no update, flag or tick.
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back"]);
     expect(error.mock.calls).toEqual([["JEE form external write failed:", "DbServiceExamRecordStatusError"]]);
     error.mockRestore();
   });
@@ -501,7 +537,8 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     }
     expect(fetchCalls).toEqual([]);
     expect(kms.commandCalls(EncryptCommand)).toEqual([]);
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back", "rolled back"]);
   });
 
   it("replaces a saved password on its own when the number is unchanged", async () => {
@@ -535,7 +572,9 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     }
     expect(kms.commandCalls(EncryptCommand)).toEqual([]);
     expect(fetchCalls).toEqual([]);
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    // Only the NVS-only save got as far as the transaction, and wrote nothing.
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back"]);
   });
 
   // Accepted on review of #507 (Blended Learning has no NVS Students): Filled
@@ -574,7 +613,8 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     expect(res.body.error).toBe("Couldn't save the password. Try again.");
     expect(fetchCalls).toEqual([]);
     expect(s3.commandCalls(PutObjectCommand)).toEqual([]);
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back"]);
     expect(error.mock.calls).toEqual([["JEE form password encryption failed:", "AccessDeniedException"]]);
     error.mockRestore();
   });
@@ -587,7 +627,8 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
     expect(res.status).toBe(502);
     expect(fetchCalls.at(-1)).toMatchObject({ method: "DELETE", url: "http://db-service.test/api/lms-student-document/4401" });
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back"]);
     expect(error.mock.calls).toEqual([["JEE form external write failed:", "CiphertextNotStored"]]);
     error.mockRestore();
   });
@@ -685,11 +726,86 @@ describe("POST /api/blended-learning/students/[id]/jee-form: a save that loses a
     expect(conflicted.body.error).toBe("This conflicts with what is saved. Reload and try again.");
   });
 
-  it("rethrows anything else, withdrawing a stored confirmation", async () => {
+  it("takes the per-Student lock first, then the Mapping lock, before any read or write", async () => {
+    signedInAs(MENTOR_A);
+    expect((await record("501", FILLED, PDF)).status).toBe(201);
+
+    expect(txSql[0]).toBe("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))");
+    expect(txSql[1]).toContain("FROM blended_learning_mentor_mentee_mappings");
+    expect(txSql[1]).toContain("FOR SHARE");
+    expect(txSql[2]).toContain("FROM blended_learning_jee_form_updates");
+    // The external writes ran inside the transaction, before the update was appended.
+    expect(txSql.findIndex((text) => text.includes("INSERT INTO blended_learning_jee_form_updates"))).toBeGreaterThan(
+      txSql.findIndex((text) => text.includes("application_password_ciphertext = $4"))
+    );
+    expect(txOutcomes).toEqual(["committed"]);
+  });
+
+  it("keys the per-Student lock by the JEE form and the Student", async () => {
+    signedInAs(MENTOR_A);
+    const clients: { query: ReturnType<typeof vi.fn> }[] = [];
+    mockWithTransaction.mockImplementationOnce(async (fn) => {
+      const client = fakeClient();
+      clients.push(client);
+      return fn(client as never);
+    });
+    expect((await record("501", NOT_FILLED)).status).toBe(201);
+    expect(clients[0].query.mock.calls[0]).toEqual([
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      ["blended_learning_jee_form:501"],
+    ]);
+  });
+
+  it("answers 404 when the Mapping ends before the lock, with no KMS, S3 or DB Service write", async () => {
+    signedInAs(MENTOR_A);
+    endedBeforeLock.add(501);
+    for (const [fields, file] of [[FILLED, PDF], [NOT_FILLED, undefined]] as const) {
+      const res = await record("501", [...fields], file);
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Not found" });
+    }
+
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+    expect(s3.commandCalls(PutObjectCommand)).toEqual([]);
+    expect(fetchCalls).toEqual([]);
+    // Not even the exam record was read.
+    expect(txSql.some((text) => text.includes("student_exam_record"))).toBe(false);
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back", "rolled back"]);
+  });
+
+  it("maps a constraint on the update's insert after the external writes to 409, withdrawing the confirmation", async () => {
+    signedInAs(MENTOR_A);
+    insertError = Object.assign(new Error("duplicate"), { code: "23505" });
+    const res = await record("501", FILLED, PDF);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("This conflicts with what is saved. Reload and try again.");
+    // The exam record was written (the gap left as is), the PDF withdrawn.
+    expect(fetchCalls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+      "POST /api/lms-student-document",
+      "POST /api/student-exam-record",
+      "DELETE /api/lms-student-document/4401",
+    ]);
+    expect(writesTo("UPDATE blended_learning_action_items")).toEqual([]);
+    expect(updates).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back"]);
+  });
+
+  it("rethrows anything else after the external writes, withdrawing a stored confirmation", async () => {
+    signedInAs(MENTOR_A);
+    insertError = new Error("connection lost");
+    await expect(POST(jeeRequest("501", FILLED, PDF), routeParams({ id: "501" }))).rejects.toThrow("connection lost");
+    expect(fetchCalls.at(-1)).toMatchObject({ method: "DELETE", url: "http://db-service.test/api/lms-student-document/4401" });
+    expect(txOutcomes).toEqual(["rolled back"]);
+  });
+
+  it("rethrows a failure to open the transaction, having written nothing", async () => {
     signedInAs(MENTOR_A);
     mockWithTransaction.mockRejectedValueOnce(new Error("connection lost"));
     await expect(POST(jeeRequest("501", FILLED, PDF), routeParams({ id: "501" }))).rejects.toThrow("connection lost");
-    expect(fetchCalls.at(-1)).toMatchObject({ method: "DELETE", url: "http://db-service.test/api/lms-student-document/4401" });
+    expect(fetchCalls).toEqual([]);
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
   });
 });
 

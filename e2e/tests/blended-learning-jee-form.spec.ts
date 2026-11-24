@@ -35,6 +35,8 @@ const MENTOR_PASSWORD = "e2e-portal-pass-1";
 const PHONE_PASSWORD = "e2e-portal-pass-2";
 // What an admin tries to save, refused: it must reach neither KMS nor the DB Service.
 const ADMIN_PASSWORD = "e2e-admin-pass-9";
+// What a save whose Mapping ends while it waits tries to save, refused the same way.
+const RACED_PASSWORD = "e2e-portal-pass-3";
 
 const studentIds: Record<string, number> = {};
 
@@ -540,6 +542,78 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     expect(await reveal.text()).not.toContain(MENTOR_PASSWORD);
     expect((await reveals(studentIds[mentee.key])).length).toBe(logged);
   });
+
+  // The save takes a per-Student lock, then re-checks the Mapping, and only
+  // then calls KMS and the DB Service. Holding that lock here makes the save
+  // pass the scope check and wait; the Mapping ends meanwhile.
+  test("a save whose Mapping ends while it waits for the Student's lock is refused (404), touching no exam record", async ({ page }) => {
+    await fetch(`${STUB}/__requests`, { method: "DELETE" });
+    const studentId = studentIds[mentee.key];
+    const recordsBefore = await jeeRecords(studentId);
+    const updatesBefore = await updates(studentId);
+    await signInAs(page, BLENDED_MENTOR_C);
+
+    const pool = getTestPool();
+    const holder = await pool.connect();
+    const lockKey = `blended_learning_jee_form:${studentId}`;
+    let endedIds: string[] = [];
+    try {
+      await holder.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
+      const holderPid = (await holder.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const saving = page.request.post(jeeFormUrl(mentee), {
+        multipart: { status: "filled", applicationNumber: "E2E-JEE-0002", password: RACED_PASSWORD },
+      });
+      // The save is waiting on the lock this connection holds.
+      await expect
+        .poll(async () => {
+          const result = await pool.query<{ waiting: number }>(
+            `SELECT count(*)::int AS waiting
+             FROM pg_locks waiter
+             JOIN pg_locks held
+               ON held.locktype = 'advisory' AND held.granted AND held.pid = $1
+              AND waiter.classid = held.classid AND waiter.objid = held.objid AND waiter.objsubid = held.objsubid
+             WHERE waiter.locktype = 'advisory' AND NOT waiter.granted`,
+            [holderPid]
+          );
+          return result.rows[0].waiting;
+        })
+        .toBe(1);
+      const ended = await pool.query<{ id: string }>(
+        `UPDATE blended_learning_mentor_mentee_mappings
+         SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
+             ended_by_email = 'e2e-race@example.com', end_source = 'e2e_race', end_reason = 'e2e_race'
+         WHERE student_id = $1 AND academic_year = $2 AND ended_at IS NULL
+         RETURNING id`,
+        [studentId, CURRENT_ACADEMIC_YEAR]
+      );
+      endedIds = ended.rows.map((mapping) => mapping.id);
+      expect(endedIds).toHaveLength(1);
+      await holder.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
+
+      const res = await saving;
+      expect(res.status()).toBe(404);
+      expect(await res.text()).not.toContain(RACED_PASSWORD);
+    } finally {
+      await holder.query("SELECT pg_advisory_unlock_all()");
+      holder.release();
+      // Map the Student again for the specs that follow.
+      if (endedIds.length > 0) {
+        await pool.query(
+          `UPDATE blended_learning_mentor_mentee_mappings
+           SET ended_at = NULL, ended_by_email = NULL, end_source = NULL, end_reason = NULL
+           WHERE id = ANY($1::bigint[])`,
+          [endedIds]
+        );
+      }
+      await pool.end();
+    }
+
+    // Nothing reached KMS or the DB Service, and nothing was recorded.
+    expect(await stubRequests()).toEqual([]);
+    expect(await kmsCalls()).toEqual([]);
+    expect(await jeeRecords(studentId)).toEqual(recordsBefore);
+    expect(await updates(studentId)).toEqual(updatesBefore);
+  });
 });
 
 test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
@@ -690,6 +764,8 @@ test("no request the tab made to the DB Service carried the plaintext column or 
   for (const request of await allStubRequests()) {
     const body = JSON.stringify(request.body ?? {});
     expect(body).not.toMatch(/"application_password"/);
-    for (const secret of [MENTOR_PASSWORD, PHONE_PASSWORD, ADMIN_PASSWORD]) expect(body).not.toContain(secret);
+    for (const secret of [MENTOR_PASSWORD, PHONE_PASSWORD, ADMIN_PASSWORD, RACED_PASSWORD]) {
+      expect(body).not.toContain(secret);
+    }
   }
 });

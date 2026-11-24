@@ -859,10 +859,20 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   held by any other record is a 409 (the DB Service's create upserts on student + number). The
   PDF (≤ 5 MB) goes through `uploadDocumentPages` + `createDocument` as document type
   `jee_main_confirmation` (labelled in the Documents tab by `documentTypeLabel`, not offered in its
-  picker). Then one transaction appends the update (Mapping's Mentor/program/year, actor as
-  `recorded_by_email`) and either raises the `jee_form` flag (comment = exam + reason labels +
-  details) or ticks the Student's open Action Items whose Common Action Item text is "JEE Form
-  Filling (Reminder)" (case and spacing ignored; no id is hard-coded). Re-saving the same values
+  picker). The update (Mapping's Mentor/program/year, actor as `recorded_by_email`) then either
+  raises the `jee_form` flag (comment = exam + reason labels + details) or ticks the Student's open
+  Action Items whose Common Action Item text is "JEE Form Filling (Reminder)" (case and spacing
+  ignored; no id is hard-coded). **Save order (one transaction):** a per-Student
+  `pg_advisory_xact_lock(hashtextextended('blended_learning_jee_form:<studentId>', 0))` (serializes
+  two tabs) → `lockMappingInScope` (out of scope → 404 before any KMS/S3/DB Service write) →
+  latest update → for Filled, `writeApplication` (plan/409, password/422/403, KMS, PDF, exam record;
+  its reads on the transaction client; a refusal rolls back with the same status) → append the
+  update + flag/tick → commit. The lock is held across those HTTP calls (accepted). Left as is: if
+  the insert/commit fails after the exam record write, the record keeps the new number/password
+  while the tab shows the old status (the PDF is still withdrawn); saving again repairs it. A
+  same-form re-save still runs `writeApplication`, which sends nothing unless the record no longer
+  holds the number (edited elsewhere). E2E: the JEE spec holds the lock, ends the Mapping, and
+  expects 404 with no stub write. Re-saving the same values
   (no new PDF, no password typed) appends nothing (200), but a Filled re-save still ticks an open
   reminder, done by the latest update; the POST's `form` is read after the save, so the tab's
   "Reminder" line shows Done. A typed password can't be compared with the saved ciphertext, so it

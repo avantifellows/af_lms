@@ -12,6 +12,7 @@ import {
   mentorNameSql,
   viewableMentorUserIds,
   type BlendedLearningAccess,
+  type MappingSnapshot,
 } from "./blended-learning-access";
 import {
   JEE_FORM_EXAM,
@@ -384,10 +385,15 @@ function planTarget(rows: ExamRecordRow[], examId: number, plan: ExamRecordPlan)
   return { plan, recordId: row ? Number(row.id) : null, passwordSaved: Boolean(row?.has_password) };
 }
 
-async function examRecordPlan(studentId: number, examId: number, applicationNumber: string): Promise<ExamRecordTarget> {
+async function examRecordPlan(
+  client: PoolClient,
+  studentId: number,
+  examId: number,
+  applicationNumber: string
+): Promise<ExamRecordTarget> {
   // Named columns only: never the legacy password, and only whether a
   // ciphertext is there, not the ciphertext.
-  const rows = await query<ExamRecordRow>(
+  const { rows } = await client.query<ExamRecordRow>(
     `SELECT ser.id, ser.exam_id, e.name AS exam_name, ser.exam_year, ser.application_number,
             (ser.application_password_ciphertext IS NOT NULL) AS has_password
      FROM student_exam_record ser
@@ -403,6 +409,7 @@ async function examRecordPlan(studentId: number, examId: number, applicationNumb
 // `ciphertext` (a new password) rides along with the plan's write; with
 // nothing else to change, it is patched onto the record on its own.
 async function applyExamRecordPlan(
+  client: PoolClient,
   target: ExamRecordTarget,
   studentId: number,
   examId: number,
@@ -428,7 +435,7 @@ async function applyExamRecordPlan(
   } else if (plan.kind === "none" && ciphertext !== null && target.recordId !== null) {
     await patchExamRecordWithoutPlaintext(target.recordId, password);
   }
-  if (ciphertext !== null) await confirmCiphertextStored(studentId, examId, ciphertext);
+  if (ciphertext !== null) await confirmCiphertextStored(client, studentId, examId, ciphertext);
 }
 
 class CiphertextNotStored extends Error {
@@ -438,9 +445,15 @@ class CiphertextNotStored extends Error {
 // A DB Service that predates `application_password_ciphertext` answers 2xx
 // and drops the key, so the write is read back from Postgres instead of
 // being taken on trust (the response body, which holds the legacy password,
-// is never read).
-async function confirmCiphertextStored(studentId: number, examId: number, ciphertext: string): Promise<void> {
-  const rows = await query<{ id: number | string }>(
+// is never read). Read on the save's transaction client: each statement sees
+// what the DB Service has committed.
+async function confirmCiphertextStored(
+  client: PoolClient,
+  studentId: number,
+  examId: number,
+  ciphertext: string
+): Promise<void> {
+  const { rows } = await client.query<{ id: number | string }>(
     `SELECT ser.id
      FROM student_exam_record ser
      WHERE ser.student_id = $1 AND ser.exam_id = $2 AND ser.exam_year = $3
@@ -492,7 +505,26 @@ async function discardConfirmation(stored: StoredConfirmation | null): Promise<v
   }
 }
 
-class OutOfScope extends Error {}
+class OutOfScope extends Error {
+  name = "OutOfScope";
+}
+
+// A refusal decided inside the save's transaction (409, 403, 422 or 502):
+// thrown so the transaction rolls back, then answered with its result.
+class SaveRefused extends Error {
+  name = "SaveRefused";
+  constructor(readonly result: RecordJeeFormResult) {
+    super("JEE form save refused");
+  }
+}
+
+// Serializes saves for one Student (two tabs, two devices), held to commit,
+// so the exam record and the latest update can't end up holding different
+// numbers and the same Not filled form can't raise two flags. Taken before
+// the Mapping lock; keyed by a namespaced string as the Holistic locks are.
+async function lockStudentJeeForm(client: PoolClient, studentId: number): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`blended_learning_jee_form:${studentId}`]);
+}
 
 type LatestRow = {
   id: number | string;
@@ -505,8 +537,8 @@ type LatestRow = {
 
 // The same status and values as the latest update, with no new PDF and, for
 // Filled, no password typed: a typed password can't be compared with the
-// saved ciphertext (and is written to the exam record before this runs), so
-// it always counts as a change and records a new update.
+// saved ciphertext (and is written to the exam record before the update is
+// appended), so it always counts as a change and records a new update.
 function unchanged(latest: LatestRow | undefined, input: JeeFormInput, newDocument: boolean): boolean {
   if (!latest || latest.status !== input.status || newDocument) return false;
   if (input.status === "filled") {
@@ -523,7 +555,7 @@ async function insertUpdate(
     examId: number;
     input: JeeFormInput;
     confirmationDocumentId: number | null;
-    mapping: { mentor_user_id: number | string; program_id: number | string; academic_year: string };
+    mapping: MappingSnapshot;
   }
 ): Promise<number> {
   const { input, mapping } = values;
@@ -603,42 +635,44 @@ async function latestUpdate(client: PoolClient, studentId: number, examId: numbe
   return result.rows[0];
 }
 
-// The update, its flag or tick, in one transaction. False when nothing
-// changed (the same status and values were saved again): no update is added
-// then, but saving Filled again still ticks an open reminder, done by the
-// latest (Filled) update. That closes a reminder left open while the Student
-// was already Filled (a push that ran alongside the save, or one made before
-// pushes added it done), which nothing else can tick.
-function saveUpdate(
+// The update and its flag or tick. False when nothing changed (the same
+// status and values were saved again): no update is added then, but saving
+// Filled again still ticks an open reminder, done by the latest (Filled)
+// update. That closes a reminder left open while the Student was already
+// Filled (a push that ran alongside the save, or one made before pushes
+// added it done), which nothing else can tick.
+async function appendUpdate(
+  client: PoolClient,
   access: BlendedLearningAccess,
-  studentId: number,
-  examId: number,
-  input: JeeFormInput,
-  stored: StoredConfirmation | null
+  values: {
+    studentId: number;
+    examId: number;
+    input: JeeFormInput;
+    latest: LatestRow | undefined;
+    stored: StoredConfirmation | null;
+    mapping: MappingSnapshot;
+  }
 ): Promise<boolean> {
-  return withTransaction(async (client) => {
-    const mapping = await lockMappingInScope(client, access, studentId);
-    if (!mapping) throw new OutOfScope();
-    const latest = await latestUpdate(client, studentId, examId);
-    if (unchanged(latest, input, stored !== null)) {
-      if (latest?.status === "filled") await tickReminder(client, access, studentId, Number(latest.id));
-      return false;
-    }
+  const { studentId, examId, input, latest, stored, mapping } = values;
+  if (unchanged(latest, input, stored !== null)) {
+    if (latest?.status === "filled") await tickReminder(client, access, studentId, Number(latest.id));
+    return false;
+  }
 
-    const updateId = await insertUpdate(client, access, {
-      studentId,
-      examId,
-      input,
-      confirmationDocumentId: stored?.documentId ?? keptDocument(latest, input),
-      mapping,
-    });
-    if (input.status === "not_filled") await raiseFlag(client, access, studentId, updateId, input);
-    else await tickReminder(client, access, studentId, updateId);
-    return true;
+  const updateId = await insertUpdate(client, access, {
+    studentId,
+    examId,
+    input,
+    confirmationDocumentId: stored?.documentId ?? keptDocument(latest, input),
+    mapping,
   });
+  if (input.status === "not_filled") await raiseFlag(client, access, studentId, updateId, input);
+  else await tickReminder(client, access, studentId, updateId);
+  return true;
 }
 
 function failedSave(error: unknown): RecordJeeFormResult {
+  if (error instanceof SaveRefused) return error.result;
   if (error instanceof OutOfScope) return NOT_FOUND;
   const code = (error as { code?: unknown } | null)?.code;
   if (code === "23514" || code === "23505" || code === "23503") {
@@ -688,26 +722,31 @@ async function passwordCiphertext(
   }
 }
 
-// A filled form's writes outside the database transaction: the confirmation
-// PDF (S3 + lms_student_documents) and the student_exam_record upsert with
-// any new password ciphertext, both through the DB Service. The password is
-// encrypted before anything is written; on failure the stored PDF is
-// withdrawn.
+// A filled form's writes outside the database: the confirmation PDF (S3 +
+// lms_student_documents) and the student_exam_record upsert with any new
+// password ciphertext, both through the DB Service. They run inside the
+// save's open transaction (its reads use the transaction client), after the
+// locks and before the update is appended. The password is encrypted before
+// anything is written; on failure the stored PDF is withdrawn. A same-form
+// re-save runs this too: with no password or PDF it sends nothing unless the
+// record no longer holds the number (edited elsewhere), and it still answers
+// 409 / 422 when the number now clashes or the record lost its password.
 async function writeApplication(
+  client: PoolClient,
   access: BlendedLearningAccess,
   studentId: number,
   examId: number,
   input: Extract<JeeFormInput, { status: "filled" }>,
   file: ConfirmationFile | null
 ): Promise<ExternalWrite> {
-  const target = await examRecordPlan(studentId, examId, input.applicationNumber);
+  const target = await examRecordPlan(client, studentId, examId, input.applicationNumber);
   if (target.plan.kind === "conflict") return { ok: false, result: conflict({ applicationNumber: target.plan.message }) };
   const secret = await passwordCiphertext(studentId, input.password, target.passwordSaved);
   if (!secret.ok) return secret;
   let stored: StoredConfirmation | null = null;
   try {
     if (file) stored = await storeConfirmation(studentId, file, access.actorEmail);
-    await applyExamRecordPlan(target, studentId, examId, input.applicationNumber, secret.ciphertext);
+    await applyExamRecordPlan(client, target, studentId, examId, input.applicationNumber, secret.ciphertext);
     return { ok: true, stored };
   } catch (error) {
     // Never log keys, bodies or the number: the error's name is enough.
@@ -725,6 +764,17 @@ async function writeApplication(
 // row. On success `created` is false when the same form was saved again
 // (nothing new recorded, though an open reminder is still ticked); `form` is
 // read after the save, so it shows the reminder as it now is.
+//
+// One save is one transaction, in this order: the per-Student lock, the
+// Mapping re-checked in scope (404 before any KMS, S3 or DB Service write),
+// the latest update, then for Filled the external writes (writeApplication),
+// then the update and its flag or tick, then commit. Any refusal or failure
+// rolls the transaction back and withdraws a stored PDF. What can't be undone
+// is the exam record write: if the insert or commit fails after it (a
+// constraint, a lost connection, or the pool's 15 s idle-in-transaction
+// timeout ending the session while the HTTP calls run), the record holds the
+// new number or password while the latest update still shows the old status.
+// That gap is left as is, not compensated; saving again repairs it.
 export async function recordJeeForm(
   access: BlendedLearningAccess,
   studentId: number,
@@ -744,15 +794,24 @@ export async function recordJeeForm(
   const examId = await jeeExamId();
   if (examId === null) return { ok: false, status: 503, error: "The JEE Mains exam isn't set up yet." };
 
-  const external = input.status === "filled" ? await writeApplication(access, studentId, examId, input, file) : null;
-  if (external && !external.ok) return external.result;
-  const stored = external?.stored ?? null;
-
+  // Set once the PDF is stored, so a failure after that withdraws it.
+  const written: { stored: StoredConfirmation | null } = { stored: null };
   let created: boolean;
   try {
-    created = await saveUpdate(access, studentId, examId, input, stored);
+    created = await withTransaction(async (client) => {
+      await lockStudentJeeForm(client, studentId);
+      const mapping = await lockMappingInScope(client, access, studentId);
+      if (!mapping) throw new OutOfScope();
+      const latest = await latestUpdate(client, studentId, examId);
+      if (input.status === "filled") {
+        const external = await writeApplication(client, access, studentId, examId, input, file);
+        if (!external.ok) throw new SaveRefused(external.result);
+        written.stored = external.stored;
+      }
+      return appendUpdate(client, access, { studentId, examId, input, latest, stored: written.stored, mapping });
+    });
   } catch (error) {
-    await discardConfirmation(stored);
+    await discardConfirmation(written.stored);
     return failedSave(error);
   }
 
