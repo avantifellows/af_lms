@@ -128,7 +128,9 @@ export async function getBlendedLearningAccess(
 // Mentor or admin who is not read-only may, and only for a Student in their
 // scope (canAccessBlendedStudent: a Mentor's own Mentees, any mapped Student
 // for an admin); each reveal is logged (blended-learning-jee-password).
-// Read-only accounts, Mentor or admin, never reveal it.
+// Read-only accounts, Mentor or admin, never reveal it. A team lead's
+// supervised Mentees are view only for everything else but out of scope for
+// the JEE form: no reading, recording or revealing (full scope only).
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction

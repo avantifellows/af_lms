@@ -263,6 +263,23 @@ describe("MenteeDetailPage", () => {
       );
     });
 
+    it("shows no JEE form line or JEE tab link, and never reads the form: it is full scope only", async () => {
+      mockGetMenteeDetail.mockResolvedValue({
+        ...SUPERVISED,
+        openActionItems: [
+          { id: 130, text: "JEE Form Filling (Reminder)", owner: "student", agreedOn: "2026-10-25", source: "common", jeeReminder: true },
+        ],
+      });
+
+      await renderPage("502");
+
+      expect(mockGetJeeForm).not.toHaveBeenCalled();
+      expect(screen.queryByRole("region", { name: "JEE Main 2027 form" })).not.toBeInTheDocument();
+      const items = screen.getByRole("region", { name: "Open Action Items" });
+      expect(within(items).getByText("JEE Form Filling (Reminder)")).toBeInTheDocument();
+      expect(within(items).queryByRole("link")).not.toBeInTheDocument();
+    });
+
     it("sends them back to the supervised Mentor's list, or to Flags when they came from it", async () => {
       await renderPage("502");
       expect(screen.getByRole("link", { name: "Back to Reportee's students" })).toHaveAttribute(
@@ -649,6 +666,7 @@ describe("MenteeDetailPage", () => {
 
     it.each([
       ["a Mentor", MENTOR, "Fill in JEE tab"],
+      ["a team lead on their own Mentee", { ...MENTOR, actorEmail: "lead@test.local", supervisedMentorUserIds: [9002] }, "Fill in JEE tab"],
       ["a Blended Learning Admin", BLENDED_ADMIN, "View in JEE tab"],
       ["a read-only Blended Learning Admin", READ_ONLY_ADMIN, "View in JEE tab"],
     ] as const)("shows %s Not recorded and links to the Student's row in the JEE Form tab", async (_who, access, link) => {

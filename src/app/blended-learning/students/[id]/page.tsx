@@ -320,11 +320,12 @@ function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt
 function OpenActionItems({
   studentId,
   items,
-  canRecordJee,
+  jeeLink,
 }: {
   studentId: number;
   items: MenteeDetail["openActionItems"];
-  canRecordJee: boolean;
+  // The JEE reminder's link label, or null for no link (a view-only viewer).
+  jeeLink: "Fill in JEE tab" | "View in JEE tab" | null;
 }) {
   return (
     <section aria-label="Open Action Items">
@@ -337,9 +338,7 @@ function OpenActionItems({
               <span className="min-w-0 break-words">
                 {item.text}
                 <ActionItemMeta agreedOn={item.agreedOn} source={item.source} />
-                {item.jeeReminder && (
-                  <JeeTabLink studentId={studentId}>{canRecordJee ? "Fill in JEE tab" : "View in JEE tab"}</JeeTabLink>
-                )}
+                {item.jeeReminder && jeeLink && <JeeTabLink studentId={studentId}>{jeeLink}</JeeTabLink>}
               </span>
             </li>
           ))}
@@ -447,11 +446,13 @@ export default async function MenteeDetailPage({
     loadDashboardChrome(access),
     searchParams,
   ]);
-  // A supervised Mentor's Mentee is view only: no logging, draft changes or
-  // JEE form.
+  // A supervised Mentor's Mentee is view only: no logging or draft changes,
+  // and no JEE form at all (it is read, recorded and revealed only in full
+  // scope, canAccessBlendedStudent), so neither its line nor a JEE tab link.
   const canLog = !mentee.viewOnly && canBlendedLearning(access, "log");
-  const canRecordJee = !mentee.viewOnly && canBlendedLearning(access, "record_jee_form");
-  const jeeForm = await loadJeeForm(access, mentee.studentId);
+  const showJee = !mentee.viewOnly;
+  const canRecordJee = showJee && canBlendedLearning(access, "record_jee_form");
+  const jeeForm = showJee ? await loadJeeForm(access, mentee.studentId) : null;
   const back = backLink(access, mentee, backOrigin(query?.from));
 
   return (
@@ -476,13 +477,13 @@ export default async function MenteeDetailPage({
         />
       )}
       {mentee.openActionItems.length > 0 && (
-        <OpenActionItems studentId={mentee.studentId} items={mentee.openActionItems} canRecordJee={canRecordJee} />
+        <OpenActionItems
+          studentId={mentee.studentId}
+          items={mentee.openActionItems}
+          jeeLink={showJee ? (canRecordJee ? "Fill in JEE tab" : "View in JEE tab") : null}
+        />
       )}
-      <JeeFormStatusLine
-        studentId={mentee.studentId}
-        form={jeeForm}
-        canRecord={canRecordJee}
-      />
+      {showJee && <JeeFormStatusLine studentId={mentee.studentId} form={jeeForm} canRecord={canRecordJee} />}
       <History
         history={mentee.history}
         canPlayRecording={canBlendedLearning(access, "play_recording")}

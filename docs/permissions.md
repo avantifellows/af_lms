@@ -211,7 +211,9 @@ Mentor (not read-only) records the form and sets the password; Blended Learning 
 `admin`s) see the form view only and can't fill it or set, replace or clear the password.
 Revealing the password needs edit rights, as on the Exams tab: an account that is not read-only
 may reveal it for a Student in their scope, a Mentor (team leads included) only for their own
-active Mentees, a `blended_admin` or LMS `admin` for any Student with an active Mapping.
+active Mentees, a `blended_admin` or LMS `admin` for any Student with an active Mapping. A team
+lead's view-only reach into a supervised Mentor's Mentees doesn't extend to the JEE form: they
+can't see, record or reveal it for those Students.
 Read-only accounts, Mentor or admin, can't reveal it (403, nothing decrypted or logged; "Show
 password" is disabled as "View only"). Those reveals are logged to `lms_exam_password_reveals`
 too.

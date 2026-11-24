@@ -26,6 +26,8 @@ const ADMIN_READ_ONLY = "bl-viewer@example.org";
 const LMS_ADMIN = "lms-admin@example.org";
 const MENTOR_READ_ONLY = "bl-mentor-read-only@example.org";
 const TEACHER = "teacher@example.org";
+// A team-lead Mentor (9004) who supervises Mentor 9002 (Student 601).
+const SUPERVISOR = "bl-team-lead@example.org";
 
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
   [MENTOR_A]: { role: "blended_mentor", read_only: false, user_id: 9001 },
@@ -34,7 +36,10 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [LMS_ADMIN]: { role: "admin", read_only: false, user_id: 13 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [SUPERVISOR]: { role: "blended_mentor", read_only: false, user_id: 9004 },
 };
+// Active current-year Supervisions: supervisor → supervised Mentors.
+const SUPERVISIONS: Record<number, number[]> = { 9004: [9002] };
 // Active current-year Mappings: student → Mentor user id. Student 503 is unmapped.
 const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002 };
 const JEE_EXAM_ID = 1;
@@ -85,7 +90,13 @@ function matchesPermission(sqlText: string, params?: unknown[]) {
 // The read side of the database, keyed the way the SQL reads it.
 async function fakeQuery(text: string, params?: unknown[]) {
   sql.push(text);
-  if (text.includes("FROM user_permission")) return matchesPermission(text, params);
+  // The permission read (the Supervisions read also checks user_permission).
+  if (text.includes("FROM user_permission") && !text.includes("FROM blended_learning_mentor_supervisions")) {
+    return matchesPermission(text, params);
+  }
+  if (text.includes("FROM blended_learning_mentor_supervisions")) {
+    return (SUPERVISIONS[Number(params?.[0])] ?? []).map((id) => ({ mentor_user_id: id }));
+  }
   if (text.includes("FROM blended_learning_mentor_mentee_mappings")) {
     const mentor = MAPPINGS[Number(params?.[0])];
     return mentor ? [{ mentor_user_id: mentor }] : [];
@@ -273,6 +284,14 @@ describe("POST /api/blended-learning/students/[id]/jee-form: who may record", ()
     for (const id of ["601", "503", "abc"]) expect((await record(id, FILLED)).status).toBe(404);
     expect(fetchCalls).toEqual([]);
     expect(txWrites).toEqual([]);
+  });
+
+  it("answers 404 to a team lead for a supervised Mentor's Mentee: view only, writing nothing", async () => {
+    signedInAs(SUPERVISOR);
+    for (const fields of [FILLED, NOT_FILLED]) expect((await record("601", fields)).status).toBe(404);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(txWrites).toEqual([]);
+    expect(fetchCalls).toEqual([]);
   });
 
   it("refuses (403) Blended Learning Admins and LMS admins: only the Mentor records the form", async () => {

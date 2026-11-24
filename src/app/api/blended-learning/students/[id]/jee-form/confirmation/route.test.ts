@@ -16,7 +16,11 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   "bl-mentor@example.org": { role: "blended_mentor", read_only: false, user_id: 9001 },
   "bl-viewer@example.org": { role: "blended_admin", read_only: true, user_id: 12 },
   "teacher@example.org": { role: "teacher", read_only: false, user_id: 40 },
+  // A team-lead Mentor who supervises Mentor 9002 (Student 601).
+  "bl-team-lead@example.org": { role: "blended_mentor", read_only: false, user_id: 9004 },
 };
+// Active current-year Supervisions: supervisor → supervised Mentors.
+const SUPERVISIONS: Record<number, number[]> = { 9004: [9002] };
 const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002 };
 const KEY = "lms-documents/students/501/jee_main_confirmation/0f0e/page-1.pdf";
 let pages: unknown[] | null;
@@ -36,10 +40,14 @@ beforeEach(() => {
   sql = [];
   mockQuery.mockImplementation((async (text: string, params?: unknown[]) => {
     sql.push(text);
-    if (text.includes("FROM user_permission")) {
+    // The permission read (the Supervisions read also checks user_permission).
+    if (text.includes("FROM user_permission") && !text.includes("FROM blended_learning_mentor_supervisions")) {
       const email = String(params?.[0]).toLowerCase();
       const row = PERMISSIONS[email];
       return row ? [{ email, level: 1, school_codes: null, regions: null, program_ids: [], ...row }] : [];
+    }
+    if (text.includes("FROM blended_learning_mentor_supervisions")) {
+      return (SUPERVISIONS[Number(params?.[0])] ?? []).map((id) => ({ mentor_user_id: id }));
     }
     if (text.includes("FROM blended_learning_mentor_mentee_mappings")) {
       const mentor = MAPPINGS[Number(params?.[0])];
@@ -73,11 +81,14 @@ describe("GET /api/blended-learning/students/[id]/jee-form/confirmation", () => 
     expect(documentSql).toContain("doc.student_id = $1");
   });
 
-  it("answers 404 without a confirmation, out of scope or for another role's 403", async () => {
+  it("answers 404 without a confirmation or out of scope (a team lead's supervised Mentee included), and another role's 403", async () => {
     signedInAs("bl-mentor@example.org");
     expect((await open("601")).status).toBe(404);
     pages = null;
     expect((await open("501")).status).toBe(404);
+    pages = [{ s3_key: KEY, page_number: 1, mime_type: "application/pdf", byte_size: 5 }];
+    signedInAs("bl-team-lead@example.org");
+    expect((await open("601")).status).toBe(404);
     signedInAs("teacher@example.org");
     expect((await open("501")).status).toBe(403);
     signedInAs(null);

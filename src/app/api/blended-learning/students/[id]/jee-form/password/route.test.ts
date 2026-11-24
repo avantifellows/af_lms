@@ -21,6 +21,9 @@ const ADMIN = "bl-admin@example.org";
 const ADMIN_READ_ONLY = "bl-viewer@example.org";
 const LMS_ADMIN = "lms-admin@example.org";
 const TEACHER = "teacher@example.org";
+// A team-lead Mentor (9004) who supervises Mentor 9002 (Student 601) and
+// mentors Student 701 themself.
+const SUPERVISOR = "bl-team-lead@example.org";
 
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
   [MENTOR_A]: { role: "blended_mentor", read_only: false, user_id: 9001 },
@@ -29,9 +32,12 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [LMS_ADMIN]: { role: "admin", read_only: false, user_id: 13 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [SUPERVISOR]: { role: "blended_mentor", read_only: false, user_id: 9004 },
 };
+// Active current-year Supervisions: supervisor → supervised Mentors.
+const SUPERVISIONS: Record<number, number[]> = { 9004: [9002] };
 // Active current-year Mappings: student → Mentor user id. 503 is unmapped.
-const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002, 502: 9001 };
+const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002, 502: 9001, 701: 9004 };
 // 502 is a JNV NVS-only Student (a safety net: no Mentee is one today).
 const NVS_ONLY = new Set([502]);
 const CIPHERTEXT = "ZmFrZS1jaXBoZXJ0ZXh0";
@@ -45,10 +51,14 @@ let logFails: boolean;
 
 async function fakeQuery(text: string, params: unknown[] = []) {
   sql.push(text);
-  if (text.includes("FROM user_permission")) {
+  // The permission read (the Supervisions read also checks user_permission).
+  if (text.includes("FROM user_permission") && !text.includes("FROM blended_learning_mentor_supervisions")) {
     const email = String(params[0]).toLowerCase();
     const row = PERMISSIONS[email];
     return row ? [{ email, level: 1, school_codes: null, regions: null, program_ids: [], ...row }] : [];
+  }
+  if (text.includes("FROM blended_learning_mentor_supervisions")) {
+    return (SUPERVISIONS[Number(params[0])] ?? []).map((id) => ({ mentor_user_id: id }));
   }
   if (text.includes("FROM blended_learning_mentor_mentee_mappings")) {
     const mentor = MAPPINGS[Number(params[0])];
@@ -87,7 +97,7 @@ function expectNothingRevealed() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  ciphertexts = { 501: CIPHERTEXT, 601: CIPHERTEXT, 502: CIPHERTEXT };
+  ciphertexts = { 501: CIPHERTEXT, 601: CIPHERTEXT, 502: CIPHERTEXT, 701: CIPHERTEXT };
   sql = [];
   events = [];
   reveals = [];
@@ -132,6 +142,18 @@ describe("POST /api/blended-learning/students/[id]/jee-form/password: who may re
       expect(res.cacheControl).toBe("no-store");
     }
     expectNothingRevealed();
+  });
+
+  it("lets a team lead reveal only their own Mentee's password, never a supervised Mentor's (403, nothing read)", async () => {
+    signedInAs(SUPERVISOR);
+    const refused = await reveal("601");
+    expect(refused.status).toBe(403);
+    expect(refused.text).not.toContain(PASSWORD);
+    expectNothingRevealed();
+    expect(sql.some((text) => text.includes("FROM student_exam_record"))).toBe(false);
+
+    expect((await reveal("701")).status).toBe(200);
+    expect(reveals).toEqual([[701, 77, 1, SUPERVISOR, "blended_mentor"]]);
   });
 
   it("refuses (403) read-only accounts, Mentor or admin, even in scope: nothing decrypted or logged", async () => {

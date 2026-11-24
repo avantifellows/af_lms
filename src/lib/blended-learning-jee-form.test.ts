@@ -129,6 +129,14 @@ describe("listJeeFormRows", () => {
     expect(saved[0].text).toMatch(/application_password_ciphertext IS NOT NULL/);
   });
 
+  it("reads only a team lead's own Students, never their reportees'", async () => {
+    await listJeeFormRows({ ...MENTOR, supervisedMentorUserIds: [9002] });
+    expect(sql.find(({ text }) => text.includes("FROM blended_learning_mentor_mentee_mappings"))?.params).toEqual([
+      "2026-2027",
+      MENTOR.mentorUserId,
+    ]);
+  });
+
   it("reads every Mentor's Students for an admin", async () => {
     await listJeeFormRows(ADMIN);
     expect(sql.find(({ text }) => text.includes("FROM blended_learning_mentor_mentee_mappings"))?.params).toEqual([

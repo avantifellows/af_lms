@@ -204,6 +204,7 @@ describe("BlendedLearningPage", () => {
       expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
         "Team",
         "My Students",
+        "JEE Form",
         "Flags",
         "Resources",
       ]);

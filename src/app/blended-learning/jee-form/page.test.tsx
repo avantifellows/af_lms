@@ -78,6 +78,25 @@ describe("JeeFormPage", () => {
     expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, canReveal: true, showMentor: false });
   });
 
+  it("gives a team lead the JEE Form tab after Team and My Students, with only their own Students to record", async () => {
+    const teamLead = { ...MENTOR, supervisedMentorUserIds: [9002] };
+    signedInAs(teamLead);
+
+    render(await JeeFormPage());
+
+    const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "Team",
+      "My Students",
+      "JEE Form",
+      "Flags2 new",
+      "Resources",
+    ]);
+    expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("aria-current", "page");
+    expect(mockListJeeFormRows).toHaveBeenCalledWith(teamLead);
+    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, canReveal: true, showMentor: false });
+  });
+
   it.each([
     ["an admin", ADMIN, true],
     ["a read-only admin", READ_ONLY_ADMIN, false],
