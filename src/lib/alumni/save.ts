@@ -41,6 +41,8 @@ export type SaveResult =
       warnings?: Issue[];
       /** Nothing to write: every answer is already on record (or blank). */
       nothing?: true;
+      /** With `nothing`: saved values the person blanked, which a save never clears. */
+      notCleared?: string[];
     };
 
 const FIELD = new Map(ALUMNI_FIELDS.map((f) => [f.column, f]));
@@ -67,7 +69,7 @@ function nothingToSave(context: EntryContext, notCleared: string[]): Failure {
   const error = notCleared.length
     ? "Clearing a saved value isn't allowed here — nothing else changed."
     : context.kind === "edit" ? "Nothing changed from the alumni record." : "Nothing filled in yet.";
-  return { ok: false, status: 400, error, nothing: true };
+  return { ok: false, status: 400, error, nothing: true, notCleared };
 }
 
 /** DB Service payload: the form's (full) field names; college/branch as ids, years/numbers as numbers. */
@@ -134,7 +136,9 @@ async function sendAsCall(
     if (!created.ok) return created;
     alumniId = created.alumniId;
   }
-  const written = await postJourney(alumniId, fields, journey);
+  // The call's outcome on every row, changed or not (reports count calls by it).
+  const contactStatus = String(fields.contact_status ?? context.alumni.contact_status ?? "");
+  const written = await postJourney(alumniId, fields, { ...journey, contactStatus });
   if (written.ok) return { ok: true, alumniId, action: existingId ? "updated" : "inserted" };
   if (existingId) return written;
   // The record exists now, without the answers: a reload shows it to edit.
@@ -224,7 +228,9 @@ export async function saveAlumni(
   const prepared = await prepareSave(context, submitted, confirmed, version);
   if (!prepared.ok) {
     // A call where nothing changed but something happened ("Wrong phone number").
-    if (prepared.nothing && journey?.notes && journeyEnabled() && context.kind === "edit") return saveRemarkOnly(context, journey);
+    if (prepared.nothing && journey?.notes && journeyEnabled() && context.kind === "edit") {
+      return saveRemarkOnly(context, journey, prepared.notCleared ?? []);
+    }
     return prepared;
   }
   const { values, changed, notCleared, codes } = prepared;
@@ -240,17 +246,20 @@ export async function saveAlumni(
   };
 }
 
-/** Only the call remark: a history row with no field changes (the alumni row is untouched). */
-async function saveRemarkOnly(context: EntryContext, journey: JourneyNote): Promise<SaveResult> {
+/**
+ * Only the call remark: a history row with no field changes (the alumni row is
+ * untouched). `notCleared`: blanked saved values, reported as not cleared.
+ */
+async function saveRemarkOnly(context: EntryContext, journey: JourneyNote, notCleared: string[]): Promise<SaveResult> {
   const alumniId = context.ids.alumniId;
-  const written = await postJourney(alumniId, {}, journey);
+  const written = await postJourney(alumniId, {}, { ...journey, contactStatus: context.alumni.contact_status });
   if (!written.ok) return { ...written, error: "Couldn't save the remark. Try again." };
   return {
     ok: true,
     alumniId,
     action: "updated",
     changed: [],
-    notCleared: [],
+    notCleared: fieldLabels(notCleared),
     version: await currentVersion(alumniId),
     remark: journey.notes,
   };

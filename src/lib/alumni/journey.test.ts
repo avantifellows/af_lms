@@ -72,6 +72,7 @@ describe("postJourney", () => {
       actor_email: "a@avantifellows.org",
       actor_role: "alumni_manager",
       notes: "Updated by student",
+      contact_status: null,
     });
   });
 

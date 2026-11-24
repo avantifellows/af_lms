@@ -156,10 +156,21 @@ export default function AlumniDataTable({ schoolCode, canEdit = true }: Props) {
   const view = useFilters(schoolCode);
   const [open, setOpen] = useState<AlumniEntryRef | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  /** A bulk check or save is running: its popup stays open. */
+  const [bulkBusy, setBulkBusy] = useState(false);
+  /** A bulk save happened: the selection clears when its popup closes (however it's closed). */
+  const [bulkSaved, setBulkSaved] = useState(false);
   const selection = useSelection();
   const selectedStudents = useMemo(() => [...selection.selected.values()], [selection.selected]);
   const table = useTableData(view.query);
   const { data, reload } = table;
+
+  const closeBulk = () => {
+    if (bulkBusy) return;
+    setBulkOpen(false);
+    if (bulkSaved) selection.clear();
+    setBulkSaved(false);
+  };
 
   return (
     <div className="space-y-4">
@@ -184,15 +195,16 @@ export default function AlumniDataTable({ schoolCode, canEdit = true }: Props) {
       <ClosableModal open={open !== null} onClose={() => setOpen(null)}>
         {open && <AlumniForm entry={open} canEdit={canEdit} onSaved={reload} />}
       </ClosableModal>
-      <ClosableModal open={bulkOpen} onClose={() => setBulkOpen(false)}>
+      <ClosableModal open={bulkOpen} onClose={closeBulk} locked={bulkBusy}>
         {bulkOpen && (
           <BulkEditPanel
             students={selectedStudents}
-            onDone={() => {
-              setBulkOpen(false);
-              selection.clear();
+            onBusyChange={setBulkBusy}
+            onSaved={() => {
+              setBulkSaved(true);
               reload();
             }}
+            onDone={closeBulk}
           />
         )}
       </ClosableModal>
@@ -230,15 +242,22 @@ function TableCard({ table, showSchool, selection, onSelectAll, onEditSelected, 
   );
 }
 
-/** A wide modal with a close button in its corner. */
-function ClosableModal({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+/** A wide modal with a close button in its corner; `locked` (work running) keeps it open. */
+function ClosableModal({ open, onClose, locked = false, children }: {
+  open: boolean;
+  onClose: () => void;
+  locked?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <Modal open={open} onClose={onClose} className="max-w-4xl p-6">
+    <Modal open={open} onClose={locked ? undefined : onClose} className="max-w-4xl p-6">
       {open && (
         <>
-          <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded p-1 text-text-muted hover:bg-hover-bg">
-            <X className="h-4 w-4" aria-hidden />
-          </button>
+          {!locked && (
+            <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded p-1 text-text-muted hover:bg-hover-bg">
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          )}
           {children}
         </>
       )}

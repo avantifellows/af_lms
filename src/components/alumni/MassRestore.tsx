@@ -28,9 +28,6 @@ type Step =
 
 type Load = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; groups: HistoryGroup[] };
 
-/** Just before the step: restoring to it undoes the step and everything after (seconds are the finest the rows keep). */
-const justBefore = (group: HistoryGroup) => new Date(Date.parse(group.start) - 1000).toISOString();
-
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 async function send(body: object): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
@@ -86,20 +83,22 @@ export default function MassRestore({ scope, scopeLabel }: { scope: RestoreScope
   const pick = async (group: HistoryGroup) => {
     setBusyId(group.id);
     setError("");
-    const r = await send({ scope, at: justBefore(group), dryRun: true });
+    // Just before the step's first history row: undoes the step and everything after.
+    const r = await send({ scope, beforeId: group.id, dryRun: true });
     setBusyId(null);
     if (!r.ok) return setError(r.error);
     setStep({ kind: "plan", group, plan: r.data as unknown as RestorePlan });
   };
 
   const restore = async (group: HistoryGroup, plan: RestorePlan) => {
-    const at = justBefore(group);
     const ids = plan.items.map((i) => i.alumniId);
+    // What the preview showed: anyone saved since is skipped, not reverted unseen.
+    const versions = Object.fromEntries(plan.items.map((i) => [i.alumniId, i.version]));
     const results: RestoreResult[] = [];
     setStep({ kind: "running", group, plan, done: 0 });
     for (let i = 0; i < ids.length; i += RESTORE_CHUNK) {
       const chunk = ids.slice(i, i + RESTORE_CHUNK);
-      const r = await send({ scope, at, alumniIds: chunk });
+      const r = await send({ scope, beforeId: group.id, alumniIds: chunk, versions });
       if (r.ok) results.push(...(r.data.results as RestoreResult[]));
       else results.push(...chunk.map((alumniId) => failed(alumniId, plan, r.error)));
       setStep({ kind: "running", group, plan, done: Math.min(i + RESTORE_CHUNK, ids.length) });
@@ -145,7 +144,7 @@ const failed = (alumniId: string, plan: RestorePlan, message: string): RestoreRe
 
 /** The panel on the right (full screen on a phone); the page makes room for it. */
 function Panel({ title, onClose, children }: { title: string; onClose?: () => void; children: React.ReactNode }) {
-  useMakeRoom("32rem");
+  useMakeRoom(32);
   return (
     <aside
       role="dialog"
@@ -325,16 +324,29 @@ function Progress({ done, total }: { done: number; total: number }) {
 function DoneView({ group, results, onBack }: { group: HistoryGroup; results: RestoreResult[]; onBack: () => void }) {
   const restored = results.filter((r) => r.result === "restored").length;
   const errors = results.filter((r) => r.result === "error");
-  const unchanged = results.length - restored - errors.length;
+  const skipped = results.filter((r) => r.result === "skipped");
+  const unchanged = results.length - restored - errors.length - skipped.length;
   return (
     <>
-      <p className="flex items-start gap-2 text-sm text-text-primary">
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-700" aria-hidden />
-        <span>
-          Restored <strong>{plural(restored, "alumnus", "alumni")}</strong> to just before {formatMoment(group.start)}.
-          {unchanged > 0 && ` ${unchanged} already matched and were left as they are.`}
-        </span>
-      </p>
+      {restored > 0 ? (
+        <p className="flex items-start gap-2 text-sm text-text-primary">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
+          <span>
+            Restored <strong>{plural(restored, "alumnus", "alumni")}</strong> to just before {formatMoment(group.start)}.
+            {unchanged > 0 && ` ${unchanged} already matched and were left as they are.`}
+          </span>
+        </p>
+      ) : (
+        <p className="flex items-start gap-2 text-sm font-semibold text-danger">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Nothing was restored.
+        </p>
+      )}
+      {skipped.length > 0 && (
+        <p className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning-text">
+          {plural(skipped.length, "alumnus was", "alumni were")} saved by someone after your preview and left as they are:{" "}
+          {skipped.map((s) => s.name || `alumni ${s.alumniId}`).join(", ")}. Open this step again to see the latest.
+        </p>
+      )}
       {errors.length > 0 && (
         <div className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">
           <p className="font-semibold">{errors.length} couldn&apos;t be restored — try them again:</p>

@@ -5,7 +5,7 @@ const target = (id: string, kind: "alumnus" | "pass-out" = "alumnus") => ({ kind
 
 describe("commonAnswers", () => {
   it("splits answers everyone shares from ones that differ or are partly filled", () => {
-    const records = [
+    const records: Record<string, string>[] = [
       { ug_status: "Studying", degree_ug: "BTech/BE", current_ctc: "" },
       { ug_status: "Studying", degree_ug: "BSc", current_ctc: "4" },
       { ug_status: " Studying " },

@@ -71,6 +71,21 @@ describe("HistoryPanel", () => {
     expect(document.body.style.paddingRight).toBe("");
   });
 
+  it("two panels open: room for the widest still open, padding back after the last", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    document.body.style.paddingRight = "1px";
+    const panel = (
+      <HistoryPanel journey={{ entries: [], error: "" }} selectedId={null} onSelect={vi.fn()} onClose={vi.fn()} />
+    );
+    const first = render(panel);
+    const second = render(panel);
+    expect(document.body.style.paddingRight).toBe("24rem");
+    first.unmount();
+    expect(document.body.style.paddingRight).toBe("24rem");
+    second.unmount();
+    expect(document.body.style.paddingRight).toBe("1px");
+  });
+
   it("says when there is no history yet", () => {
     render(<HistoryPanel journey={{ entries: [], error: "" }} selectedId={null} onSelect={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText(/No history yet/)).toBeInTheDocument();

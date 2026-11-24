@@ -18,6 +18,8 @@ export interface RestorePlanItem {
   school: string;
   /** The version restored to: the date it was reported, or "" for the record before any answer. */
   versionOn: string;
+  /** The record's version now (sent back with the restore, to skip anyone changed since). */
+  version: string;
   changes: RestoreChange[];
 }
 
@@ -31,7 +33,8 @@ export interface RestorePlan {
 export interface RestoreResult {
   alumniId: string;
   name: string;
-  result: "restored" | "unchanged" | "error";
+  /** skipped: changed since the preview, so not restored unseen. */
+  result: "restored" | "unchanged" | "skipped" | "error";
   message?: string;
   changed: string[];
 }

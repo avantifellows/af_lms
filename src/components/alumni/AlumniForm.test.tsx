@@ -249,6 +249,10 @@ describe("AlumniForm", () => {
       return init?.method === "POST" ? json({ error: "no" }, 500) : json(edit);
     });
     render(<AlumniForm entry={ALUMNUS} />);
+    // Something typed and not saved yet.
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+    select("Current status", "Seeking Work");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: /History/ }));
     expect(screen.getByRole("dialog", { name: "Version history" })).toBeInTheDocument();
@@ -263,12 +267,14 @@ describe("AlumniForm", () => {
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Restore this version/ }));
+    expect(screen.getByText(/Your unsaved changes in the form will be lost/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/Restored the record of/), expect.anything()));
     const [, init] = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/journey/revert"))!;
     expect(JSON.parse(init.body)).toEqual({ journeyId: "4", version: "v2" });
-    // Back on the current record.
+    // Back on the current record, with nothing left over from before the restore.
     expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
   });
 
   it("sends the reloaded version after a save, not its own (someone may have saved since)", async () => {

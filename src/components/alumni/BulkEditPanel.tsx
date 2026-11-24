@@ -24,8 +24,12 @@ export type BulkStudent = BulkTarget & { name: string };
 
 interface Props {
   students: BulkStudent[];
-  /** After saving: reload the table and clear the selection. */
+  /** "Done" on the result screen: close. */
   onDone: () => void;
+  /** A check or save is running (the popup can't be closed then). */
+  onBusyChange?: (busy: boolean) => void;
+  /** A save finished: reload the table (the result screen stays open). */
+  onSaved?: () => void;
 }
 
 /** Students per request (the server takes at most 25). */
@@ -157,7 +161,8 @@ async function runInChunks(
 
 const count = (results: BulkResult[], ...kinds: BulkResult["result"][]) => results.filter((r) => kinds.includes(r.result)).length;
 
-export default function BulkEditPanel({ students, onDone }: Props) {
+export default function BulkEditPanel(props: Props) {
+  const { students } = props;
   const { start, error: startError } = useCommon(students);
   if (!start) {
     return (
@@ -166,7 +171,7 @@ export default function BulkEditPanel({ students, onDone }: Props) {
       </p>
     );
   }
-  return <BulkEditor students={students} start={start} startError={startError} onDone={onDone} />;
+  return <BulkEditor {...props} start={start} startError={startError} />;
 }
 
 /** The answers being filled in, and what they mean for each student. `onEdit`: an answer changed. */
@@ -203,7 +208,7 @@ function useBulkAnswers(start: BulkCommon, onEdit: () => void) {
 type Answers = Pick<ReturnType<typeof useBulkAnswers>, "answers" | "replace" | "overwrite">;
 
 /** Check (nothing written), then save the students the check says can be saved. */
-function useBulkRun(students: BulkStudent[]) {
+function useBulkRun(students: BulkStudent[], { onBusyChange, onSaved }: Pick<Props, "onBusyChange" | "onSaved">) {
   const [stage, setStage] = useState<Stage>("edit");
   const [progress, setProgress] = useState(0);
   const [preview, setPreview] = useState<BulkResult[]>([]);
@@ -214,20 +219,25 @@ function useBulkRun(students: BulkStudent[]) {
 
   const check = async ({ answers, replace, overwrite }: Answers) => {
     setStage("checking");
+    onBusyChange?.(true);
     setProgress(0);
     setAcceptWarnings(false);
     setPreview(await runInChunks(students, { values: answers, replace, confirmed: [], overwrite, dryRun: true }, setProgress));
     setStage("preview");
+    onBusyChange?.(false);
   };
 
   const save = async ({ answers, replace, overwrite }: Answers) => {
     const keys = new Set(toSave.map((r) => `${r.target.kind}-${r.target.id}`));
     const chosen = students.filter((s) => keys.has(`${s.kind}-${s.id}`));
     setStage("saving");
+    onBusyChange?.(true);
     setProgress(0);
     const confirmed = acceptWarnings ? warnings.map((w) => w.id) : [];
     setSaved(await runInChunks(chosen, { values: answers, replace, confirmed, overwrite, dryRun: false }, setProgress));
     setStage("done");
+    onBusyChange?.(false);
+    onSaved?.();
   };
 
   return {
@@ -239,8 +249,8 @@ function useBulkRun(students: BulkStudent[]) {
   };
 }
 
-function BulkEditor({ students, start, startError, onDone }: Props & { start: BulkCommon; startError: string }) {
-  const run = useBulkRun(students);
+function BulkEditor({ students, start, startError, onDone, onBusyChange, onSaved }: Props & { start: BulkCommon; startError: string }) {
+  const run = useBulkRun(students, { onBusyChange, onSaved });
   const form = useBulkAnswers(start, run.edited);
 
   if (run.stage === "done") return <DoneView results={run.saved} onClose={onDone} />;
@@ -249,25 +259,28 @@ function BulkEditor({ students, start, startError, onDone }: Props & { start: Bu
     <div className="space-y-5">
       <BulkHeader students={students} />
       {startError && <p className="text-xs text-warning-text">{startError}</p>}
-      <SharedAnswers columns={form.folded} values={form.values} names={form.names} onReopen={form.reopen} total={start.total} />
-      <MixedAnswers mixed={start.mixed} total={start.total} shown={form.sections.flatMap((s) => s.open.fields.map((f) => f.column))} />
+      {/* Locked while a check or save runs, so the preview always matches the answers. */}
+      <fieldset disabled={run.busy} className="min-w-0 space-y-5">
+        <SharedAnswers columns={form.folded} values={form.values} names={form.names} onReopen={form.reopen} total={start.total} />
+        <MixedAnswers mixed={start.mixed} total={start.total} shown={form.sections.flatMap((s) => s.open.fields.map((f) => f.column))} />
 
-      {form.sections.filter((s) => s.hasOpen).map(({ section, open }, i) => (
-        <FormSectionBlock
-          key={section.id}
-          step={i + 1}
-          section={open}
-          values={form.values}
-          previous={form.common}
-          names={form.names}
-          errors={form.errors}
-          warnings={{}}
-          onValue={form.setValue}
-          onName={form.setName}
-        />
-      ))}
+        {form.sections.filter((s) => s.hasOpen).map(({ section, open }, i) => (
+          <FormSectionBlock
+            key={section.id}
+            step={i + 1}
+            section={open}
+            values={form.values}
+            previous={form.common}
+            names={form.names}
+            errors={form.errors}
+            warnings={{}}
+            onValue={form.setValue}
+            onName={form.setName}
+          />
+        ))}
 
-      <OverwriteToggle checked={form.overwrite} disabled={run.busy} onChange={form.setOverwrite} />
+        <OverwriteToggle checked={form.overwrite} disabled={run.busy} onChange={form.setOverwrite} />
+      </fieldset>
 
       {(run.stage === "preview" || run.stage === "saving") && (
         <PreviewSummary results={run.preview} warnings={run.warnings} accept={run.acceptWarnings} onAccept={run.setAcceptWarnings} />
@@ -352,7 +365,7 @@ function ActionsContent({ run, form, students }: Parameters<typeof BulkActions>[
   return (
     <>
       <Button type="button" onClick={() => run.check(form)} disabled={!answerCount || errorCount > 0}>
-        Check {students} students
+        Check {students} {students === 1 ? "student" : "students"}
       </Button>
       <span className="text-sm text-text-muted">{checkHint(errorCount, answerCount)}</span>
     </>
@@ -481,11 +494,18 @@ function ResultList({ results }: { results: BulkResult[] }) {
 /** After the save: what was written, and what wasn't. */
 function DoneView({ results, onClose }: { results: BulkResult[]; onClose: () => void }) {
   const failed = results.filter((r) => r.result !== "create" && r.result !== "update");
+  const anySaved = failed.length < results.length;
   return (
     <div className="space-y-4">
-      <h2 className="flex items-center gap-2 text-xl font-extrabold text-text-primary">
-        <CheckCircle2 className="h-6 w-6 text-success" aria-hidden /> Saved to the alumni table
-      </h2>
+      {anySaved ? (
+        <h2 className="flex items-center gap-2 text-xl font-extrabold text-text-primary">
+          <CheckCircle2 className="h-6 w-6 text-success" aria-hidden /> Saved to the alumni table
+        </h2>
+      ) : (
+        <h2 className="flex items-center gap-2 text-xl font-extrabold text-danger">
+          <AlertTriangle className="h-6 w-6" aria-hidden /> Nothing was saved
+        </h2>
+      )}
       <div className="flex flex-wrap gap-2 text-sm font-medium">
         <Pill tone="coral" n={count(results, "create")} label="added (new record)" />
         <Pill tone="gold" n={count(results, "update")} label="updated" />

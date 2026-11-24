@@ -28,6 +28,8 @@ export interface JourneyNote {
   actorRole?: string;
   /** The call remark. */
   notes?: string;
+  /** The call's outcome (contact status), stored on the row as `contact_status`. */
+  contactStatus?: string;
 }
 
 export type JourneyWrite = { ok: true } | { ok: false; status: number; error: string };
@@ -50,6 +52,7 @@ export async function postJourney(alumniId: string, data: Record<string, unknown
       actor_email: note.actorEmail,
       actor_role: note.actorRole ?? null,
       notes: note.notes ?? null,
+      contact_status: note.contactStatus || null,
     }),
   });
   if (response.ok) return { ok: true };

@@ -8,9 +8,16 @@ vi.mock("./AlumniForm", () => ({
   default: ({ entry }: { entry: { kind: string; id: string } }) => <div>form for {entry.kind} {entry.id}</div>,
 }));
 vi.mock("./BulkEditPanel", () => ({
-  default: ({ students, onDone }: { students: { id: string }[]; onDone: () => void }) => (
+  default: ({ students, onDone, onBusyChange, onSaved }: {
+    students: { id: string }[];
+    onDone: () => void;
+    onBusyChange: (busy: boolean) => void;
+    onSaved: () => void;
+  }) => (
     <div>
       bulk for {students.map((s) => s.id).join(",")}
+      <button type="button" onClick={() => onBusyChange(true)}>start saving</button>
+      <button type="button" onClick={() => { onBusyChange(false); onSaved(); }}>saving done</button>
       <button type="button" onClick={onDone}>finish bulk</button>
     </div>
   ),
@@ -103,10 +110,28 @@ describe("AlumniDataTable", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit 2 selected" }));
     expect(screen.getByText("bulk for 8340,86655")).toBeInTheDocument();
+
+    // While saving, the popup can't be closed (no X, Esc ignored).
+    fireEvent.click(screen.getByRole("button", { name: "start saving" }));
+    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByText("bulk for 8340,86655")).toBeInTheDocument();
+
+    // A finished save reloads the table at once; closing the popup any way then clears the selection.
     const loads = tableCalls().length;
-    fireEvent.click(screen.getByRole("button", { name: "finish bulk" }));
-    expect(screen.getByText(/Tick students to fill in/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "saving done" }));
     await waitFor(() => expect(tableCalls().length).toBe(loads + 1));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText("bulk for 8340,86655")).not.toBeInTheDocument();
+    expect(screen.getByText(/Tick students to fill in/)).toBeInTheDocument();
+  });
+
+  it("closing bulk edit without saving keeps the selection", async () => {
+    render(<AlumniDataTable />);
+    fireEvent.click(await screen.findByLabelText("Select Ampoli Ram", {}, LOAD));
+    fireEvent.click(screen.getByRole("button", { name: "Edit 1 selected" }));
+    fireEvent.click(screen.getByRole("button", { name: "finish bulk" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
   });
 
   it("opens a record from its row", async () => {

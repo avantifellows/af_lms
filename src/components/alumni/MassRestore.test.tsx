@@ -12,6 +12,7 @@ const item = (id: string) => ({
   name: `Alumnus ${id}`,
   school: "JNV Adilabad",
   versionOn: "2026-11-23",
+  version: `v-${id}`,
   changes: [{ label: "Contact status", before: "Contacted - Positive Response", after: "Contacted - Unreachable" }],
 });
 const BULK = {
@@ -69,15 +70,16 @@ describe("MassRestore (version history for many alumni)", () => {
 
     expect(await screen.findByText(/would go back to how they were just before this/)).toHaveTextContent("30 alumni");
     expect(screen.getByText(/Late Comer/)).toBeInTheDocument();
-    // One second before the step started.
-    expect(bodies()[1]).toEqual({ scope: { kind: "school", code: "59525" }, at: "2026-11-23T10:41:59.000Z", dryRun: true });
+    // Just before the step's first history row.
+    expect(bodies()[1]).toEqual({ scope: { kind: "school", code: "59525" }, beforeId: "40", dryRun: true });
 
     fireEvent.click(screen.getByRole("button", { name: "Restore 30 alumni" }));
     fireEvent.click(screen.getByRole("button", { name: "Yes, restore" }));
     expect(await screen.findByText(/^Restored/)).toHaveTextContent("Restored 30 alumni");
     const chunks = bodies().filter((b) => b.alumniIds);
     expect(chunks.map((b) => b.alumniIds.length)).toEqual([25, 5]);
-    expect(chunks[0].at).toBe("2026-11-23T10:41:59.000Z");
+    expect(chunks[0].beforeId).toBe("40");
+    expect(chunks[0].versions).toMatchObject({ "1": "v-1", "30": "v-30" });
     expect(refresh).toHaveBeenCalled();
     // The list is loaded again, with the restore in it.
     await waitFor(() => expect(bodies().filter((b) => b.history)).toHaveLength(2));
@@ -94,6 +96,24 @@ describe("MassRestore (version history for many alumni)", () => {
     expect(await screen.findByText("Bulk edit")).toBeInTheDocument();
   });
 
+  it("says who was skipped because someone saved them after the preview", async () => {
+    fetchMock
+      .mockResolvedValueOnce(json({ groups: [CALL] }))
+      .mockResolvedValueOnce(json({ items: [item("1"), item("2")], addedAfter: [] }))
+      .mockResolvedValueOnce(json({ results: [
+        { alumniId: "1", name: "Alumnus 1", result: "restored", changed: [] },
+        { alumniId: "2", name: "Alumnus 2", result: "skipped", changed: [] },
+      ] }))
+      .mockResolvedValue(json({ groups: [CALL] }));
+    render(<MassRestore scope={{ kind: "all" }} scopeLabel="all alumni" />);
+    await openHistory();
+    fireEvent.click((await screen.findByText("“Wrong Phone number”")).closest("button")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Restore 2 alumni" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, restore" }));
+    expect(await screen.findByText(/saved by someone after your preview/)).toHaveTextContent("Alumnus 2");
+    expect(screen.getByText(/^Restored/)).toHaveTextContent("Restored 1 alumnus");
+  });
+
   it("shows a refusal and lists the ones that failed", async () => {
     fetchMock
       .mockResolvedValueOnce(json({ groups: [CALL] }))
@@ -101,7 +121,7 @@ describe("MassRestore (version history for many alumni)", () => {
       .mockResolvedValueOnce(
         json({
           results: [
-            { alumniId: "1", name: "Alumnus 1", result: "restored", changed: [] },
+            { alumniId: "1", name: "Alumnus 1", result: "error", message: "the DB Service answered 422", changed: [] },
             { alumniId: "2", name: "Alumnus 2", result: "error", message: "the DB Service answered 422", changed: [] },
           ],
         }),
@@ -113,6 +133,7 @@ describe("MassRestore (version history for many alumni)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Restore 2 alumni" }));
     fireEvent.click(screen.getByRole("button", { name: "Yes, restore" }));
     await waitFor(() => expect(screen.getByText(/be restored/)).toBeInTheDocument());
+    expect(screen.getByText("Nothing was restored.")).toBeInTheDocument();
     expect(screen.getByText(/Alumnus 2: the DB Service answered 422/)).toBeInTheDocument();
   });
 

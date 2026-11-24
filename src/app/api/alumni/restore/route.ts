@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { authorizeAlumni } from "@/lib/alumni/access";
 import { journeyEnabled } from "@/lib/alumni/journey";
-import { listHistory, planRestore, runRestore } from "@/lib/alumni/mass-restore";
+import { findMarker, listHistory, planRestore, runRestore } from "@/lib/alumni/mass-restore";
 import { RESTORE_CHUNK, type RestoreScope } from "@/lib/alumni/mass-restore-types";
 import { reachesAllSchools } from "@/lib/alumni/scope";
 
 // Version history and mass restore (mass-restore.ts): { scope, history } lists
-// the scope's steps; { scope, at, dryRun, alumniIds? } restores to a moment.
+// the scope's steps; { scope, beforeId, dryRun, alumniIds?, versions? } restores
+// to just before history row `beforeId` (a step's first row).
 //   scope { kind: "all" }            — edit access to every school (admins,
 //                                       Alumni Managers with full access)
 //   scope { kind: "school", code }   — edit access to that school
@@ -14,8 +15,9 @@ import { reachesAllSchools } from "@/lib/alumni/scope";
 
 interface Body {
   scope?: { kind?: unknown; code?: unknown };
-  at?: unknown;
+  beforeId?: unknown;
   dryRun?: unknown;
+  versions?: unknown;
   alumniIds?: unknown;
   history?: unknown;
 }
@@ -30,11 +32,10 @@ function readScope(body: Body): RestoreScope | null {
   return null;
 }
 
-/** A moment in the past (since 2000). */
-function readMoment(at: unknown): Date | null {
-  const date = typeof at === "string" ? new Date(at) : null;
-  if (!date || Number.isNaN(date.getTime())) return null;
-  return date.getTime() <= Date.now() && date.getUTCFullYear() >= 2000 ? date : null;
+/** Each alumnus's record version from the preview ({ alumniId: version }); other entries are dropped. */
+function readVersions(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((e): e is [string, string] => typeof e[1] === "string"));
 }
 
 /** The request body, or null when it isn't JSON. */
@@ -85,15 +86,16 @@ export async function POST(request: Request) {
   if (body.history === true) {
     return guarded("[alumni/history]", "Couldn't load the history.", async () => NextResponse.json({ groups: await listHistory(scope) }));
   }
-  const at = readMoment(body.at);
-  if (!at) return bad("Pick a date and time in the past.");
+  const beforeId = typeof body.beforeId === "string" && /^\d+$/.test(body.beforeId) ? body.beforeId : null;
+  const marker = beforeId ? await findMarker(beforeId) : null;
+  if (!marker) return bad("Pick a step from the history.");
   if (body.dryRun === true) {
-    return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () => NextResponse.json(await planRestore(scope, at)));
+    return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () => NextResponse.json(await planRestore(scope, marker)));
   }
   const ids = readIds(body.alumniIds);
   if (!ids) return bad(`Send 1 to ${RESTORE_CHUNK} alumni at a time.`);
   const actor = { actorEmail: auth.email, actorRole: auth.permission.role };
   return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () =>
-    NextResponse.json({ results: await runRestore(scope, at, ids, actor) }),
+    NextResponse.json({ results: await runRestore(scope, marker, ids, actor, readVersions(body.versions)) }),
   );
 }

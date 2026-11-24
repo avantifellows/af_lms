@@ -139,6 +139,22 @@ describe("saveAlumni", () => {
       expect(result).toMatchObject({ ok: false, status: 502, error: expect.stringMatching(/added without these answers/) });
     });
 
+    it("stores the call's outcome on every row: the new one, else the one on record", async () => {
+      mockQuery.mockResolvedValue([{ id: "8340", version: "v2" }]);
+      const onRecord = { ...EDIT, alumni: { ...EDIT.alumni, contact_status: "Contacted - Unreachable" } };
+      await saveAlumni(onRecord, { ...onRecord.alumni, skilling_programs: "NPTEL" }, [], EDIT.version, NOTE);
+      expect(sent().body.contact_status).toBe("Contacted - Unreachable");
+      mockFetch.mockClear();
+      await saveAlumni(onRecord, { ...onRecord.alumni, contact_status: "Contacted - Positive Response" }, [], EDIT.version, NOTE);
+      expect(sent().body.contact_status).toBe("Contacted - Positive Response");
+    });
+
+    it("a remark with a blanked field still says the field wasn't cleared", async () => {
+      mockQuery.mockResolvedValue([{ id: "8340", version: "v2" }]);
+      const result = await saveAlumni(EDIT, { ...EDIT.alumni, degree_ug: "" }, [], EDIT.version, { ...NOTE, notes: "Updated by student" });
+      expect(result).toMatchObject({ ok: true, remark: "Updated by student", notCleared: ["Degree"] });
+    });
+
     it("saves a remark alone as a call with no answers", async () => {
       mockQuery.mockResolvedValue([{ id: "8340", version: "v2" }]);
       const result = await saveAlumni(EDIT, EDIT.alumni, [], EDIT.version, { ...NOTE, notes: "Wrong Phone number" });

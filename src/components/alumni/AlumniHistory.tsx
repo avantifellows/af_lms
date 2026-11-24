@@ -114,21 +114,35 @@ interface PanelProps {
 }
 
 
+/** Open side panels and their widths (rem); the page makes room for the widest. */
+const roomTakers = new Map<symbol, number>();
+/** The page's own right padding, from before the first panel opened. */
+let paddingBefore = "";
+
+function applyRoom() {
+  const widest = Math.max(0, ...roomTakers.values());
+  document.body.style.paddingRight = widest ? `${widest}rem` : paddingBefore;
+}
+
 /**
  * While the panel is open on a wider screen, the page makes room for it (like
- * a sheet's version history) instead of being covered. A form in a modal is
- * fixed in place, so there the panel lies over the modal's right side.
+ * a sheet's version history) instead of being covered. Panels can be open at
+ * once (an alumnus's and the school's); the room fits the widest still open,
+ * and the page gets its padding back when the last one closes. A form in a
+ * modal is fixed in place, so there the panel lies over the modal's right side.
  */
-export function useMakeRoom(width = "24rem") {
+export function useMakeRoom(rem = 24) {
   useEffect(() => {
     if (!window.matchMedia?.("(min-width: 640px)").matches) return;
-    const body = document.body;
-    const before = body.style.paddingRight;
-    body.style.paddingRight = width;
+    const key = Symbol("panel");
+    if (!roomTakers.size) paddingBefore = document.body.style.paddingRight;
+    roomTakers.set(key, rem);
+    applyRoom();
     return () => {
-      body.style.paddingRight = before;
+      roomTakers.delete(key);
+      applyRoom();
     };
-  }, [width]);
+  }, [rem]);
 }
 
 /** The version list, on the right of the screen (full screen on a phone). */

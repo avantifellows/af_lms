@@ -5,11 +5,12 @@ vi.mock("@/lib/db-service-config", () => ({ getDbServiceConfig: vi.fn() }));
 
 import { query } from "@/lib/db";
 import { getDbServiceConfig } from "@/lib/db-service-config";
-import { groupHistory, istMoment, listHistory, planRestore, runRestore } from "./mass-restore";
+import { findMarker, groupHistory, istMoment, listHistory, planRestore, runRestore } from "./mass-restore";
 
 const mockQuery = vi.mocked(query);
 const mockFetch = vi.fn();
-const AT = new Date("2026-11-23T11:40:00Z");
+/** Restore to just before history row 40, recorded at this moment. */
+const AT = { id: "40", at: "2026-11-23T11:40:00Z" };
 const ACTOR = { actorEmail: "a@avantifellows.org", actorRole: "alumni_manager" };
 
 /** A candidate row as loadCandidates returns it (`a.*` + extras). */
@@ -17,6 +18,7 @@ const candidate = (overrides: Record<string, unknown>) => ({
   id: "8340",
   person: "Ampoli Ram Charan",
   school_name: "JNV Adilabad",
+  row_version: "v5",
   added_after: false,
   contact_status: "Contacted - Positive Response",
   skilling_programs: null,
@@ -43,13 +45,21 @@ afterEach(() => vi.unstubAllGlobals());
 const candidates = (...rows: Record<string, unknown>[]) => mockQuery.mockResolvedValueOnce(rows as never);
 
 describe("planRestore", () => {
-  it("narrows to the school in SQL and to alumni changed or added after the moment", async () => {
+  it("narrows to the school in SQL and to alumni with history from the marker row on, or added since", async () => {
     candidates();
     await planRestore({ kind: "school", code: "59525" }, AT);
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("j.inserted_at > $1::timestamptz AT TIME ZONE 'UTC'");
-    expect(sql).toContain("AND sch.code = $2");
-    expect(params).toEqual(["2026-11-23T11:40:00.000Z", "59525"]);
+    expect(sql).toContain("j.id >= $1::bigint");
+    expect(sql).toContain("j.id < $1::bigint"); // the version to go back to: the latest row before the marker
+    expect(sql).toContain("a.inserted_at >= $2::timestamptz AT TIME ZONE 'UTC'");
+    expect(sql).toContain("AND sch.code = $3");
+    expect(params).toEqual(["40", "2026-11-23T11:40:00Z", "59525"]);
+  });
+
+  it("finds the marker row", async () => {
+    mockQuery.mockResolvedValueOnce([{ id: "40", at: "2026-11-23T11:40:00Z" }] as never).mockResolvedValueOnce([] as never);
+    expect(await findMarker("40")).toEqual({ id: "40", at: "2026-11-23T11:40:00Z" });
+    expect(await findMarker("41")).toBeNull();
   });
 
   it("all alumni: no school filter", async () => {
@@ -57,7 +67,7 @@ describe("planRestore", () => {
     await planRestore({ kind: "all" }, AT);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).not.toContain("sch.code = $");
-    expect(params).toEqual(["2026-11-23T11:40:00.000Z"]);
+    expect(params).toEqual(["40", "2026-11-23T11:40:00Z"]);
   });
 
   it("goes back to the version at or before the moment, listing what changes", async () => {
@@ -69,6 +79,7 @@ describe("planRestore", () => {
         name: "Ampoli Ram Charan",
         school: "JNV Adilabad",
         versionOn: "2026-11-23",
+        version: "v5",
         changes: [{ label: "Contact status", before: "Contacted - Positive Response", after: "Contacted - Unreachable" }],
       },
     ]);
@@ -108,9 +119,9 @@ describe("runRestore", () => {
       source: "correction",
       data: { contact_status: "Contacted - Unreachable", skilling_programs: null },
       actor_email: "a@avantifellows.org",
-      notes: `Mass restore to ${istMoment(AT)} (school 59525)`,
+      notes: `Mass restore to just before history #40 (${istMoment(new Date(AT.at))}, school 59525)`,
     });
-    expect(mockQuery.mock.calls[0][1]).toEqual(["2026-11-23T11:40:00.000Z", "59525", ["8340"]]);
+    expect(mockQuery.mock.calls[0][1]).toEqual(["40", "2026-11-23T11:40:00Z", "59525", ["8340"]]);
   });
 
   it("re-checks: already back, added after, or outside the scope → nothing written", async () => {
@@ -118,6 +129,14 @@ describe("runRestore", () => {
     const results = await runRestore({ kind: "all" }, AT, ["8340", "9002", "777"], ACTOR);
     expect(results.map((r) => r.result)).toEqual(["unchanged", "unchanged", "unchanged"]);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("skips anyone saved after the preview instead of reverting that save unseen", async () => {
+    candidates(candidate({ row_version: "v6" }), candidate({ id: "8341", row_version: "v5" }));
+    const results = await runRestore({ kind: "all" }, AT, ["8340", "8341"], ACTOR, { "8340": "v5", "8341": "v5" });
+    expect(results.map((r) => r.result)).toEqual(["skipped", "restored"]);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe("https://db.test/api/alumni/8341/journey");
   });
 
   it("reports a DB Service refusal for that alumnus and goes on", async () => {

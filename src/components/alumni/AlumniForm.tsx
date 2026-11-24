@@ -204,6 +204,16 @@ function useSaveFlow() {
     errors, dirty, saving, justSaved, formError, confirming, confirmed, setConfirming,
     /** The version to send: our own last save's until the reload lands, else the one loaded. */
     versionFor: (loaded: EntryContext) => (lastSave?.over === loaded ? lastSave.version : loaded.version),
+    /** Back to a clean form (after a restore reloads the record). */
+    reset() {
+      setErrors({});
+      setDirty(false);
+      setJustSaved(false);
+      setFormError("");
+      setConfirming(null);
+      setConfirmed([]);
+      setLastSave(null);
+    },
     /** Close the confirm dialog; its confirmations don't carry over. */
     cancel() {
       setConfirming(null);
@@ -302,8 +312,11 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
     runStep(nextStep({ ...review, errors: fieldErrors }), { fix: scrollToField, confirm: flow.setConfirming, send: () => submit([]) });
   };
 
+  /** After a restore: the record reloads, so typed changes, errors and the remark go. */
   const reload = () => {
     history.select(null);
+    flow.reset();
+    setRemark(NO_REMARK);
     setVersion((v) => v + 1);
     onSaved?.();
   };
@@ -317,6 +330,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
           alumniId={context.ids.alumniId}
           version={context.version}
           canEdit={canEdit}
+          unsaved={dirty}
           onRestored={reload}
           onBack={() => history.select(null)}
         />
@@ -517,7 +531,11 @@ function useHistoryView(context: EntryContext | null, reloadKey: number) {
   const [open, setOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const preview = journey?.entries.find((e) => e.id === previewId) ?? null;
-  const select = (entry: JourneyEntry | null) => setPreviewId(entry?.id ?? null);
+  const select = (entry: JourneyEntry | null) => {
+    setPreviewId(entry?.id ?? null);
+    // On a phone the panel covers the whole screen: close it to show the version (History reopens it).
+    if (entry && !window.matchMedia?.("(min-width: 640px)").matches) setOpen(false);
+  };
   const close = () => {
     setOpen(false);
     setPreviewId(null);
@@ -536,12 +554,14 @@ const noop = () => {};
 
 /** One version of the record, read-only, with the fields it changed highlighted; it can be restored from here. */
 function VersionPreview({
-  entry, alumniId, version, canEdit, onRestored, onBack,
+  entry, alumniId, version, canEdit, unsaved, onRestored, onBack,
 }: {
   entry: JourneyEntry;
   alumniId: string;
   version: string;
   canEdit: boolean;
+  /** The form has changes not saved yet: a restore discards them. */
+  unsaved: boolean;
   onRestored: () => void;
   onBack: () => void;
 }) {
@@ -601,6 +621,7 @@ function VersionPreview({
         {confirming && (
           <span className="flex flex-wrap items-center gap-2 text-sm text-warning-text">
             Put the record back to this version? Newer versions stay in the history.
+            {unsaved && <strong> Your unsaved changes in the form will be lost.</strong>}
             <Button type="button" size="sm" onClick={restore} disabled={restoring}>
               {restoring && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />} Restore
             </Button>

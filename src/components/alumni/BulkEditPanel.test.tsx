@@ -50,7 +50,9 @@ describe("BulkEditPanel", () => {
   it("starts from what they share, checks, then saves the ones that can be saved", async () => {
     server([result("8340", "alumnus", "update"), result("86655", "pass-out", "create")]);
     const onDone = vi.fn();
-    render(<BulkEditPanel students={STUDENTS} onDone={onDone} />);
+    const onBusyChange = vi.fn();
+    const onSaved = vi.fn();
+    render(<BulkEditPanel students={STUDENTS} onDone={onDone} onBusyChange={onBusyChange} onSaved={onSaved} />);
 
     expect(await screen.findByText("Edit 2 students together")).toBeInTheDocument();
     expect(screen.getByText(/1 not added yet/)).toBeInTheDocument();
@@ -66,8 +68,10 @@ describe("BulkEditPanel", () => {
     expect(screen.getByText("1 will be added (new record)")).toBeInTheDocument();
     expect(bulkBodies()[0]).toMatchObject({ values: { contact_status: "Not Contacted" }, dryRun: true, overwrite: false });
 
+    expect(onBusyChange.mock.calls).toEqual([[true], [false]]);
     fireEvent.click(screen.getByRole("button", { name: "Save 2 students" }));
     expect(await screen.findByText("Saved to the alumni table")).toBeInTheDocument();
+    expect(onSaved).toHaveBeenCalledTimes(1);
     expect(bulkBodies()[1]).toMatchObject({ dryRun: false, confirmed: [] });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(onDone).toHaveBeenCalled();
@@ -99,6 +103,32 @@ describe("BulkEditPanel", () => {
     expect(bulkBodies()[0]).toMatchObject({ values: { ug_status: "Graduated" }, replace: ["ug_status"], overwrite: true });
     fireEvent.click(screen.getByRole("button", { name: "Change answers" }));
     expect(screen.getByRole("button", { name: "Check 2 students" })).toBeEnabled();
+  });
+
+  it("locks the answers while the check runs", async () => {
+    let answer: (v: unknown) => void = () => {};
+    fetchMock.mockImplementation(async (url: string) =>
+      url === "/api/alumni/bulk/common" ? json(COMMON) : new Promise((resolve) => (answer = resolve)),
+    );
+    render(<BulkEditPanel students={STUDENTS} onDone={vi.fn()} />);
+    await screen.findByLabelText("Contact status");
+    select("Contact status", "Not Contacted");
+    fireEvent.click(screen.getByRole("button", { name: "Check 2 students" }));
+    expect(screen.getByLabelText("Contact status")).toBeDisabled();
+    answer(json({ results: [result("8340", "alumnus", "update"), result("86655", "pass-out", "create")] }));
+    await screen.findByText(/Check result/);
+    expect(screen.getByLabelText("Contact status")).toBeEnabled();
+  });
+
+  it("says nothing was saved when every save failed", async () => {
+    server([result("8340", "alumnus", "update")], [result("8340", "alumnus", "error", { message: "DB down", name: "Ampoli Ram" })]);
+    render(<BulkEditPanel students={[STUDENTS[0]]} onDone={vi.fn()} />);
+    await screen.findByLabelText("Contact status");
+    select("Contact status", "Not Contacted");
+    fireEvent.click(screen.getByRole("button", { name: /Check 1 student/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save 1 student" }));
+    expect(await screen.findByText("Nothing was saved")).toBeInTheDocument();
+    expect(screen.queryByText("Saved to the alumni table")).not.toBeInTheDocument();
   });
 
   it("starts blank when it can't load what they share, and reports a failed chunk per student", async () => {
