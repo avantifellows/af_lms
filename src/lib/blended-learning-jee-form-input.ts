@@ -161,7 +161,7 @@ function trimmed(value: unknown): string {
 }
 
 export const JEE_PASSWORD_REQUIRED = "Enter the exam portal password.";
-export const JEE_SESSIONS_REQUIRED = "Choose the session the student applied for: Session 1, Session 2 or both.";
+const JEE_SESSIONS_REQUIRED = "Choose the session the student applied for: Session 1, Session 2 or both.";
 
 function applicationNumberError(applicationNumber: string): string | null {
   if (!applicationNumber) return "Enter the application number.";
