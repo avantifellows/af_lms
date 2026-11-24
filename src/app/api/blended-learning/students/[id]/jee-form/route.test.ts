@@ -88,6 +88,10 @@ let fetchStatus: Record<string, number>;
 // whether it stores one it is sent (an old DB Service drops the key).
 let storedCiphertext: string | null;
 let dbServiceStoresCiphertext: boolean;
+// The legacy plaintext the (fake) record holds, and whether the DB Service
+// clears it when sent `application_password: null`.
+let legacyPlaintext: string | null;
+let dbServiceClearsLegacy: boolean;
 
 function matchesPermission(sqlText: string, params?: unknown[]) {
   const email = String(params?.[0]).toLowerCase();
@@ -115,7 +119,10 @@ async function fakeQuery(text: string, params?: unknown[]) {
     const [studentId] = params?.[0] as number[];
     return storedCiphertext ? [{ student_id: studentId }] : [];
   }
-  if (text.includes("application_password_ciphertext = $4")) return storedCiphertext === params?.[3] ? [{ id: 77 }] : [];
+  if (text.includes("application_password_ciphertext = $4")) {
+    const legacyCleared = !text.includes("ser.application_password IS NULL") || legacyPlaintext === null;
+    return storedCiphertext === params?.[3] && legacyCleared ? [{ id: 77 }] : [];
+  }
   if (text.includes("FROM student_exam_record")) return examRecords;
   if (text.includes("FROM blended_learning_jee_form_updates u")) {
     const [studentId] = params?.[0] as number[];
@@ -246,6 +253,8 @@ beforeEach(() => {
   fetchStatus = {};
   storedCiphertext = null;
   dbServiceStoresCiphertext = true;
+  legacyPlaintext = null;
+  dbServiceClearsLegacy = true;
   mockQuery.mockImplementation(fakeQuery as typeof query);
   // As withTransaction does: COMMIT after the callback, ROLLBACK when it throws.
   mockWithTransaction.mockImplementation(async (fn) => {
@@ -278,6 +287,7 @@ beforeEach(() => {
       if (status < 300 && dbServiceStoresCiphertext && typeof sent.application_password_ciphertext === "string") {
         storedCiphertext = sent.application_password_ciphertext;
       }
+      if (status < 300 && dbServiceClearsLegacy && sent.application_password === null) legacyPlaintext = null;
       const record = {
         id: 77,
         student_id: 501,
@@ -356,6 +366,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
           exam_id: JEE_EXAM_ID,
           exam_year: 2027,
           application_number: "270310000001",
+          application_password: null,
           application_password_ciphertext: CIPHERTEXT,
         }),
       },
@@ -385,7 +396,11 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       {
         url: "http://db-service.test/api/student-exam-record/77",
         method: "PATCH",
-        body: JSON.stringify({ application_number: "270310000001", application_password_ciphertext: CIPHERTEXT }),
+        body: JSON.stringify({
+          application_number: "270310000001",
+          application_password: null,
+          application_password_ciphertext: CIPHERTEXT,
+        }),
       },
     ]);
   });
@@ -399,7 +414,12 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
       [
         "PATCH",
         "http://db-service.test/api/student-exam-record/55",
-        JSON.stringify({ application_number: "270310000001", exam_year: 2027, application_password_ciphertext: CIPHERTEXT }),
+        JSON.stringify({
+          application_number: "270310000001",
+          exam_year: 2027,
+          application_password: null,
+          application_password_ciphertext: CIPHERTEXT,
+        }),
       ],
     ]);
   });
@@ -550,8 +570,61 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
 
     expect((await record("501", FILLED)).status).toBe(201);
     expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
-      ["PATCH", "http://db-service.test/api/student-exam-record/77", JSON.stringify({ application_password_ciphertext: CIPHERTEXT })],
+      [
+        "PATCH",
+        "http://db-service.test/api/student-exam-record/77",
+        JSON.stringify({ application_password: null, application_password_ciphertext: CIPHERTEXT }),
+      ],
     ]);
+  });
+
+  it("clears a legacy plaintext with the new ciphertext, and confirms it is gone", async () => {
+    examRecords = [
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001" },
+    ];
+    legacyPlaintext = STORED_PASSWORD;
+    signedInAs(MENTOR_A);
+
+    const res = await record("501", FILLED);
+    expect(res.status).toBe(201);
+    expect(JSON.parse(fetchCalls[0].body!)).toEqual({ application_password: null, application_password_ciphertext: CIPHERTEXT });
+    expect(legacyPlaintext).toBeNull();
+    // The read-back tests the legacy column IS NULL; it never selects it.
+    const readBack = txSql.find((text) => text.includes("application_password_ciphertext = $4"))!;
+    expect(readBack).toContain("AND ser.application_password IS NULL");
+    expect(readBack).toMatch(/^\s*SELECT ser\.id\s+FROM/);
+  });
+
+  it("records nothing (502) when the DB Service leaves the legacy plaintext in place", async () => {
+    examRecords = [
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "270310000001" },
+    ];
+    legacyPlaintext = STORED_PASSWORD;
+    dbServiceClearsLegacy = false;
+    signedInAs(MENTOR_A);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await record("501", FILLED);
+    expect(res.status).toBe(502);
+    expect(res.text).not.toContain(STORED_PASSWORD);
+    expect(txWrites).toEqual([]);
+    expect(txOutcomes).toEqual(["rolled back"]);
+    expect(error.mock.calls).toEqual([["JEE form external write failed:", "CiphertextNotStored"]]);
+    error.mockRestore();
+  });
+
+  it("changes only the number when no password is typed, leaving both password columns as they are (the Exams tab's keep)", async () => {
+    examRecords = [
+      { id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "111", has_password: true },
+    ];
+    storedCiphertext = "c2F2ZWQ=";
+    signedInAs(MENTOR_A);
+
+    expect((await record("501", FILLED_KEEP)).status).toBe(201);
+    expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
+      ["PATCH", "http://db-service.test/api/student-exam-record/77", JSON.stringify({ application_number: "270310000001" })],
+    ]);
+    expect(kms.commandCalls(EncryptCommand)).toEqual([]);
   });
 
   it("never encrypts for an admin, a read-only Mentor, another Mentor's Student or a JNV NVS-only Student", async () => {
@@ -810,7 +883,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: a save that loses a
 });
 
 describe("the password is write-only and never plaintext", () => {
-  it("never reads or writes the legacy column, and never returns, logs or sends the password", async () => {
+  it("never reads the legacy column, only ever clears it, and never returns, logs or sends the password", async () => {
     examRecords = [{ id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: "111" }];
     signedInAs(MENTOR_A);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -818,14 +891,18 @@ describe("the password is write-only and never plaintext", () => {
     examRecords = [];
     responses.push(await record("501", [["status", "filled"], ["applicationNumber", "999"], ["password", TYPED_PASSWORD]]));
 
-    for (const text of sql) {
-      // Only the ciphertext column is named; never the legacy plaintext one.
-      expect(text).not.toMatch(/application_password(?!_ciphertext)/);
+    for (const text of [...sql, ...txSql]) {
+      // The legacy plaintext column is only ever tested IS NULL (the
+      // read-back), never selected or otherwise named.
+      expect(text.replaceAll("ser.application_password IS NULL", "")).not.toMatch(/application_password(?!_ciphertext)/);
       expect(text).not.toMatch(/SELECT\s+\*/i);
     }
     expect(fetchCalls.length).toBeGreaterThan(0);
     for (const call of fetchCalls) {
-      expect(call.body ?? "").not.toMatch(/"application_password"/);
+      const sent = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+      // Sent only as null, and only alongside a new ciphertext.
+      if ("application_password" in sent) expect(sent.application_password).toBeNull();
+      expect("application_password" in sent).toBe(typeof sent.application_password_ciphertext === "string");
       expect(call.body ?? "").not.toContain(TYPED_PASSWORD);
     }
     for (const res of responses) {

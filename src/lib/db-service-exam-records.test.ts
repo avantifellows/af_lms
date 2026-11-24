@@ -109,7 +109,7 @@ describe("plaintext-free exam record writes", () => {
     const reply = answer(201);
     mockFetch.mockResolvedValue(reply.response);
 
-    const input = { student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", application_password: "x" };
+    const input = { student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", sessions_applied: [1] };
     await createExamRecordWithoutPlaintext(input);
 
     expect(mockFetch).toHaveBeenCalledWith("http://db/student-exam-record", {
@@ -137,7 +137,7 @@ describe("plaintext-free exam record writes", () => {
     ]);
   });
 
-  it("sends a ciphertext under its own key, never as the plaintext column", async () => {
+  it("sends a ciphertext under its own key, and the legacy plaintext column only as null to clear it", async () => {
     mockFetch.mockImplementation(async () => answer(200).response);
 
     await createExamRecordWithoutPlaintext({
@@ -145,15 +145,35 @@ describe("plaintext-free exam record writes", () => {
       exam_id: 1,
       exam_year: 2027,
       application_number: "2703",
+      application_password: null,
       application_password_ciphertext: "Q0lQSEVS",
     });
-    await patchExamRecordWithoutPlaintext(77, { application_password_ciphertext: "Q0lQSEVS" });
+    await patchExamRecordWithoutPlaintext(77, { application_password: null, application_password_ciphertext: "Q0lQSEVS" });
 
-    expect(mockFetch.mock.calls.map(([, init]) => JSON.parse(init.body))).toEqual([
-      { student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", application_password_ciphertext: "Q0lQSEVS" },
-      { application_password_ciphertext: "Q0lQSEVS" },
+    expect(mockFetch.mock.calls.map(([, init]) => init.body)).toEqual([
+      JSON.stringify({
+        student_id: 501,
+        exam_id: 1,
+        exam_year: 2027,
+        application_number: "2703",
+        application_password: null,
+        application_password_ciphertext: "Q0lQSEVS",
+      }),
+      JSON.stringify({ application_password: null, application_password_ciphertext: "Q0lQSEVS" }),
     ]);
-    for (const [, init] of mockFetch.mock.calls) expect(init.body).not.toMatch(/"application_password"/);
+  });
+
+  it("never sends a plaintext value under the legacy key, even if a caller slips one in", async () => {
+    mockFetch.mockImplementation(async () => answer(200).response);
+    const sneaky = { application_password: "fake-plain-1" } as unknown as { application_password: null };
+
+    await createExamRecordWithoutPlaintext({ student_id: 501, exam_id: 1, exam_year: 2027, application_number: "2703", ...sneaky });
+    await patchExamRecordWithoutPlaintext(77, { application_number: "2703", ...sneaky });
+
+    for (const [, init] of mockFetch.mock.calls) {
+      expect(init.body).not.toContain("fake-plain-1");
+      expect(JSON.parse(init.body).application_password).toBeNull();
+    }
   });
 
   it("throws only the status on a refusal, without reading the body", async () => {

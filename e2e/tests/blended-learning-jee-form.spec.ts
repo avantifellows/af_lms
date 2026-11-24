@@ -189,24 +189,24 @@ async function updates(studentId: number) {
   });
 }
 
-// The Student's JEE Mains records. The legacy plaintext password is compared
-// in SQL, never read; of the ciphertext only whether there is one.
-async function jeeRecords(studentId: number, password: string | null = null) {
+// The Student's JEE Mains records. Of the legacy plaintext password only
+// whether it is empty, of the ciphertext only whether there is one.
+async function jeeRecords(studentId: number) {
   return withPool(async (pool) => {
     const result = await pool.query<{
       id: string;
       exam_year: number | null;
       application_number: string;
-      password_kept: boolean;
+      legacy_cleared: boolean;
       ciphertext_saved: boolean;
     }>(
       `SELECT ser.id, ser.exam_year, ser.application_number,
-              ser.application_password IS NOT DISTINCT FROM $2::varchar AS password_kept,
+              ser.application_password IS NULL AS legacy_cleared,
               ser.application_password_ciphertext IS NOT NULL AS ciphertext_saved
        FROM student_exam_record ser JOIN exam ON exam.id = ser.exam_id
        WHERE ser.student_id = $1 AND exam.name = 'JEE Mains'
        ORDER BY ser.id`,
-      [studentId, password]
+      [studentId]
     );
     return result.rows;
   });
@@ -395,6 +395,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
         exam_id: expect.any(Number),
         exam_year: 2027,
         application_number: "E2E-JEE-0001",
+        application_password: null,
         application_password_ciphertext: expect.any(String),
       },
     });
@@ -402,7 +403,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     expect(await kmsCalls()).toEqual(["TrentService.Encrypt"]);
     // The legacy plaintext column stays empty; only the ciphertext is stored.
     expect(await jeeRecords(studentId)).toEqual([
-      { id: expect.any(String), exam_year: 2027, application_number: "E2E-JEE-0001", password_kept: true, ciphertext_saved: true },
+      { id: expect.any(String), exam_year: 2027, application_number: "E2E-JEE-0001", legacy_cleared: true, ciphertext_saved: true },
     ]);
     // Page data says only that one is saved.
     await expect(open.getByText("Exam portal password")).toBeVisible();
@@ -620,10 +621,12 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
   test.use({ viewport: { width: 390, height: 844 } });
   const mentee = JEE_FORM_MENTEES.mobile;
 
-  test("fits the phone and updates the yearless JEE Mains record holding the number, never reading or showing its legacy password", async ({ page }) => {
+  test("fits the phone and updates the yearless JEE Mains record holding the number, clearing but never reading or showing its legacy password", async ({ page }) => {
     await fetch(`${STUB}/__requests`, { method: "DELETE" });
     const studentId = studentIds[mentee.key];
-    const [existing] = await jeeRecords(studentId, JEE_EXISTING_RECORD.password);
+    const [existing] = await jeeRecords(studentId);
+    // The seeded record holds a legacy plaintext password.
+    expect(existing.legacy_cleared).toBe(false);
     await signInAs(page, BLENDED_MENTOR_C);
     await page.goto(TAB);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
@@ -659,19 +662,19 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
         body: {
           application_number: JEE_EXISTING_RECORD.applicationNumber,
           exam_year: 2027,
+          application_password: null,
           application_password_ciphertext: expect.any(String),
         },
       },
     ]);
     // Still one record, now for 2027, with the ciphertext; the legacy column
-    // is neither read nor written (the backfill re-encrypts only rows without
-    // a ciphertext, so it won't overwrite this one).
-    expect(await jeeRecords(studentId, JEE_EXISTING_RECORD.password)).toEqual([
+    // was never read, and is now cleared, as the Exams tab clears it.
+    expect(await jeeRecords(studentId)).toEqual([
       {
         id: existing.id,
         exam_year: 2027,
         application_number: JEE_EXISTING_RECORD.applicationNumber,
-        password_kept: true,
+        legacy_cleared: true,
         ciphertext_saved: true,
       },
     ]);
@@ -760,10 +763,15 @@ test.describe("Blended Learning JEE Form tab — Blended Learning Admin", () => 
   });
 });
 
-test("no request the tab made to the DB Service carried the plaintext column or a typed password", async () => {
+test("no request the tab made to the DB Service carried a plaintext password or a typed password", async () => {
   for (const request of await allStubRequests()) {
     const body = JSON.stringify(request.body ?? {});
-    expect(body).not.toMatch(/"application_password"/);
+    // The legacy column is only ever cleared, alongside a new ciphertext.
+    const sent = (request.body ?? {}) as Record<string, unknown>;
+    if ("application_password" in sent) {
+      expect(sent.application_password).toBeNull();
+      expect(typeof sent.application_password_ciphertext).toBe("string");
+    }
     for (const secret of [MENTOR_PASSWORD, PHONE_PASSWORD, ADMIN_PASSWORD, RACED_PASSWORD]) {
       expect(body).not.toContain(secret);
     }

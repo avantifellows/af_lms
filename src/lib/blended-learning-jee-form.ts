@@ -63,10 +63,12 @@ import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type U
 //   recipient `jee_form` is raised for the program team's Flags feed.
 //
 // The legacy plaintext `student_exam_record.application_password` is never
-// selected, written or returned here: every read names its columns, the DB
-// Service writes send only `application_password_ciphertext` and never read
-// the response body, and page data carries only `passwordSaved`. The
-// password is decrypted only by the logged reveal
+// selected, read or returned here: every read names its columns, and page
+// data carries only `passwordSaved`. It is only ever cleared: a write that
+// sets a new ciphertext also sends `application_password: null` (as the Exams
+// tab does), and the read-back confirms it is null with an IS NULL test that
+// never selects the value. The DB Service writes never read the response
+// body. The password is decrypted only by the logged reveal
 // (blended-learning-jee-password).
 
 const JEE_CONFIRMATION_DOCUMENT_TYPE = "jee_main_confirmation";
@@ -407,7 +409,10 @@ async function examRecordPlan(
 }
 
 // `ciphertext` (a new password) rides along with the plan's write; with
-// nothing else to change, it is patched onto the record on its own.
+// nothing else to change, it is patched onto the record on its own. It always
+// goes with `application_password: null`, clearing any legacy plaintext as
+// the Exams tab does; a write without a new password (a number change alone)
+// leaves both password columns as they are, as the Exams tab's "keep" does.
 async function applyExamRecordPlan(
   client: PoolClient,
   target: ExamRecordTarget,
@@ -417,7 +422,8 @@ async function applyExamRecordPlan(
   ciphertext: string | null
 ): Promise<void> {
   const { plan } = target;
-  const password = ciphertext === null ? {} : { application_password_ciphertext: ciphertext };
+  const password =
+    ciphertext === null ? {} : { application_password: null, application_password_ciphertext: ciphertext };
   if (plan.kind === "create") {
     await createExamRecordWithoutPlaintext({
       student_id: studentId,
@@ -445,8 +451,10 @@ class CiphertextNotStored extends Error {
 // A DB Service that predates `application_password_ciphertext` answers 2xx
 // and drops the key, so the write is read back from Postgres instead of
 // being taken on trust (the response body, which holds the legacy password,
-// is never read). Read on the save's transaction client: each statement sees
-// what the DB Service has committed.
+// is never read). As the Exams tab checks its response, the record must hold
+// this ciphertext and no legacy plaintext: the legacy column is only tested
+// IS NULL, never selected. Read on the save's transaction client: each
+// statement sees what the DB Service has committed.
 async function confirmCiphertextStored(
   client: PoolClient,
   studentId: number,
@@ -458,6 +466,7 @@ async function confirmCiphertextStored(
      FROM student_exam_record ser
      WHERE ser.student_id = $1 AND ser.exam_id = $2 AND ser.exam_year = $3
        AND ser.application_password_ciphertext = $4
+       AND ser.application_password IS NULL
      LIMIT 1`,
     [studentId, examId, JEE_FORM_EXAM.examYear, ciphertext]
   );

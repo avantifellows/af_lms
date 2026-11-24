@@ -884,9 +884,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   blank password keeps it and a new one replaces it. It is trimmed, ≤ 255, refused (403) for a JNV
   NVS-only Student (`isPmuOnlyStudent`, a safety net), encrypted with Aman's `encryptExamPassword`
   (KMS, bound to the Student) before anything is written, sent as `application_password_ciphertext`
-  with the plan's POST/PATCH (or a PATCH of its own when the number is unchanged), then read back
-  from Postgres (`confirmCiphertextStored`) because an old DB Service drops the unknown key with a
-  2xx. A KMS failure is a 502 before any write. Page data carries only `JeeFormView.passwordSaved`
+  with the plan's POST/PATCH (or a PATCH of its own when the number is unchanged) together with
+  `application_password: null`, which clears any legacy plaintext as the Exams tab does (a number
+  change without a new password sends neither password key, as the Exams tab's "keep"), then read
+  back from Postgres (`confirmCiphertextStored`: this ciphertext AND `application_password IS NULL`,
+  the legacy value never selected) because an old DB Service drops the unknown key with a 2xx; a
+  record still holding a plaintext there is a 502. A KMS failure is a 502 before any write. Page data carries only `JeeFormView.passwordSaved`
   (ciphertext IS NOT NULL on the 2027 record), never the password or the ciphertext.
   So a JNV NVS-only Student can't be recorded as Filled (422 without a password, 403 with one);
   Not filled still works. Accepted on review of #507 (Blended Learning has no NVS Students); if
@@ -900,10 +903,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   ciphertext (404 without one), `decryptExamPassword`, then Aman's `recordExamPasswordReveal` (viewer
   email + BL role) before the password is returned; a failed log is a 500 and no reveal. The Exams
   tab's `exam-records-gate` can't be used here (it denies Blended roles). UI: `jee-form/JeePassword.tsx`.
-- **Never the plaintext:** no read or write here names the legacy `application_password` (no `SELECT *`;
-  a record holding only legacy plaintext counts as no password, so the form asks again);
+- **Never the plaintext:** no read selects the legacy `application_password` (no `SELECT *`; the
+  read-back only tests it IS NULL; a record holding only legacy plaintext counts as no password, so
+  the form asks again), and the only value ever written to it is null, with a new ciphertext;
   `createExamRecordWithoutPlaintext` / `patchExamRecordWithoutPlaintext` in
-  `src/lib/db-service-exam-records.ts` send named fields only (number, year, ciphertext) and never
+  `src/lib/db-service-exam-records.ts` send named fields only (number, year, ciphertext, and the
+  legacy key only as the literal null) and never
   read the DB Service's response body (it contains the legacy password); failures log the status
   only. Nothing logs a password or ciphertext (error names only). E2E encrypts against a fake KMS in
   the DB Service stub (`EXAM_PASSWORD_KMS_ENDPOINT`, e2e only).
