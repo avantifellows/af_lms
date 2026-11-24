@@ -1,10 +1,18 @@
 import { Badge } from "@/components/ui";
 import { formatCalendarDate } from "@/lib/blended-learning-format";
-import { jeeFormReasonLabel, type JeeFormUpdate } from "@/lib/blended-learning-jee-form-input";
+import {
+  jeeFormReasonLabel,
+  type JeeFormStatusSummary,
+  type JeeFormUpdate,
+} from "@/lib/blended-learning-jee-form-input";
 
 // How a JEE form status reads wherever it is shown: the JEE Form tab's rows
 // and the Mentee page's status line. No hooks, so server and client
-// components both use it.
+// components both use it. Each takes the whole update or a view-only status
+// summary (JeeFormStatusSummary: no application number).
+
+// The current update or status, as either shape carries it.
+type CurrentStatus = (JeeFormStatusSummary & { applicationNumber?: string | null }) | null;
 
 const JEE_TAB_PATH = "/blended-learning/jee-form";
 
@@ -13,7 +21,7 @@ export function jeeTabHref(studentId: number): string {
   return `${JEE_TAB_PATH}?student=${studentId}`;
 }
 
-export function JeeStatusBadge({ current }: { current: JeeFormUpdate | null }) {
+export function JeeStatusBadge({ current }: { current: CurrentStatus }) {
   if (!current) return <Badge>Not recorded</Badge>;
   return current.status === "filled" ? (
     <Badge className="bg-success-bg font-bold text-success">Filled</Badge>
@@ -22,7 +30,7 @@ export function JeeStatusBadge({ current }: { current: JeeFormUpdate | null }) {
   );
 }
 
-function reasonsText(update: JeeFormUpdate): string {
+function reasonsText(update: Pick<JeeFormUpdate, "reasons">): string {
   return update.reasons.map(jeeFormReasonLabel).join("; ");
 }
 
@@ -33,9 +41,11 @@ export function updateSummary(update: JeeFormUpdate): string {
 }
 
 // The application number (Filled) or the reasons (Not filled), on one line.
-export function JeeStatusDetail({ current }: { current: JeeFormUpdate | null }) {
+// A view-only status has no application number, so Filled shows nothing more.
+export function JeeStatusDetail({ current }: { current: CurrentStatus }) {
   if (!current) return null;
   if (current.status === "filled") {
+    if (!current.applicationNumber) return null;
     return (
       <span className="min-w-0 break-words text-text-primary">
         <span className="text-text-muted">App no. </span>
@@ -46,7 +56,7 @@ export function JeeStatusDetail({ current }: { current: JeeFormUpdate | null }) 
   return <span className="min-w-0 break-words text-text-primary">{reasonsText(current)}</span>;
 }
 
-export function RecordedOn({ current }: { current: JeeFormUpdate | null }) {
+export function RecordedOn({ current }: { current: Pick<JeeFormStatusSummary, "recordedOn"> | null }) {
   if (!current) return null;
   return (
     <span className="text-xs text-text-muted">

@@ -1,14 +1,16 @@
 import Link from "next/link";
 
 import { Card } from "@/components/ui";
-import { JEE_FORM_EXAM, type JeeFormView } from "@/lib/blended-learning-jee-form-input";
+import { JEE_FORM_EXAM, type JeeFormLineView } from "@/lib/blended-learning-jee-form-input";
 
 import { JeeStatusBadge, JeeStatusDetail, RecordedOn, jeeTabHref } from "../../jee-form/jeeFormDisplay";
 
 // The Mentee page's JEE form line: the current status (with the application
 // number or the Not filled reasons) and a link to this Student's row in the
 // JEE Form tab, where the Mentor records it ("View in JEE tab" for anyone
-// else: admins and read-only accounts only view it).
+// else: admins and read-only accounts only view it). A team lead on a
+// supervised Mentor's Mentee gets the status only (JeeStatusOnlyView: Filled
+// or Not filled with its reasons, and the date), never the application number.
 
 // One per page, so a fixed id is enough (no hooks: a Server Component).
 const TITLE_ID = "jee-form-status-title";
@@ -25,7 +27,7 @@ export function JeeTabLink({ studentId, children }: { studentId: number; childre
   );
 }
 
-function linkLabel(form: JeeFormView | null, canRecord: boolean): string {
+function linkLabel(form: JeeFormLineView | null, canRecord: boolean): string {
   if (!canRecord) return "View in JEE tab";
   return form?.current ? "Update in JEE tab" : "Fill in JEE tab";
 }
@@ -36,7 +38,7 @@ export function JeeFormStatusLine({
   canRecord,
 }: {
   studentId: number;
-  form: JeeFormView | null;
+  form: JeeFormLineView | null;
   canRecord: boolean;
 }) {
   const current = form?.current ?? null;

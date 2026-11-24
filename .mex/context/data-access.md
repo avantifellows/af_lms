@@ -890,13 +890,17 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   only. Nothing logs a password or ciphertext (error names only). E2E encrypts against a fake KMS in
   the DB Service stub (`EXAM_PASSWORD_KMS_ENDPOINT`, e2e only).
 - **Read/UI:** the JEE Form tab `/blended-learning/jee-form` (`view_list`) reads `listJeeFormRows`:
-  the Students with an active current-year Mapping (a Mentor's own; every Mentor's for an admin),
+  the Students with an active current-year Mapping (a Mentor's own; a team lead's own and their
+  reportees', the latter `viewOnly` with the status only from a separate status-only read; every
+  Mentor's for an admin),
   then every Student's updates in one query (`row_number()` per Student, newest 20) and their
   reminder items in another. The client list (`jee-form/JeeFormTab.tsx`) shows counts, a status
   filter and rows that open in place to `JeeFormPanel` / `JeeFormEditor`; saving updates the row
-  and counts from the POST's `form`. URL params: `status`, `mentor` (admins), `student` (open row,
+  and counts from the POST's `form` (a `viewOnly` row never opens). URL params: `status`, `mentor`
+  (admins, team leads), `student` (open row,
   scrolled to on arrival), written with `history.pushState` / `replaceState`. The Mentee page shows
-  `JeeFormStatusLine` (from `getJeeForm`) linking to `?student=<id>`; it renders without the data
+  `JeeFormStatusLine` (from `getJeeFormLine`: by `blendedStudentScope`, the whole form or, view
+  only, the status alone) linking to `?student=<id>`; it renders without the data
   when the read fails, and so does the tab.
 - **Reminder rule:** `src/lib/blended-learning-jee-reminder.ts` holds the reminder's text match.
   `getMenteeDetail` marks the open item `jeeReminder`, so the Mentee page and the log form show a

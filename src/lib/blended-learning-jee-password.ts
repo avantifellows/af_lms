@@ -15,7 +15,7 @@ import { recordExamPasswordReveal } from "./student-exam-records";
 // check, canBlendedLearning) and has the Student in Blended Learning scope —
 // canAccessBlendedStudent, i.e. a Mentor (team leads included) only for their
 // own Mentees with an active current-year Mapping (never a supervised Mentor's
-// Mentee: view only is not enough), a Blended Learning Admin or
+// Mentee: view only shows the status alone), a Blended Learning Admin or
 // LMS admin for any Student with one. Read-only accounts never reveal, as on
 // the Exams tab, where a reveal needs edit rights. That gate
 // (`exam-records-gate`) can't be reused: it is school-scoped and gives Blended

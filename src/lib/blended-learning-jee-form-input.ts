@@ -80,21 +80,42 @@ export type JeeFormView = {
   passwordSaved: boolean;
 };
 
-// One Student's row in the JEE Form tab.
-export type JeeFormRow = {
+// The JEE status a view-only viewer (a team lead on a supervised Mentor's
+// Mentee) gets: whether the form is filled, the Not filled reasons and when it
+// was recorded. Never the application number, the details, the confirmation,
+// the history or anything about the exam-portal password: the server builds
+// it from a read that selects only these columns.
+export type JeeFormStatusSummary = Pick<JeeFormUpdate, "status" | "reasons" | "recordedOn">;
+
+export type JeeStatusOnlyView = {
+  statusOnly: true;
+  // Null until anything is recorded.
+  current: JeeFormStatusSummary | null;
+};
+
+// What the Mentee page's JEE line shows: the whole form (full scope) or the
+// status only (view only).
+export type JeeFormLineView = JeeFormView | JeeStatusOnlyView;
+
+type JeeFormRowBase = {
   studentId: number;
   // `student.student_id` as text (leading zeros kept); may be NULL.
   programStudentId: string | null;
   name: string;
   mentorUserId: number;
   mentorName: string;
-  form: JeeFormView;
 };
+
+// One Student's row in the JEE Form tab: the whole form for a Student in full
+// scope, the status only for a team lead's supervised Mentor's Mentee
+// (`viewOnly`).
+export type JeeFormRow = JeeFormRowBase &
+  ({ viewOnly: false; form: JeeFormView } | { viewOnly: true; form: JeeStatusOnlyView });
 
 // The tab's status filter: "not_recorded" is a Student with no update yet.
 export type JeeFormStatusFilter = "all" | "not_recorded" | JeeFormStatus;
 
-export function jeeRowStatus(form: JeeFormView): Exclude<JeeFormStatusFilter, "all"> {
+export function jeeRowStatus(form: { current: { status: JeeFormStatus } | null }): Exclude<JeeFormStatusFilter, "all"> {
   return form.current?.status ?? "not_recorded";
 }
 

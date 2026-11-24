@@ -5,10 +5,12 @@ import { query, withTransaction } from "./db";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
   activeBlendedMappingSql,
+  blendedStudentScope,
   canAccessBlendedStudent,
   canBlendedLearning,
   lockMappingInScope,
   mentorNameSql,
+  viewableMentorUserIds,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import {
@@ -21,11 +23,14 @@ import {
   type JeeFormFieldErrors,
   type JeeFormInput,
   type JeeFormReason,
+  type JeeFormLineView,
   type JeeFormRow,
   type JeeFormStatus,
+  type JeeFormStatusSummary,
   type JeeFormUpdate,
   type JeeFormView,
   type JeeReminderItem,
+  type JeeStatusOnlyView,
   type RawJeeForm,
 } from "./blended-learning-jee-form-input";
 import { jeeReminderMatchSql } from "./blended-learning-jee-reminder";
@@ -186,9 +191,53 @@ async function jeeFormViews(studentIds: number[], examId: number): Promise<Map<n
   );
 }
 
-// One Mentee's form; null when out of the actor's scope or when there is no
-// "JEE Mains" exam row to record against.
-export async function getJeeForm(access: BlendedLearningAccess, studentId: number): Promise<JeeFormView | null> {
+type StatusRow = {
+  student_id: number | string;
+  status: JeeFormStatus;
+  reasons: JeeFormReason[] | null;
+  recorded_on: string;
+};
+
+// Each Student's current status for a view-only viewer: the latest update's
+// status, reasons and date, and nothing else. This read never selects the
+// application number, the details, the confirmation or the exam record.
+async function jeeStatusOnlyViews(studentIds: number[], examId: number): Promise<Map<number, JeeStatusOnlyView>> {
+  if (studentIds.length === 0) return new Map();
+  const rows = await query<StatusRow>(
+    `SELECT DISTINCT ON (u.student_id) u.student_id, u.status, u.reasons,
+            ((u.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS recorded_on
+     FROM blended_learning_jee_form_updates u
+     WHERE u.student_id = ANY($1::bigint[]) AND u.exam_id = $2 AND u.exam_year = $3
+     ORDER BY u.student_id, u.id DESC`,
+    [studentIds, examId, JEE_FORM_EXAM.examYear]
+  );
+  const current = new Map<number, JeeFormStatusSummary>(
+    rows.map((row) => [
+      Number(row.student_id),
+      { status: row.status, reasons: row.reasons ?? [], recordedOn: row.recorded_on },
+    ])
+  );
+  return new Map(
+    studentIds.map((studentId) => [studentId, { statusOnly: true, current: current.get(studentId) ?? null }])
+  );
+}
+
+// The Mentee page's JEE line, by the viewer's scope on the Student
+// (blendedStudentScope): the whole form in full scope, the status only for a
+// team lead on a supervised Mentor's Mentee (view only). Null out of scope or
+// without a "JEE Mains" exam row.
+export async function getJeeFormLine(access: BlendedLearningAccess, studentId: number): Promise<JeeFormLineView | null> {
+  const scope = await blendedStudentScope(access, studentId);
+  if (scope === null) return null;
+  const examId = await jeeExamId();
+  if (examId === null) return null;
+  if (scope === "view_only") return (await jeeStatusOnlyViews([studentId], examId)).get(studentId) ?? null;
+  return (await jeeFormViews([studentId], examId)).get(studentId) ?? null;
+}
+
+// One Mentee's form; null when out of the actor's full scope or when there is
+// no "JEE Mains" exam row to record against.
+async function getJeeForm(access: BlendedLearningAccess, studentId: number): Promise<JeeFormView | null> {
   if (!(await canAccessBlendedStudent(access, studentId))) return null;
   const examId = await jeeExamId();
   if (examId === null) return null;
@@ -205,11 +254,14 @@ type StudentRow = {
 };
 
 // The JEE Form tab: one row per Student with an active current-year Mapping
-// (a Mentor's own; every Mentor's for an admin), A–Z by name, each with its
-// form. Null when there is no "JEE Mains" exam row.
+// the viewer sees (viewableMentorUserIds: a Mentor's own, a team lead's
+// supervised Mentors' too; every Mentor's for an admin), A–Z by name. A row
+// in full scope carries its form; a supervised Mentor's Mentee (view only,
+// as blendedStudentScope has it) carries the status only. Null when there is
+// no "JEE Mains" exam row.
 export async function listJeeFormRows(access: BlendedLearningAccess): Promise<JeeFormRow[] | null> {
-  const mentorUserId = access.kind === "mentor" ? (access.mentorUserId ?? null) : null;
-  if (access.kind === "mentor" && mentorUserId === null) return [];
+  const mentorUserIds = viewableMentorUserIds(access);
+  if (mentorUserIds !== null && mentorUserIds.length === 0) return [];
   const examId = await jeeExamId();
   if (examId === null) return null;
   const students = await query<StudentRow>(
@@ -220,24 +272,31 @@ export async function listJeeFormRows(access: BlendedLearningAccess): Promise<Je
      JOIN "user" account ON account.id = st.user_id
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
      WHERE ${activeBlendedMappingSql("mapping", "$1")}
-       AND ($2::bigint IS NULL OR mapping.mentor_user_id = $2::bigint)
+       AND ($2::bigint[] IS NULL OR mapping.mentor_user_id = ANY($2::bigint[]))
      ORDER BY lower(CONCAT_WS(' ', account.first_name, account.last_name)), st.id`,
-    [CURRENT_ACADEMIC_YEAR, mentorUserId]
+    [CURRENT_ACADEMIC_YEAR, mentorUserIds]
   );
-  const views = await jeeFormViews(
-    students.map((row) => Number(row.student_id)),
-    examId
-  );
-  return students.map((row) => {
+  // View only: a Mentor's row whose Mapping is to a Mentor they supervise.
+  const viewOnly = (row: StudentRow) => access.kind === "mentor" && Number(row.mentor_user_id) !== access.mentorUserId;
+  const ids = (rows: StudentRow[]) => rows.map((row) => Number(row.student_id));
+  const [views, statuses] = await Promise.all([
+    jeeFormViews(ids(students.filter((row) => !viewOnly(row))), examId),
+    jeeStatusOnlyViews(ids(students.filter(viewOnly)), examId),
+  ]);
+  return students.map((row): JeeFormRow => {
     const studentId = Number(row.student_id);
-    return {
+    const base = {
       studentId,
       programStudentId: row.program_student_id,
       name: [row.first_name, row.last_name].filter(Boolean).join(" "),
       mentorUserId: Number(row.mentor_user_id),
       mentorName: row.mentor_name,
-      form: views.get(studentId) ?? { current: null, earlier: [], reminderItems: [], passwordSaved: false },
     };
+    if (viewOnly(row)) {
+      return { ...base, viewOnly: true, form: statuses.get(studentId) ?? { statusOnly: true, current: null } };
+    }
+    const form = views.get(studentId) ?? { current: null, earlier: [], reminderItems: [], passwordSaved: false };
+    return { ...base, viewOnly: false, form };
   });
 }
 

@@ -184,9 +184,15 @@ test.describe("Blended Learning supervisor view", () => {
     // No way to log at all: not a link, and not a greyed-out button either.
     await expect(page.getByRole("link", { name: "Log conversation" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Log conversation" })).toHaveCount(0);
-    // The JEE form is full scope only: no status line and no JEE tab link.
-    await expect(page.getByRole("region", { name: "JEE Main 2027 form" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: /JEE tab/ })).toHaveCount(0);
+    // The JEE status only: no way to fill it or show a password.
+    const jee = page.getByRole("region", { name: "JEE Main 2027 form" });
+    await expect(jee).toContainText("Not recorded");
+    await expect(jee.getByRole("link", { name: "View in JEE tab" })).toHaveAttribute(
+      "href",
+      `/blended-learning/jee-form?student=${taraId}`
+    );
+    await expect(page.getByRole("link", { name: /^(Fill|Update) in JEE tab$/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Show password" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^Back to .*'s students$/ })).toHaveAttribute(
       "href",
       `/blended-learning/mentors/${mentorBId}`
@@ -224,6 +230,67 @@ test.describe("Blended Learning supervisor view", () => {
     }
   });
 
+  test("a supervised Mentor's Mentee's JEE status shows without its application number, on their page and the JEE Form tab", async ({
+    page,
+  }) => {
+    const taraId = await studentId(tara);
+    const applicationNumber = "E2E-SUPERVISED-270001";
+    // Mentor B recorded Tara's form as Filled. The updates are append-only,
+    // so the cleanup below deletes it with the trigger switched off.
+    const updateId = await withPool(async (pool) => {
+      const result = await pool.query<{ id: string }>(
+        `INSERT INTO blended_learning_jee_form_updates
+           (student_id, exam_id, exam_year, status, application_number, mentor_user_id, program_id,
+            academic_year, recorded_by_email)
+         SELECT mapping.student_id, exam.id, 2027, 'filled', $3, mapping.mentor_user_id, mapping.program_id,
+                mapping.academic_year, $4
+         FROM blended_learning_mentor_mentee_mappings mapping
+         JOIN exam ON exam.name = 'JEE Mains'
+         WHERE mapping.student_id = $1 AND mapping.academic_year = $2 AND mapping.ended_at IS NULL
+         ORDER BY exam.id
+         LIMIT 1
+         RETURNING id`,
+        [taraId, CURRENT_ACADEMIC_YEAR, applicationNumber, BLENDED_MENTOR_B.email]
+      );
+      return Number(result.rows[0].id);
+    });
+    try {
+      await page.goto(`/blended-learning/students/${taraId}`);
+      const jee = page.getByRole("region", { name: "JEE Main 2027 form" });
+      await expect(jee).toContainText("Filled");
+      await expect(jee).toContainText("Recorded");
+      await expect(page.getByText(applicationNumber)).toHaveCount(0);
+      expect(await page.content()).not.toContain(applicationNumber);
+
+      await jee.getByRole("link", { name: "View in JEE tab" }).click();
+      await expect(page).toHaveURL(new RegExp(`/blended-learning/jee-form\\?student=${taraId}$`));
+      const row = page.getByRole("list", { name: "Students" }).getByRole("listitem").filter({ hasText: fullName(tara) });
+      await expect(row).toContainText("View only");
+      await expect(row).toContainText("Filled");
+      await expect(row).toContainText(BLENDED_MENTOR_B.name);
+      await expect(row.getByRole("button")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Show password" })).toHaveCount(0);
+      // Nothing of the form reaches the page, not even in its data.
+      expect(await page.content()).not.toContain(applicationNumber);
+
+      // Their own Mentee's row still opens to the form.
+      const own = page.getByRole("list", { name: "Students" }).getByRole("listitem").filter({ hasText: fullName(SUPERVISOR_MENTEE) });
+      await expect(own.getByRole("button")).toBeVisible();
+      await expect(own).not.toContainText("View only");
+      const mentor = page.getByRole("combobox", { name: "Mentor", exact: true });
+      await expect(mentor.getByRole("option")).toHaveText(["All Mentors", "My students", BLENDED_MENTOR_B.name]);
+    } finally {
+      await withPool((pool) =>
+        pool.query(
+          `BEGIN;
+           SET LOCAL session_replication_role = replica;
+           DELETE FROM blended_learning_jee_form_updates WHERE id = ${updateId};
+           COMMIT;`
+        )
+      );
+    }
+  });
+
   test("their own Mentee's page goes back to My Students", async ({ page }) => {
     await page.goto(`/blended-learning/students/${await studentId(SUPERVISOR_MENTEE)}`);
 
@@ -248,7 +315,7 @@ test.describe("Blended Learning supervisor view", () => {
     expect(upload.status()).toBe(404);
     expect(await conversationCount(taraId)).toBe(before);
 
-    // The JEE form is full scope only: no recording, revealing or reading it.
+    // The JEE form is view only for them: no recording, revealing or confirmation PDF.
     const jee = await page.request.post(`/api/blended-learning/students/${taraId}/jee-form`, {
       multipart: { status: "not_filled", reasons: "not_aware" },
     });

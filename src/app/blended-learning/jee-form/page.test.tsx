@@ -44,7 +44,7 @@ import JeeFormPage from "./page";
 const MENTOR = { kind: "mentor", role: "blended_mentor", readOnly: false, actorEmail: "mentor@example.org", mentorUserId: 9001 };
 const READ_ONLY_ADMIN = { kind: "admin", role: "blended_admin", readOnly: true, actorEmail: "viewer@example.org" };
 const ADMIN = { ...READ_ONLY_ADMIN, readOnly: false, actorEmail: "admin@example.org" };
-const ROWS = [{ studentId: 501, programStudentId: "0501", name: "Asha Testcase", mentorUserId: 9001, mentorName: "Mentor Alpha" }];
+const ROWS = [{ studentId: 501, programStudentId: "0501", name: "Asha Testcase", mentorUserId: 9001, mentorName: "Mentor Alpha", viewOnly: false }];
 
 function signedInAs(access: { actorEmail: string }) {
   mockGetServerSession.mockResolvedValue({ user: { email: access.actorEmail } });
@@ -75,10 +75,10 @@ describe("JeeFormPage", () => {
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("aria-current", "page");
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("href", "/blended-learning/jee-form");
     expect(mockListJeeFormRows).toHaveBeenCalledWith(MENTOR);
-    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, canReveal: true, showMentor: false });
+    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, canReveal: true, showMentor: false, ownMentorUserId: null });
   });
 
-  it("gives a team lead the JEE Form tab after Team and My Students, with only their own Students to record", async () => {
+  it("gives a team lead the JEE Form tab after Team and My Students, with a Mentor filter for their reportees' Students", async () => {
     const teamLead = { ...MENTOR, supervisedMentorUserIds: [9002] };
     signedInAs(teamLead);
 
@@ -94,7 +94,7 @@ describe("JeeFormPage", () => {
     ]);
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("aria-current", "page");
     expect(mockListJeeFormRows).toHaveBeenCalledWith(teamLead);
-    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, canReveal: true, showMentor: false });
+    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: true, canReveal: true, showMentor: true, ownMentorUserId: 9001 });
   });
 
   it.each([
@@ -107,7 +107,7 @@ describe("JeeFormPage", () => {
 
     const tabs = screen.getByRole("navigation", { name: "Admin views" });
     expect(within(tabs).getByRole("link", { name: "JEE Form" })).toHaveAttribute("aria-current", "page");
-    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: false, canReveal, showMentor: true });
+    expect(mockJeeFormTab).toHaveBeenCalledWith({ rows: ROWS, canRecord: false, canReveal, showMentor: true, ownMentorUserId: null });
   });
 
   it("says the form can't be shown when the rows can't be read, without logging what failed", async () => {

@@ -7,8 +7,8 @@ import { Badge, Button, Card } from "@/components/ui";
 import { canBlendedLearning, isTeamLead, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
-import { getJeeForm } from "@/lib/blended-learning-jee-form";
-import type { JeeFormView } from "@/lib/blended-learning-jee-form-input";
+import { getJeeFormLine } from "@/lib/blended-learning-jee-form";
+import type { JeeFormLineView } from "@/lib/blended-learning-jee-form-input";
 import { describeSession, formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
 import {
   getMenteeDetail,
@@ -324,8 +324,8 @@ function OpenActionItems({
 }: {
   studentId: number;
   items: MenteeDetail["openActionItems"];
-  // The JEE reminder's link label, or null for no link (a view-only viewer).
-  jeeLink: "Fill in JEE tab" | "View in JEE tab" | null;
+  // The JEE reminder's link label: Fill for the Mentor, View for anyone else.
+  jeeLink: "Fill in JEE tab" | "View in JEE tab";
 }) {
   return (
     <section aria-label="Open Action Items">
@@ -338,7 +338,7 @@ function OpenActionItems({
               <span className="min-w-0 break-words">
                 {item.text}
                 <ActionItemMeta agreedOn={item.agreedOn} source={item.source} />
-                {item.jeeReminder && jeeLink && <JeeTabLink studentId={studentId}>{jeeLink}</JeeTabLink>}
+                {item.jeeReminder && <JeeTabLink studentId={studentId}>{jeeLink}</JeeTabLink>}
               </span>
             </li>
           ))}
@@ -422,9 +422,9 @@ function backLink(access: BlendedLearningAccess, mentee: MenteeDetail, from: Bac
 // The JEE form status line's data. The page still renders without it (the
 // line says it can't be shown), e.g. on a database without the JEE form
 // migration.
-async function loadJeeForm(access: BlendedLearningAccess, studentId: number): Promise<JeeFormView | null> {
+async function loadJeeForm(access: BlendedLearningAccess, studentId: number): Promise<JeeFormLineView | null> {
   try {
-    return await getJeeForm(access, studentId);
+    return await getJeeFormLine(access, studentId);
   } catch (error) {
     console.error("Failed to load the JEE form status:", error instanceof Error ? error.name : "unknown");
     return null;
@@ -447,12 +447,11 @@ export default async function MenteeDetailPage({
     searchParams,
   ]);
   // A supervised Mentor's Mentee is view only: no logging or draft changes,
-  // and no JEE form at all (it is read, recorded and revealed only in full
-  // scope, canAccessBlendedStudent), so neither its line nor a JEE tab link.
+  // and only the JEE status (getJeeFormLine reads the status alone in view
+  // only scope); recording and revealing stay full scope.
   const canLog = !mentee.viewOnly && canBlendedLearning(access, "log");
-  const showJee = !mentee.viewOnly;
-  const canRecordJee = showJee && canBlendedLearning(access, "record_jee_form");
-  const jeeForm = showJee ? await loadJeeForm(access, mentee.studentId) : null;
+  const canRecordJee = !mentee.viewOnly && canBlendedLearning(access, "record_jee_form");
+  const jeeForm = await loadJeeForm(access, mentee.studentId);
   const back = backLink(access, mentee, backOrigin(query?.from));
 
   return (
@@ -480,10 +479,10 @@ export default async function MenteeDetailPage({
         <OpenActionItems
           studentId={mentee.studentId}
           items={mentee.openActionItems}
-          jeeLink={showJee ? (canRecordJee ? "Fill in JEE tab" : "View in JEE tab") : null}
+          jeeLink={canRecordJee ? "Fill in JEE tab" : "View in JEE tab"}
         />
       )}
-      {showJee && <JeeFormStatusLine studentId={mentee.studentId} form={jeeForm} canRecord={canRecordJee} />}
+      <JeeFormStatusLine studentId={mentee.studentId} form={jeeForm} canRecord={canRecordJee} />
       <History
         history={mentee.history}
         canPlayRecording={canBlendedLearning(access, "play_recording")}

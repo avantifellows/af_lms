@@ -4,7 +4,7 @@ vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
 import type { BlendedLearningAccess } from "./blended-learning-access";
 import { query } from "./db";
-import { listJeeFormRows, planExamRecordWrite } from "./blended-learning-jee-form";
+import { getJeeFormLine, listJeeFormRows, planExamRecordWrite } from "./blended-learning-jee-form";
 
 const mockQuery = vi.mocked(query);
 
@@ -72,8 +72,20 @@ const update = (student_id: number, id: number, status: "filled" | "not_filled")
   flag_raised: status === "not_filled",
 });
 
+// A team lead (9001) who supervises Mentor 9002, whose Mentee is Student 601.
+const TEAM_LEAD: BlendedLearningAccess = { ...MENTOR, supervisedMentorUserIds: [9002] };
+// The view-only status read's row, with a column it must never pass on.
+const STATUS_ROW = { student_id: 601, status: "not_filled", reasons: ["not_aware"], recorded_on: "2026-11-14", application_number: "2799" };
+// What a view-only status read may select, and what it must not.
+const NOT_STATUS = /application_number|confirmation|details|password|student_exam_record|action_items/i;
+
 describe("listJeeFormRows", () => {
   let sql: { text: string; params: unknown[] }[];
+  const MAPPED = [
+    { student_id: 501, program_student_id: "0501", first_name: "Asha", last_name: "Testcase", mentor_user_id: 9001, mentor_name: "Mentor Alpha" },
+    { student_id: 502, program_student_id: null, first_name: "Biren", last_name: null, mentor_user_id: 9001, mentor_name: "Mentor Alpha" },
+    { student_id: 601, program_student_id: "0601", first_name: "Chitra", last_name: "Sample", mentor_user_id: 9002, mentor_name: "Mentor Beta" },
+  ];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -82,11 +94,10 @@ describe("listJeeFormRows", () => {
       sql.push({ text, params });
       if (text.includes("FROM exam WHERE name")) return [{ id: 1 }];
       if (text.includes("FROM blended_learning_mentor_mentee_mappings")) {
-        return [
-          { student_id: 501, program_student_id: "0501", first_name: "Asha", last_name: "Testcase", mentor_user_id: 9001, mentor_name: "Mentor Alpha" },
-          { student_id: 502, program_student_id: null, first_name: "Biren", last_name: null, mentor_user_id: 9001, mentor_name: "Mentor Alpha" },
-        ];
+        const mentors = params[1] as number[] | null;
+        return MAPPED.filter((row) => mentors === null || mentors.includes(row.mentor_user_id));
       }
+      if (text.includes("SELECT DISTINCT ON (u.student_id)")) return [STATUS_ROW];
       if (text.includes("FROM blended_learning_jee_form_updates u")) {
         return [update(501, 12, "filled"), update(501, 10, "not_filled")];
       }
@@ -99,7 +110,10 @@ describe("listJeeFormRows", () => {
   });
 
   it("reads a Mentor's own Students with each one's current status, earlier updates and reminder", async () => {
-    const rows = await listJeeFormRows(MENTOR);
+    const rows = (await listJeeFormRows(MENTOR))!.map((row) => {
+      if (row.viewOnly) throw new Error("a Mentor's own row is never view only");
+      return row;
+    });
 
     expect(rows?.map((row) => [row.studentId, row.programStudentId, row.name, row.mentorName])).toEqual([
       [501, "0501", "Asha Testcase", "Mentor Alpha"],
@@ -117,7 +131,8 @@ describe("listJeeFormRows", () => {
     });
 
     const mappings = sql.find(({ text }) => text.includes("FROM blended_learning_mentor_mentee_mappings"));
-    expect(mappings?.params).toEqual(["2026-2027", 9001]);
+    expect(mappings?.params).toEqual(["2026-2027", [9001]]);
+    expect(mappings?.text).toContain("mapping.mentor_user_id = ANY($2::bigint[])");
     expect(mappings?.text).toMatch(/mapping\.ended_at IS NULL/);
     // One read of the updates and one of the reminders for every Student.
     const updates = sql.filter(({ text }) => text.includes("FROM blended_learning_jee_form_updates u"));
@@ -129,12 +144,49 @@ describe("listJeeFormRows", () => {
     expect(saved[0].text).toMatch(/application_password_ciphertext IS NOT NULL/);
   });
 
-  it("reads only a team lead's own Students, never their reportees'", async () => {
-    await listJeeFormRows({ ...MENTOR, supervisedMentorUserIds: [9002] });
+  it("gives a team lead their own Students' forms and their reportees' Students' status only", async () => {
+    const rows = await listJeeFormRows(TEAM_LEAD);
+
     expect(sql.find(({ text }) => text.includes("FROM blended_learning_mentor_mentee_mappings"))?.params).toEqual([
       "2026-2027",
-      MENTOR.mentorUserId,
+      [9001, 9002],
     ]);
+    expect(rows?.map((row) => [row.studentId, row.viewOnly])).toEqual([
+      [501, false],
+      [502, false],
+      [601, true],
+    ]);
+    // Exactly the status: no application number, details, confirmation,
+    // history, reminder or password flag, whatever the row read returned.
+    expect(rows?.[2].form).toEqual({
+      statusOnly: true,
+      current: { status: "not_filled", reasons: ["not_aware"], recordedOn: "2026-11-14" },
+    });
+
+    // The supervised Student's status comes from its own narrow read; the
+    // full reads (updates, reminders, exam records) never include them.
+    const statusReads = sql.filter(({ text }) => text.includes("SELECT DISTINCT ON (u.student_id)"));
+    expect(statusReads.map(({ params }) => params)).toEqual([[[601], 1, 2027]]);
+    expect(statusReads[0].text).not.toMatch(NOT_STATUS);
+    const fullReads = sql.filter(
+      ({ text }) =>
+        text.includes("FROM student_exam_record") ||
+        text.includes("FROM blended_learning_action_items") ||
+        (text.includes("FROM blended_learning_jee_form_updates u") && !text.includes("DISTINCT ON"))
+    );
+    expect(fullReads).toHaveLength(3);
+    for (const { params } of fullReads) expect(params[0]).toEqual([501, 502]);
+  });
+
+  it("gives a team lead a status-only row as Not recorded when nothing is recorded", async () => {
+    mockQuery.mockImplementation((async (text: string, params: unknown[] = []) => {
+      sql.push({ text, params });
+      if (text.includes("FROM exam WHERE name")) return [{ id: 1 }];
+      if (text.includes("FROM blended_learning_mentor_mentee_mappings")) return [MAPPED[2]];
+      return [];
+    }) as typeof query);
+
+    expect((await listJeeFormRows(TEAM_LEAD))?.[0]).toMatchObject({ viewOnly: true, form: { statusOnly: true, current: null } });
   });
 
   it("reads every Mentor's Students for an admin", async () => {
@@ -154,10 +206,66 @@ describe("listJeeFormRows", () => {
 
   it("never selects everything, the ciphertext or the legacy plaintext password", async () => {
     await listJeeFormRows(ADMIN);
+    await listJeeFormRows(TEAM_LEAD);
     for (const { text } of sql) {
       // Only `application_password_ciphertext IS NOT NULL`, never the column's value.
       expect(text.replace(/application_password_ciphertext IS NOT NULL/g, "")).not.toMatch(/password/i);
       expect(text).not.toMatch(/SELECT\s+\*/i);
     }
+  });
+});
+
+describe("getJeeFormLine", () => {
+  let sql: { text: string; params: unknown[] }[];
+  // Active current-year Mappings: Student → Mentor.
+  const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002, 701: 9003 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sql = [];
+    mockQuery.mockImplementation((async (text: string, params: unknown[] = []) => {
+      sql.push({ text, params });
+      if (text.includes("FROM blended_learning_mentor_mentee_mappings")) {
+        const mentor = MAPPINGS[Number(params[0])];
+        return mentor ? [{ mentor_user_id: mentor }] : [];
+      }
+      if (text.includes("FROM exam WHERE name")) return [{ id: 1 }];
+      if (text.includes("SELECT DISTINCT ON (u.student_id)")) return [STATUS_ROW];
+      if (text.includes("FROM blended_learning_jee_form_updates u")) return [update(501, 12, "filled")];
+      if (text.includes("FROM blended_learning_action_items item")) return [];
+      if (text.includes("FROM student_exam_record ser")) return [{ student_id: 501 }];
+      throw new Error(`Unexpected query: ${text}`);
+    }) as typeof query);
+  });
+
+  it("gives the whole form in full scope: a Mentor's own Mentee, any mapped Student for an admin", async () => {
+    for (const access of [MENTOR, TEAM_LEAD, ADMIN]) {
+      expect(await getJeeFormLine(access, 501)).toMatchObject({
+        current: { status: "filled", applicationNumber: "2712" },
+        passwordSaved: true,
+      });
+    }
+    expect(await getJeeFormLine(ADMIN, 601)).toMatchObject({ earlier: [], passwordSaved: false });
+    expect(sql.some(({ text }) => text.includes("SELECT DISTINCT ON (u.student_id)"))).toBe(false);
+  });
+
+  it("gives a team lead only the status of a supervised Mentor's Mentee, from a read of the status alone", async () => {
+    const line = await getJeeFormLine(TEAM_LEAD, 601);
+
+    expect(line).toEqual({
+      statusOnly: true,
+      current: { status: "not_filled", reasons: ["not_aware"], recordedOn: "2026-11-14" },
+    });
+    const jeeReads = sql.filter(({ text }) => !text.includes("mentee_mappings") && !text.includes("FROM exam WHERE name"));
+    expect(jeeReads).toHaveLength(1);
+    expect(jeeReads[0].text).toContain("SELECT DISTINCT ON (u.student_id)");
+    expect(jeeReads[0].text).not.toMatch(NOT_STATUS);
+    expect(jeeReads[0].params).toEqual([[601], 1, 2027]);
+  });
+
+  it("gives nothing out of scope (another Mentor's Mentee, or a team lead's non-reportee), reading no JEE data", async () => {
+    expect(await getJeeFormLine(MENTOR, 601)).toBeNull();
+    expect(await getJeeFormLine(TEAM_LEAD, 701)).toBeNull();
+    expect(sql.every(({ text }) => text.includes("mentee_mappings"))).toBe(true);
   });
 });

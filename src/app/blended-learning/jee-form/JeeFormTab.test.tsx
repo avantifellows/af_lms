@@ -53,7 +53,24 @@ function row(studentId: number, name: string, current: JeeFormUpdate | null, men
     name,
     mentorUserId: mentor,
     mentorName: mentor === 9001 ? "Mentor Alpha" : "Mentor Beta",
+    viewOnly: false,
     form: { current, earlier: [], reminderItems: [REMINDER], passwordSaved: false },
+  };
+}
+
+// A team lead's reportee's Student: the status only, as the server sends it.
+function viewOnlyRow(studentId: number, name: string, current: JeeFormUpdate | null): JeeFormRow {
+  return {
+    studentId,
+    programStudentId: `00${studentId}`,
+    name,
+    mentorUserId: 9002,
+    mentorName: "Mentor Beta",
+    viewOnly: true,
+    form: {
+      statusOnly: true,
+      current: current && { status: current.status, reasons: current.reasons, recordedOn: current.recordedOn },
+    },
   };
 }
 
@@ -208,7 +225,9 @@ describe("JeeFormTab rows", () => {
     ["an admin", true],
     ["a read-only account", false],
   ] as const)("lets a viewer (%s) open a row but not edit it", async (_who, canReveal) => {
-    const rows = ROWS.map((row) => (row.studentId === 502 ? { ...row, form: { ...row.form, passwordSaved: true } } : row));
+    const rows = ROWS.map((row) =>
+      row.studentId === 502 && !row.viewOnly ? { ...row, form: { ...row.form, passwordSaved: true } } : row
+    );
     render(<JeeFormTab rows={rows} canRecord={false} canReveal={canReveal} showMentor={false} />);
     await userEvent.click(within(rowOf("Biren Sample")).getByRole("button"));
     const biren = rowOf("Biren Sample");
@@ -246,5 +265,58 @@ describe("JeeFormTab for an admin", () => {
     goTo("?mentor=9002");
     render(<JeeFormTab rows={ROWS} canRecord canReveal showMentor={false} />);
     expect(listedNames()).toHaveLength(4);
+  });
+});
+
+describe("JeeFormTab for a team lead", () => {
+  const TEAM_ROWS = [
+    row(501, "Asha Testcase", FILLED),
+    viewOnlyRow(601, "Dev Placeholder", FILLED),
+    viewOnlyRow(602, "Esha Dummy", NOT_FILLED),
+  ];
+
+  it("lists their reportees' Students as View only, with the status alone and nothing to open", () => {
+    render(<JeeFormTab rows={TEAM_ROWS} canRecord canReveal showMentor ownMentorUserId={9001} />);
+
+    expect(counts()).toEqual({ Filled: "2", "Not filled": "1", "Not recorded": "0" });
+    const own = rowOf("Asha Testcase");
+    expect(within(own).getByRole("button")).toBeInTheDocument();
+    expect(within(own).queryByText("View only")).not.toBeInTheDocument();
+
+    const filled = rowOf("Dev Placeholder");
+    expect(within(filled).getByText("View only")).toBeInTheDocument();
+    expect(within(filled).getByText("Filled")).toBeInTheDocument();
+    expect(within(filled).getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
+    expect(within(filled).queryByText(/App no\./)).not.toBeInTheDocument();
+    expect(within(filled).queryByRole("button")).not.toBeInTheDocument();
+
+    const notFilled = rowOf("Esha Dummy");
+    expect(within(notFilled).getByText("Not aware about the exam; Other")).toBeInTheDocument();
+    expect(within(notFilled).queryByText("Moving house")).not.toBeInTheDocument();
+    expect(within(notFilled).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("scrolls to a linked View only row but opens no form for it", () => {
+    goTo("?student=601");
+    render(<JeeFormTab rows={TEAM_ROWS} canRecord canReveal showMentor ownMentorUserId={9001} />);
+
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /password/i })).not.toBeInTheDocument();
+  });
+
+  it("filters by My students or a reportee", async () => {
+    render(<JeeFormTab rows={TEAM_ROWS} canRecord canReveal showMentor ownMentorUserId={9001} />);
+    const mentor = screen.getByRole("combobox", { name: "Mentor" });
+    expect(within(mentor).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "All Mentors",
+      "My students",
+      "Mentor Beta",
+    ]);
+
+    await userEvent.selectOptions(mentor, "9001");
+    expect(screen.getAllByRole("listitem").map((item) => item.querySelector(".font-bold")?.textContent)).toEqual([
+      "Asha Testcase",
+    ]);
   });
 });

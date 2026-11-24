@@ -11,8 +11,9 @@ import { sectionTabTitle, SectionTabs } from "../SectionTabs";
 import { JeeFormTab } from "./JeeFormTab";
 
 // The JEE Form tab: every Student in the viewer's scope (a Mentor's own
-// Mentees, a team lead's too, never their reportees'; every Mentor's for a
-// Blended Learning Admin, with a Mentor filter) with their JEE Main 2027 form
+// Mentees; a team lead's own and, status only, their reportees', with a Mentor
+// filter; every Mentor's for a Blended Learning Admin, with a Mentor filter)
+// with their JEE Main 2027 form
 // status, recorded in place. Only the Mentor (not read-only) records; Blended
 // Learning Admins and read-only accounts view, and may still reveal the
 // exam-portal password. The status filter, Mentor filter and open row are URL params read
@@ -53,7 +54,8 @@ export default async function JeeFormPage() {
             rows={rows}
             canRecord={canBlendedLearning(access, "record_jee_form")}
             canReveal={canBlendedLearning(access, "reveal_exam_password")}
-            showMentor={access.kind === "admin"}
+            showMentor={access.kind === "admin" || isTeamLead(access)}
+            ownMentorUserId={isTeamLead(access) ? (access.mentorUserId ?? null) : null}
           />
         ) : (
           <Card elevation="sm" className="p-4 sm:p-6">

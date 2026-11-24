@@ -4,7 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import { Card } from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import {
   JEE_FORM_EXAM,
@@ -25,7 +25,10 @@ import { JeeStatusBadge, JeeStatusDetail, RecordedOn } from "./jeeFormDisplay";
 // and an admin's mentor) and so does the open row (`student`), so a view or
 // one Student's row can be linked to; the Mentee page links here that way.
 // A row saved under a status filter stays listed until the filter changes,
-// so it doesn't vanish while the Mentor reads it.
+// so it doesn't vanish while the Mentor reads it. A team lead also sees their
+// reportees' Students, marked View only: the status alone (the server sends
+// nothing more), never opening to the form, the application number or the
+// password.
 
 const STATUS_FILTERS: { value: JeeFormStatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -60,12 +63,15 @@ function writeParams(pathname: string, changes: Record<string, string | null>, m
   else window.history.replaceState(null, "", url);
 }
 
-function mentorOptions(rows: JeeFormRow[]): { mentorUserId: number; name: string }[] {
+// The Mentor filter's options, A–Z; a team lead's own Students first, as "My
+// students" (as on the Flags tab).
+function mentorOptions(rows: JeeFormRow[], ownMentorUserId: number | null): { mentorUserId: number; name: string }[] {
   const mentors = new Map<number, string>();
-  for (const row of rows) mentors.set(row.mentorUserId, row.mentorName);
-  return [...mentors]
+  for (const row of rows) if (row.mentorUserId !== ownMentorUserId) mentors.set(row.mentorUserId, row.mentorName);
+  const others = [...mentors]
     .map(([mentorUserId, name]) => ({ mentorUserId, name }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+  return ownMentorUserId === null ? others : [{ mentorUserId: ownMentorUserId, name: "My students" }, ...others];
 }
 
 type Counts = Record<Exclude<JeeFormStatusFilter, "all">, number>;
@@ -134,6 +140,7 @@ function RowSummary({ row, showMentor }: { row: JeeFormRow; showMentor: boolean 
           ID <span className="font-mono">{row.programStudentId ?? "—"}</span>
           {showMentor && <> · {row.mentorName}</>}
         </span>
+        {row.viewOnly && <Badge className="mt-1">View only</Badge>}
       </span>
       <span>
         <JeeStatusBadge current={current} />
@@ -146,6 +153,17 @@ function RowSummary({ row, showMentor }: { row: JeeFormRow; showMentor: boolean 
   );
 }
 
+// A supervised Mentor's Mentee: the status only, nothing to open.
+function ViewOnlyRow({ row, showMentor }: { row: JeeFormRow; showMentor: boolean }) {
+  return (
+    <li id={rowElementId(row.studentId)} className="scroll-mt-4 rounded-lg border border-border bg-bg-card shadow-sm">
+      <div className="flex min-h-11 w-full items-start gap-3 p-3 sm:p-4">
+        <RowSummary row={row} showMentor={showMentor} />
+      </div>
+    </li>
+  );
+}
+
 function StudentRow({
   row,
   open,
@@ -155,7 +173,7 @@ function StudentRow({
   onToggle,
   onSaved,
 }: {
-  row: JeeFormRow;
+  row: Extract<JeeFormRow, { viewOnly: false }>;
   open: boolean;
   canRecord: boolean;
   canReveal: boolean;
@@ -222,13 +240,17 @@ export function JeeFormTab({
   canRecord,
   canReveal,
   showMentor,
+  ownMentorUserId = null,
 }: {
   rows: JeeFormRow[];
   canRecord: boolean;
   // Show password: anyone not read-only (reveal_exam_password).
   canReveal: boolean;
-  // Admins: every Mentor's Students, with a Mentor filter and name per row.
+  // Admins (every Mentor's Students) and team leads (theirs and their
+  // reportees'): a Mentor filter and name per row.
   showMentor: boolean;
+  // A team lead's own `user` id: their Students are "My students".
+  ownMentorUserId?: number | null;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -250,7 +272,9 @@ export function JeeFormTab({
   }
 
   function saved(studentId: number, form: JeeFormView) {
-    setRows((current) => current.map((row) => (row.studentId === studentId ? { ...row, form } : row)));
+    setRows((current) =>
+      current.map((row) => (row.studentId === studentId && !row.viewOnly ? { ...row, form } : row))
+    );
     setKept((current) => new Set(current).add(studentId));
   }
 
@@ -273,7 +297,7 @@ export function JeeFormTab({
         />
         {showMentor && (
           <MentorFilter
-            mentors={mentorOptions(rows)}
+            mentors={mentorOptions(rows, ownMentorUserId)}
             value={mentorUserId}
             onChange={(value) => filter({ mentor: value || null })}
           />
@@ -283,20 +307,24 @@ export function JeeFormTab({
         <EmptyList total={inView.length} />
       ) : (
         <ul aria-label="Students" className="space-y-2">
-          {listed.map((row) => (
-            <StudentRow
-              key={row.studentId}
-              row={row}
-              open={row.studentId === openStudent}
-              canRecord={canRecord}
-              canReveal={canReveal}
-              showMentor={showMentor}
-              onToggle={() =>
-                writeParams(pathname, { student: row.studentId === openStudent ? null : String(row.studentId) }, "replace")
-              }
-              onSaved={(form) => saved(row.studentId, form)}
-            />
-          ))}
+          {listed.map((row) =>
+            row.viewOnly ? (
+              <ViewOnlyRow key={row.studentId} row={row} showMentor={showMentor} />
+            ) : (
+              <StudentRow
+                key={row.studentId}
+                row={row}
+                open={row.studentId === openStudent}
+                canRecord={canRecord}
+                canReveal={canReveal}
+                showMentor={showMentor}
+                onToggle={() =>
+                  writeParams(pathname, { student: row.studentId === openStudent ? null : String(row.studentId) }, "replace")
+                }
+                onSaved={(form) => saved(row.studentId, form)}
+              />
+            )
+          )}
         </ul>
       )}
     </div>
