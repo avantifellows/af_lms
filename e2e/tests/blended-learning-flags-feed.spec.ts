@@ -6,6 +6,8 @@ import {
   BLENDED_MENTOR_B,
   BLENDED_MENTOR_C,
   CONTACTS,
+  DROPOUT_FLAG,
+  DROPOUT_MENTEE,
   FEED_FLAGS,
   FLAGS_LAST_SEEN_HOURS_AGO,
   IRA_HISTORY,
@@ -43,7 +45,9 @@ const TARA_WELLBEING = new RegExp(FEED_FLAGS.taraWellbeing.comment);
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const bulk = (...ns: number[]) => ns.map((n) => new RegExp(escape(bulkFlagComment(n))));
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
-// Fixture flags raised after the admins' seeded last visit.
+// Fixture flags raised after the admins' seeded last visit. DROPOUT_FLAG
+// (Mentor A's, on Yash, who is marked a dropout) is newer still, but no feed
+// shows it and no badge counts it, so every expected card list leaves it out.
 const FIXTURE_NEW = 4;
 
 async function withPool<T>(fn: (pool: ReturnType<typeof getTestPool>) => Promise<T>): Promise<T> {
@@ -167,7 +171,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(studentLink).toHaveAttribute("href", /\/blended-learning\/students\/\d+\?from=flags$/);
       await expect(studentLink.locator("svg")).toHaveAttribute("aria-hidden", "true");
       await expect(iraWellbeing.getByText("Emotional Well-being", { exact: true })).toBeVisible();
-      await expect(iraWellbeing.getByText("Grade 12 · STP Voucher Delhi · Female")).toBeVisible();
+      await expect(iraWellbeing.getByText("Grade 12 · Voucher DL · Female")).toBeVisible();
       // Postgres writes "Sep"; en-GB dates write "Sept".
       await expect(
         iraWellbeing.getByText(new RegExp(`^${conversationDate.replace(/^(\d+ )Sep /, "$1Sept ")} · ${BLENDED_MENTOR_A.name}$`))
@@ -355,6 +359,29 @@ async function taraConversationId(): Promise<number> {
     return Number(result.rows[0].id);
   });
 }
+
+test.describe("Blended Learning Flags feed — a dropout's flags", () => {
+  test("an admin's feed does not show them, filtered or not", async ({ page }) => {
+    await resetLastSeen(BLENDED_ADMIN.email);
+    await signInAs(page, BLENDED_ADMIN);
+    await openFlags(page);
+    await expect(fixtureCards(page).first()).toHaveText(IRA_PHYSICS);
+    await expect(feed(page).getByText(DROPOUT_FLAG.comment)).toHaveCount(0);
+    await expect(cards(page).filter({ hasText: fullName(DROPOUT_MENTEE) })).toHaveCount(0);
+
+    await filterBy(page, { mentor: BLENDED_MENTOR_A.name, recipient: "Maths Teacher" });
+    await expect(cards(page).first()).toBeVisible();
+    await expect(feed(page).getByText(DROPOUT_FLAG.comment)).toHaveCount(0);
+  });
+
+  test("their Mentor's feed does not show them", async ({ page }) => {
+    await signInAs(page, BLENDED_MENTOR_A);
+    await page.goto("/blended-learning?tab=flags");
+    await expect(cards(page).filter({ hasText: IRA_PHYSICS })).toHaveCount(1);
+    await expect(feed(page).getByText(DROPOUT_FLAG.comment)).toHaveCount(0);
+    await expect(cards(page).filter({ hasText: fullName(DROPOUT_MENTEE) })).toHaveCount(0);
+  });
+});
 
 test.describe("Blended Learning Flags feed — Mentor", () => {
   test("a Mentor's Flags tab holds only their own Students' flags, by recipient, never another Mentor's", async ({ page }) => {

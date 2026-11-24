@@ -4,10 +4,17 @@ import { ACTION_TYPE_VALUES, type ActionType } from "./visit-actions";
 import {
   classifyActionCompletion,
   computeAverageCompletion,
+  concernSeverity,
   dispatchComputeInlineStats,
   dispatchExtractRemarks,
+  formatCompactVisitDates,
+  formatIstDate,
+  formatIstTimestamp,
+  formatVisitCount,
   resolvePresetDateRange,
   rollupActionTypes,
+  searchParamsWithout,
+  visitSummaryBackHref,
   type ActionTypeRollupStatus,
   type RemarkEntry,
 } from "./visit-summary";
@@ -221,5 +228,111 @@ describe("summary action dispatch", () => {
     expect(dispatchComputeInlineStats("school_staff_interaction", {
       questions: { gc_staff_concern: { answer: true } },
     })).toEqual({ answeredCount: 1, totalQuestions: 2 });
+  });
+});
+
+describe("concernSeverity", () => {
+  it("grades a School by its Recurring and open Visit Concerns", () => {
+    expect(concernSeverity({ recurringCount: 4, openCount: 6 })).toBe("high");
+    expect(concernSeverity({ recurringCount: 3, openCount: 3 })).toBe("high");
+    expect(concernSeverity({ recurringCount: 2, openCount: 5 })).toBe("medium");
+    expect(concernSeverity({ recurringCount: 1, openCount: 1 })).toBe("medium");
+    expect(concernSeverity({ recurringCount: 0, openCount: 1 })).toBe("low");
+    expect(concernSeverity({ recurringCount: 0, openCount: 0 })).toBe("none");
+  });
+});
+
+describe("formatCompactVisitDates", () => {
+  // 27 Oct 2026, 10:00 IST.
+  const today = new Date("2026-10-27T04:30:00Z");
+
+  it("lists Visit dates newest first and groups same-day Visits as ×n, without the current IST year", () => {
+    expect(formatCompactVisitDates(["2026-06-10", "2026-08-06", "2026-09-15", "2026-08-06"], today)).toBe(
+      "15 Sep · 06 Aug ×2 · 10 Jun"
+    );
+  });
+
+  it("shows the year on dates outside the current IST year", () => {
+    expect(formatCompactVisitDates(["2025-12-20", "2026-01-05", "2025-12-20"], today)).toBe(
+      "05 Jan · 20 Dec 2025 ×2"
+    );
+  });
+
+  it("takes the current year from the IST date: 31 Dec 2025 20:00 UTC is already 2026 in IST", () => {
+    expect(formatCompactVisitDates(["2026-01-01", "2025-12-31"], new Date("2025-12-31T20:00:00Z"))).toBe(
+      "01 Jan · 31 Dec 2025"
+    );
+  });
+});
+
+describe("IST formatters", () => {
+  it("formats a Visit date or a timestamp as its IST date", () => {
+    expect(formatIstDate("2026-10-15")).toBe("15 Oct 2026");
+    // 31 Dec 2025 20:00 UTC is already 1 Jan 2026 in IST.
+    expect(formatIstDate(new Date("2025-12-31T20:00:00Z"))).toBe("01 Jan 2026");
+  });
+
+  it("spells September as Sep, like the concern cards' compact dates", () => {
+    expect(formatIstDate("2026-09-15")).toBe("15 Sep 2026");
+    expect(formatIstTimestamp("2026-09-17T05:00:00Z")).toBe("17 Sep 2026, 10:30");
+  });
+
+  it("formats a timestamp in IST on a 24-hour clock, and a missing one as -", () => {
+    expect(formatIstTimestamp(new Date("2026-10-20T08:30:00Z"))).toBe("20 Oct 2026, 14:00");
+    expect(formatIstTimestamp("2026-10-20T18:45:00Z")).toBe("21 Oct 2026, 00:15");
+    expect(formatIstTimestamp(null)).toBe("-");
+  });
+
+  it("counts Visits in the singular only for one", () => {
+    expect(formatVisitCount(0)).toBe("0 visits");
+    expect(formatVisitCount(1)).toBe("1 visit");
+    expect(formatVisitCount(3)).toBe("3 visits");
+  });
+});
+
+describe("searchParamsWithout", () => {
+  const current = { tab: "schools", regions: "Bhopal", sort: "visits", dir: "asc", page: "2", pms: "", schools: undefined };
+
+  it("copies every non-empty param except the omitted keys, in order", () => {
+    expect(searchParamsWithout(current, ["sort", "dir", "page"]).toString()).toBe("tab=schools&regions=Bhopal");
+    expect(searchParamsWithout(current, []).toString()).toBe("tab=schools&regions=Bhopal&sort=visits&dir=asc&page=2");
+  });
+
+  it("starts from the initial params, which an omitted key in the current params can't overwrite", () => {
+    expect(searchParamsWithout(current, ["tab", "sort", "dir", "page"], { tab: "visits" }).toString()).toBe(
+      "tab=visits&regions=Bhopal"
+    );
+  });
+});
+
+describe("visitSummaryBackHref", () => {
+  it("keeps a Visit Summary list or School page, with its query", () => {
+    for (const href of [
+      "/school-visit-summary",
+      "/school-visit-summary?tab=schools&regions=Bhopal",
+      "/school-visit-summary/schools/SC001",
+      "/school-visit-summary/schools/SC001?preset=30d&sort=visits",
+    ]) {
+      expect(visitSummaryBackHref(href)).toBe(href);
+    }
+  });
+
+  it("falls back to the Visits tab for anything else", () => {
+    for (const back of [
+      undefined,
+      "",
+      ["/school-visit-summary"],
+      "https://evil.example/school-visit-summary",
+      "//evil.example/school-visit-summary",
+      "/\\evil.example",
+      "/dashboard",
+      "/school-visit-summaryx",
+      "/school-visit-summary/123",
+      "/school-visit-summary/schools/SC001/extra",
+      "/school-visit-summary/schools/SC001#top",
+      "school-visit-summary",
+    ]) {
+      expect(visitSummaryBackHref(back)).toBe("/school-visit-summary?tab=visits");
+    }
   });
 });

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -11,13 +11,15 @@ import EnrollmentTabContent from "./EnrollmentTabContent";
 import type { Student } from "@/components/StudentTable";
 import type { ProgramStats } from "@/lib/enrollment-stats";
 
-const { mockRefresh, createdResult } = vi.hoisted(() => ({
+const { mockRefresh, createdResult, urlState } = vi.hoisted(() => ({
   mockRefresh: vi.fn(),
   createdResult: { studentId: "202812345678" as string | null, penNumber: "12345678901" as string | null },
+  urlState: { search: "" },
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mockRefresh }),
+  useSearchParams: () => new URLSearchParams(urlState.search),
 }));
 
 vi.mock("@/components/StudentTable", () => ({
@@ -27,9 +29,11 @@ vi.mock("@/components/StudentTable", () => ({
     canEditStudent?: boolean;
     selectedGrade?: string;
     selectedStream?: string;
+    selectedProgramId?: number | null;
     searchQuery?: string;
     openFlagStudentIds?: Set<string>;
     onOpenInterventionFlag?: unknown;
+    restrictToGroupUserIds?: ReadonlySet<string> | null;
   }) => (
     <div
       data-testid="student-table"
@@ -39,6 +43,12 @@ vi.mock("@/components/StudentTable", () => ({
       data-grade={props.selectedGrade}
       data-stream={props.selectedStream}
       data-search={props.searchQuery ?? ""}
+      data-restrict={
+        props.restrictToGroupUserIds
+          ? [...props.restrictToGroupUserIds].sort().join(",")
+          : "none"
+      }
+      data-program={String(props.selectedProgramId)}
     />
   ),
 }));
@@ -86,6 +96,7 @@ const baseProps = {
 describe("EnrollmentTabContent", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    urlState.search = "";
     createdResult.studentId = "202812345678";
     createdResult.penNumber = "12345678901";
   });
@@ -557,5 +568,396 @@ describe("EnrollmentTabContent", () => {
     expect(flagsCalls()).toHaveLength(1);
     expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "true");
     vi.unstubAllGlobals();
+  });
+
+  describe("flag deep link (?flag=<id>)", () => {
+    const coeStudent = {
+      group_user_id: "gu-11",
+      student_pk_id: "11",
+      first_name: "Asha",
+      last_name: "Verma",
+      grade: 11,
+      program_id: PROGRAM_IDS.COE,
+      student_program_ids: [PROGRAM_IDS.COE],
+    } as unknown as Student;
+    const nodalStudent = {
+      group_user_id: "gu-22",
+      student_pk_id: "22",
+      first_name: "Bina",
+      last_name: "Rao",
+      grade: 12,
+      program_id: PROGRAM_IDS.NODAL,
+      student_program_ids: [PROGRAM_IDS.NODAL],
+    } as unknown as Student;
+    const nvsStudent = {
+      group_user_id: "gu-33",
+      student_pk_id: "33",
+      first_name: "Chetan",
+      last_name: "Das",
+      grade: 11,
+      program_id: PROGRAM_IDS.NVS,
+      student_program_ids: [PROGRAM_IDS.NVS],
+    } as unknown as Student;
+    const flag = (id: number, studentPkId: string) => ({
+      id,
+      student_pk_id: studentPkId,
+      status: "open",
+      raised_by_email: "pm@example.com",
+      inserted_at: "2026-09-25T05:00:00Z",
+      resolved_at: null,
+      updates: [],
+    });
+
+    function renderWithFlags(search: string) {
+      urlState.search = search;
+      window.history.replaceState(null, "", `/school/14061?${search}`);
+      const fetchMock = vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.includes("intervention-flags")
+            ? { flags: [flag(501, "11"), flag(502, "22"), flag(503, "33")] }
+            : { consent: {} },
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      render(
+        <EnrollmentTabContent
+          {...baseProps}
+          programs={[
+            program(PROGRAM_IDS.COE, "JNV CoE"),
+            program(PROGRAM_IDS.NODAL, "JNV Nodal"),
+            program(PROGRAM_IDS.NVS, "JNV NVS"),
+          ]}
+          userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS]}
+          activeStudents={[coeStudent, nodalStudent, nvsStudent]}
+        />,
+      );
+      return fetchMock;
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      window.history.replaceState(null, "", "/");
+    });
+
+    it("opens the flagged Student's modal on their programme card once flags load", async () => {
+      renderWithFlags("tab=enrollment&flag=502");
+
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByRole("heading", { name: "Bina Rao" })).toBeInTheDocument();
+      expect(screen.getByTestId("student-table")).toHaveAttribute(
+        "data-program",
+        String(PROGRAM_IDS.NODAL),
+      );
+    });
+
+    it("drops `flag` from the URL once consumed, keeping the other params", async () => {
+      renderWithFlags("tab=enrollment&grade=12&flag=502");
+
+      await screen.findByRole("dialog");
+      expect(window.location.pathname).toBe("/school/14061");
+      expect(window.location.search).toBe("?tab=enrollment&grade=12");
+    });
+
+    it("does not reopen when the tab remounts after the dialog is closed", async () => {
+      // SchoolTabs unmounts the Enrollment tab when another tab is shown and
+      // mounts it afresh on the way back, reading the URL as it then stands.
+      const user = userEvent.setup();
+      const fetchMock = renderWithFlags("tab=enrollment&flag=502");
+      const flagsCalls = () =>
+        fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags"));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Close" }));
+      cleanup();
+
+      urlState.search = window.location.search.slice(1);
+      expect(urlState.search).toBe("tab=enrollment");
+      render(
+        <EnrollmentTabContent
+          {...baseProps}
+          programs={[
+            program(PROGRAM_IDS.COE, "JNV CoE"),
+            program(PROGRAM_IDS.NODAL, "JNV Nodal"),
+            program(PROGRAM_IDS.NVS, "JNV NVS"),
+          ]}
+          userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS]}
+          activeStudents={[coeStudent, nodalStudent, nvsStudent]}
+        />,
+      );
+
+      await vi.waitFor(() => expect(flagsCalls()).toHaveLength(2));
+      expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ["an unknown id (e.g. another School's flag)", "999"],
+      ["a non-numeric id", "abc"],
+      ["a partly numeric id", "502x"],
+      ["the id of a flag on the hidden JNV NVS card", "503"],
+    ])("ignores %s: no dialog, the tab renders normally, `flag` is dropped", async (_label, id) => {
+      const fetchMock = renderWithFlags(`tab=enrollment&flag=${id}`);
+
+      expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      await vi.waitFor(() => expect(window.location.search).toBe("?tab=enrollment"));
+      expect(
+        fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags")),
+      ).toHaveLength(1);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByTestId("student-table")).toHaveAttribute(
+        "data-program",
+        String(PROGRAM_IDS.COE),
+      );
+    });
+
+    it("stays closed after the dialog is closed, even when the flags reload", async () => {
+      const user = userEvent.setup();
+      const fetchMock = renderWithFlags("tab=enrollment&flag=502");
+      const flagsCalls = () =>
+        fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags"));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Close" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Leaving for the NVS card and coming back refetches the flags.
+      await user.click(screen.getByRole("button", { name: "JNV NVS" }));
+      await user.click(screen.getByRole("button", { name: "JNV Nodal" }));
+      await vi.waitFor(() => expect(flagsCalls()).toHaveLength(2));
+      expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByTestId("student-table")).toHaveAttribute(
+        "data-program",
+        String(PROGRAM_IDS.NODAL),
+      );
+    });
+  });
+});
+
+// ─── Data completeness table (#468) ─────────────────────────────────────────
+
+describe("EnrollmentTabContent - data completeness", () => {
+  // Two CoE Students, one in Grade 11 and one in Grade 12: one missing an
+  // Address, both missing every document. Only the Grade 12 Student is
+  // expected to have registered for JEE Mains this year (#468 review).
+  function centreStudent(overrides: Partial<Student> = {}): Student {
+    return {
+      group_user_id: `gu-${overrides.student_pk_id ?? "1"}`,
+      user_id: `u-${overrides.student_pk_id ?? "1"}`,
+      student_pk_id: "1",
+      first_name: "Aarav",
+      last_name: "Sharma",
+      phone: "9876543210",
+      email: null,
+      date_of_birth: "2009-05-15",
+      student_id: "STU001",
+      pen_number: "12345678901",
+      apaar_id: "APAAR001",
+      // A reserved category and both uniform sizes, so these fixtures are
+      // complete bar what each test blanks out.
+      category: "OBC",
+      stream: "science",
+      gender: "Male",
+      tshirt_size: "M",
+      track_pant_size: "M",
+      board_stream: "PCM",
+      address: "12 Main Road",
+      father_name: "Suresh",
+      mother_name: "Sunita",
+      annual_family_income: "1 - 3 Lakhs",
+      exam_records: [],
+      program_name: "JNV CoE",
+      program_id: PROGRAM_IDS.COE,
+      student_program_ids: [PROGRAM_IDS.COE],
+      grade: 11,
+      grade_id: "g-11",
+      status: null,
+      updated_at: null,
+      ...overrides,
+    } as Student;
+  }
+
+  const centreProps = {
+    ...baseProps,
+    programs: [program(PROGRAM_IDS.COE, "JNV CoE")],
+    userProgramIds: [PROGRAM_IDS.COE],
+    activeStudents: [
+      centreStudent({ student_pk_id: "1", address: null }),
+      centreStudent({ student_pk_id: "2", grade: 12 }),
+    ],
+  };
+
+  function stubFetch(documents: Record<string, string[]> = { "1": [], "2": [] }) {
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.includes("document-status")
+          ? { documents }
+          : url.includes("intervention-flags")
+            ? { flags: [] }
+            : { consent: {} },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("replaces the Admission row for a physical centre", async () => {
+    stubFetch();
+    render(<EnrollmentTabContent {...centreProps} />);
+
+    expect(await screen.findByTestId("data-completeness")).toBeInTheDocument();
+    expect(screen.queryByTestId("admission-stats-row")).not.toBeInTheDocument();
+  });
+
+  it("leaves JNV NVS with its Admission row and no table", async () => {
+    const fetchMock = stubFetch();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          centreStudent({
+            student_pk_id: "3",
+            program_id: PROGRAM_IDS.NVS,
+            student_program_ids: [PROGRAM_IDS.NVS],
+          }),
+        ]}
+      />,
+    );
+
+    expect(await screen.findByTestId("admission-stats-row")).toBeInTheDocument();
+    expect(screen.queryByTestId("data-completeness")).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("document-status")),
+    ).toHaveLength(0);
+  });
+
+  it("reads the School's documents once, not once per Student", async () => {
+    const fetchMock = stubFetch();
+    render(<EnrollmentTabContent {...centreProps} />);
+
+    await screen.findByTestId("data-completeness");
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("document-status")),
+    ).toHaveLength(1);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("consent-status")),
+    ).toHaveLength(0);
+  });
+
+  it("counts the Students missing each item", async () => {
+    stubFetch();
+    render(<EnrollmentTabContent {...centreProps} />);
+
+    await screen.findByTestId("data-completeness");
+    expect(
+      screen.getByRole("button", { name: "1 of 2 students missing Address" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "2 of 2 students missing Signed undertaking - Parent",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "1 of 1 students missing JEE Mains" }),
+    ).toBeInTheDocument();
+  });
+
+  it("narrows the roster to the Students behind a chip, then clears", async () => {
+    stubFetch();
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...centreProps} />);
+
+    await screen.findByTestId("data-completeness");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "none");
+
+    await user.click(
+      screen.getByRole("button", { name: "1 of 2 students missing Address" }),
+    );
+
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-1");
+    expect(screen.getByTestId("enrollment-filtered-count")).toHaveTextContent(
+      "Showing 1 of 2 students",
+    );
+    const bar = screen.getByTestId("completeness-filter-bar");
+    expect(within(bar).getByText("Missing Address")).toBeInTheDocument();
+
+    await user.click(within(bar).getByRole("button", { name: "Clear" }));
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "none");
+  });
+
+  it("opens a group label to everyone missing anything in it", async () => {
+    stubFetch({ "1": [], "2": [] });
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...centreProps} />);
+
+    await screen.findByTestId("data-completeness");
+    await user.click(screen.getByRole("button", { name: /^Info/ }));
+
+    // Only the Student with no Address is missing any Info field.
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-1");
+    expect(
+      within(screen.getByTestId("completeness-filter-bar")).getByText(
+        "Any info missing",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("recounts for the grade filter and clears a filter it empties", async () => {
+    stubFetch();
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...centreProps} />);
+
+    await screen.findByTestId("data-completeness");
+    await user.click(
+      screen.getByRole("button", { name: "1 of 2 students missing Address" }),
+    );
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-1");
+
+    // Grade 12 holds only the Student whose Address is filled in.
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "12");
+
+    expect(screen.queryByTestId("completeness-filter-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "none");
+    expect(
+      screen.getByRole("button", {
+        name: "1 of 1 students missing Signed undertaking - Parent",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("passes a failed exam read through to the Exams row", async () => {
+    stubFetch();
+    render(<EnrollmentTabContent {...centreProps} examRecordsFailed />);
+
+    await screen.findByTestId("data-completeness");
+    expect(
+      screen.getByText("Exams couldn't be loaded. Reload to try again."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /students missing JEE Mains/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a filter the grade change still leaves someone in", async () => {
+    stubFetch();
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...centreProps} />);
+
+    await screen.findByTestId("data-completeness");
+    await user.click(
+      screen.getByRole("button", { name: "1 of 1 students missing JEE Mains" }),
+    );
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "12");
+
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-2");
+    expect(
+      within(screen.getByTestId("completeness-filter-bar")).getByText(
+        "1 of 1 Grade 12 students",
+      ),
+    ).toBeInTheDocument();
   });
 });

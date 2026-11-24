@@ -389,6 +389,25 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
     expect(meta.last_edited_at).toBe("2026-04-15T11:30:00.000Z");
   });
 
+  it("marks or unmarks a retest on the session only", async () => {
+    const { PATCH } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockQuery.mockResolvedValue([sessionRow()]);
+
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/quiz-sessions/42", {
+        method: "PATCH",
+        body: { isRetest: true },
+      }) as never,
+      routeParams({ id: "42" })
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchBody("/session/42").meta_data.is_retest).toBe(true);
+    // The quiz player never reads it, so no quiz-doc PATCH.
+    expect(fetchCall("/quiz/quiz-abc123")).toBeUndefined();
+  });
+
   it("does not touch the quiz doc when no quiz-doc field changed", async () => {
     // gurukul_format_type lives only on the session meta_data — it has no quiz-doc home, so
     // editing it alone must not fire a no-op PATCH at quiz-backend.

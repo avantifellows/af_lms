@@ -24,7 +24,7 @@ export function useJsonFetch<T>(url: string, failure: string, onData?: (data: T)
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
-    // The same fetch as TestDeepDive and CumulativeALTable, which could move onto this hook.
+    // The same fetch as TestDeepDive, which could move onto this hook.
     // fallow-ignore-next-line code-duplication
     fetch(url, { signal: controller.signal })
       .then(async (res) => {

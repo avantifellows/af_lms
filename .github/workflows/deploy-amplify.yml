@@ -23,6 +23,8 @@ on:
 
 env:
   AWS_REGION: ap-south-1
+  # Short-lived AWS login through GitHub OIDC; no stored access key.
+  AWS_DEPLOY_ROLE_ARN: arn:aws:iam::111766607077:role/af-lms-amplify-deploy
   AMPLIFY_APP_ID: dr1eqhpsk9y2d
 
 jobs:
@@ -31,13 +33,14 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.deploy_type == 'preview'
     runs-on: ubuntu-latest
     environment: Preview
+    permissions:
+      id-token: write # AWS login through OIDC
 
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set preview branch name
@@ -53,8 +56,9 @@ jobs:
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
 
-          # Check if branch exists
-          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" 2>/dev/null; then
+          # Check if branch exists. Discard the output: Amplify returns the
+          # branch's environment variables, and this log is public.
+          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" >/dev/null 2>&1; then
             echo "Branch $BRANCH already exists, updating..."
           else
             echo "Creating new branch $BRANCH..."
@@ -62,7 +66,8 @@ jobs:
               --app-id ${{ env.AMPLIFY_APP_ID }} \
               --branch-name "$BRANCH" \
               --stage DEVELOPMENT \
-              --no-enable-auto-build
+              --no-enable-auto-build \
+              --query 'branch.branchName' --output text
           fi
 
       - name: Sync Preview environment variables
@@ -86,6 +91,11 @@ jobs:
           BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
           BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
           BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
+          HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
+          HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
+          HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
+          HOLISTIC_DICTATION_OPENROUTER_API_KEY: ${{ secrets.HOLISTIC_DICTATION_OPENROUTER_API_KEY }}
+          HOLISTIC_DICTATION_TRANSLATION_MODEL: ${{ secrets.HOLISTIC_DICTATION_TRANSLATION_MODEL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -100,6 +110,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          EXAM_PASSWORD_KMS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_KEY_ID }}
+          EXAM_PASSWORD_KMS_REGION: ${{ secrets.EXAM_PASSWORD_KMS_REGION }}
+          EXAM_PASSWORD_KMS_ACCESS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_ACCESS_KEY_ID }}
+          EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: ${{ secrets.EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY }}
           CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
@@ -130,6 +144,11 @@ jobs:
             --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
+            --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
+            --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
+            --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
+            --arg dictation_translation_model "$HOLISTIC_DICTATION_TRANSLATION_MODEL" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -144,6 +163,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg exam_kms_key "$EXAM_PASSWORD_KMS_KEY_ID" \
+            --arg exam_kms_region "$EXAM_PASSWORD_KMS_REGION" \
+            --arg exam_kms_access_key_id "$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" \
+            --arg exam_kms_secret "$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" \
             --arg cms_url "$CMS_SERVICE_URL" \
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
@@ -172,6 +195,11 @@ jobs:
               BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
+              HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
+              HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
+              HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,
+              HOLISTIC_DICTATION_TRANSLATION_MODEL: $dictation_translation_model,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -186,6 +214,10 @@ jobs:
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
               S3_DOCS_SECRET_ACCESS_KEY: $y,
+              EXAM_PASSWORD_KMS_KEY_ID: $exam_kms_key,
+              EXAM_PASSWORD_KMS_REGION: $exam_kms_region,
+              EXAM_PASSWORD_KMS_ACCESS_KEY_ID: $exam_kms_access_key_id,
+              EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: $exam_kms_secret,
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
@@ -198,7 +230,8 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "$ENV_VARS"
+            --environment-variables "$ENV_VARS" \
+            --query 'branch.branchName' --output text
 
       - name: Trigger preview build
         run: |
@@ -221,6 +254,7 @@ jobs:
     permissions:
       contents: write # force-push the PR code to the staging branch
       pull-requests: write # post the preview URL comment
+      id-token: write # AWS login through OIDC
 
     steps:
       - name: Checkout PR code
@@ -233,8 +267,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set preview branch name
@@ -251,8 +284,9 @@ jobs:
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
 
-          # Check if branch exists
-          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" 2>/dev/null; then
+          # Check if branch exists. Discard the output: Amplify returns the
+          # branch's environment variables, and this log is public.
+          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" >/dev/null 2>&1; then
             echo "Branch $BRANCH already exists, updating..."
           else
             echo "Creating new branch $BRANCH..."
@@ -260,7 +294,8 @@ jobs:
               --app-id ${{ env.AMPLIFY_APP_ID }} \
               --branch-name "$BRANCH" \
               --stage DEVELOPMENT \
-              --no-enable-auto-build
+              --no-enable-auto-build \
+              --query 'branch.branchName' --output text
           fi
 
       - name: Sync Preview environment variables
@@ -284,6 +319,11 @@ jobs:
           BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
           BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
           BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
+          HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
+          HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
+          HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
+          HOLISTIC_DICTATION_OPENROUTER_API_KEY: ${{ secrets.HOLISTIC_DICTATION_OPENROUTER_API_KEY }}
+          HOLISTIC_DICTATION_TRANSLATION_MODEL: ${{ secrets.HOLISTIC_DICTATION_TRANSLATION_MODEL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -298,6 +338,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          EXAM_PASSWORD_KMS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_KEY_ID }}
+          EXAM_PASSWORD_KMS_REGION: ${{ secrets.EXAM_PASSWORD_KMS_REGION }}
+          EXAM_PASSWORD_KMS_ACCESS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_ACCESS_KEY_ID }}
+          EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: ${{ secrets.EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY }}
           CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
@@ -328,6 +372,11 @@ jobs:
             --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
+            --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
+            --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
+            --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
+            --arg dictation_translation_model "$HOLISTIC_DICTATION_TRANSLATION_MODEL" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -342,6 +391,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg exam_kms_key "$EXAM_PASSWORD_KMS_KEY_ID" \
+            --arg exam_kms_region "$EXAM_PASSWORD_KMS_REGION" \
+            --arg exam_kms_access_key_id "$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" \
+            --arg exam_kms_secret "$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" \
             --arg cms_url "$CMS_SERVICE_URL" \
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
@@ -370,6 +423,11 @@ jobs:
               BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
+              HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
+              HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
+              HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,
+              HOLISTIC_DICTATION_TRANSLATION_MODEL: $dictation_translation_model,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -384,6 +442,10 @@ jobs:
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
               S3_DOCS_SECRET_ACCESS_KEY: $y,
+              EXAM_PASSWORD_KMS_KEY_ID: $exam_kms_key,
+              EXAM_PASSWORD_KMS_REGION: $exam_kms_region,
+              EXAM_PASSWORD_KMS_ACCESS_KEY_ID: $exam_kms_access_key_id,
+              EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: $exam_kms_secret,
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
@@ -396,7 +458,8 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "$ENV_VARS"
+            --environment-variables "$ENV_VARS" \
+            --query 'branch.branchName' --output text
 
       - name: Trigger preview build
         run: |
@@ -454,13 +517,14 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: Production
+    permissions:
+      id-token: write # AWS login through OIDC
 
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Generate production URL
@@ -490,6 +554,11 @@ jobs:
           BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
           BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
           BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
+          HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
+          HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
+          HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
+          HOLISTIC_DICTATION_OPENROUTER_API_KEY: ${{ secrets.HOLISTIC_DICTATION_OPENROUTER_API_KEY }}
+          HOLISTIC_DICTATION_TRANSLATION_MODEL: ${{ secrets.HOLISTIC_DICTATION_TRANSLATION_MODEL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -504,6 +573,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          EXAM_PASSWORD_KMS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_KEY_ID }}
+          EXAM_PASSWORD_KMS_REGION: ${{ secrets.EXAM_PASSWORD_KMS_REGION }}
+          EXAM_PASSWORD_KMS_ACCESS_KEY_ID: ${{ secrets.EXAM_PASSWORD_KMS_ACCESS_KEY_ID }}
+          EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: ${{ secrets.EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY }}
           CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
@@ -533,6 +606,11 @@ jobs:
             --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
+            --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
+            --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
+            --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
+            --arg dictation_translation_model "$HOLISTIC_DICTATION_TRANSLATION_MODEL" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -547,6 +625,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg exam_kms_key "$EXAM_PASSWORD_KMS_KEY_ID" \
+            --arg exam_kms_region "$EXAM_PASSWORD_KMS_REGION" \
+            --arg exam_kms_access_key_id "$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" \
+            --arg exam_kms_secret "$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" \
             --arg cms_url "$CMS_SERVICE_URL" \
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
@@ -575,6 +657,11 @@ jobs:
               BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
+              HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
+              HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
+              HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,
+              HOLISTIC_DICTATION_TRANSLATION_MODEL: $dictation_translation_model,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -589,6 +676,10 @@ jobs:
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
               S3_DOCS_SECRET_ACCESS_KEY: $y,
+              EXAM_PASSWORD_KMS_KEY_ID: $exam_kms_key,
+              EXAM_PASSWORD_KMS_REGION: $exam_kms_region,
+              EXAM_PASSWORD_KMS_ACCESS_KEY_ID: $exam_kms_access_key_id,
+              EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY: $exam_kms_secret,
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
@@ -601,7 +692,8 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name main \
-            --environment-variables "$ENV_VARS"
+            --environment-variables "$ENV_VARS" \
+            --query 'branch.branchName' --output text
 
       # Amplify auto-build is enabled on main — it triggers a build on every
       # push automatically. The env vars synced above will be picked up by

@@ -20,7 +20,8 @@ const ADMIN: BlendedLearningAccess = {
 function row(studentId: number, mentorUserId: number, name: string) {
   const [first_name, last_name] = name.split(" ");
   return {
-    student_id: studentId, mentor_user_id: mentorUserId, first_name, last_name, gender: "Female",
+    student_id: studentId, program_student_id: null as string | null, category: null as string | null,
+    mentor_user_id: mentorUserId, first_name, last_name, gender: "Female",
     grade: 12, program_id: 80, program_name: "STP Voucher Delhi",
     last_conversation_on: "2026-10-20", last_conversation_id: studentId * 10,
     last_attempt_on: null as string | null, last_attempt_id: null as number | null, legacy_last_contact_on: null, open_draft_state: null,
@@ -28,11 +29,11 @@ function row(studentId: number, mentorUserId: number, name: string) {
 }
 
 // Fixture: active current-year Mapping rows; the mock narrows them by the
-// bound Mentor id the way the WHERE clause does.
+// bound Mentor ids the way the WHERE clause does.
 function givenMappedMentees(rows: ReturnType<typeof row>[]) {
   mockQuery.mockImplementation(async (_sql: string, params?: unknown[]) => {
-    const mentor = params?.[1];
-    return rows.filter((r) => mentor == null || r.mentor_user_id === Number(mentor));
+    const mentors = params?.[1] as number[] | null;
+    return rows.filter((r) => mentors == null || mentors.includes(r.mentor_user_id));
   });
 }
 
@@ -62,6 +63,16 @@ describe("listMentees", () => {
     expect(lokeshs.everyoneElse.map((m) => m.name)).toEqual(["Tara Other"]);
   });
 
+  it("leaves out Mentees marked a dropout, though their Mapping is still active", async () => {
+    givenMappedMentees([FAIZANS]);
+
+    await listMentees({ access: ADMIN, today: "2026-10-22" });
+
+    expect(mockQuery.mock.calls[0][0]).toMatch(
+      /WHERE mapping\.academic_year = \$1 AND mapping\.ended_at IS NULL AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/
+    );
+  });
+
   it("gives a Mentor with no Mentor user id an empty list without reading", async () => {
     givenMappedMentees([FAIZANS]);
 
@@ -81,5 +92,21 @@ describe("listMentees", () => {
       lastAttemptOn: "2026-10-21",
     });
     expect(list.talkToFirst[0]).not.toHaveProperty("lastDurationMinutes");
+  });
+
+  it("reads the program's Student ID as text with leading zeros, and the category", async () => {
+    givenMappedMentees([
+      { ...FAIZANS, program_student_id: "00123456", category: "Gen-EWS" },
+      { ...LOKESHS, mentor_user_id: 9001 },
+    ]);
+
+    const list = await listMentees({ access: MENTOR, today: "2026-10-22" });
+
+    expect(list.everyoneElse.map(({ studentId, programStudentId, category }) => ({ studentId, programStudentId, category })))
+      .toEqual([
+        { studentId: 501, programStudentId: "00123456", category: "Gen-EWS" },
+        { studentId: 601, programStudentId: null, category: null },
+      ]);
+    expect(mockQuery.mock.calls[0][0]).toContain("st.student_id AS program_student_id, st.category");
   });
 });

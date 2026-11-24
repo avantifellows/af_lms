@@ -180,7 +180,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await expect(saved.getByRole("term").nth(2)).toHaveText("Action items added");
       await expect(saved.getByRole("definition").nth(2)).toHaveText("0");
       await expect(saved.getByText("Today")).toBeVisible();
-      await expect(saved.getByText("No conversation yet")).toHaveCount(0);
+      await expect(saved.getByText("No conversation", { exact: true })).toHaveCount(0);
 
       expect(await savedEntries(studentIds[mentee.key])).toEqual([
         {
@@ -232,7 +232,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await expect(
         saved.getByText(`${mentee.firstName} moved from "Everyone else" to "Talk to first" in your student list.`)
       ).toBeVisible();
-      await expect(saved.getByText(/^Not reachable, /)).toBeVisible();
+      await expect(saved.getByText(/^Unreachable · /)).toBeVisible();
       await expect(saved.getByText(lastContact)).toBeVisible();
 
       const rows = await savedEntries(studentIds[mentee.key]);
@@ -245,7 +245,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       await page.goto("/blended-learning");
       const row = listEntry(page, "Talk to first", mentee);
-      await expect(row).toContainText("Not reachable, ");
+      await expect(row).toContainText("Unreachable · ");
       await expect(row).toContainText(lastContact);
     });
 

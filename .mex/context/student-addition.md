@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-23
+last_updated: 2026-11-16
 ---
 
 # Student Addition
@@ -187,25 +187,136 @@ decide which blocks *open* — nothing is stored until a teacher fills one in, a
 can be removed.
 
 Per exam: application number (required — see the DB Service note below), application
-password (type=password with a Show toggle) and, for an exam that runs more than once a
-year, the sittings applied for. Only JEE Mains has sittings today (`EXAM_SESSIONS`).
+password and, for an exam that runs more than once a year, the sittings applied for. Only
+JEE Mains has sittings today (`EXAM_SESSIONS`).
+
+**Passwords are KMS-encrypted (2026-11-16, confirmed with Programs).** The LMS encrypts an
+exam-portal password with AWS KMS (`src/lib/exam-password-crypto.ts`, key
+`EXAM_PASSWORD_KMS_KEY_ID`, its own IAM user) before it goes to the DB Service, which stores
+the base64 ciphertext in `student_exam_record.application_password_ciphertext` without any
+key that could read it; BigQuery gets the ciphertext only. The encryption context carries
+the Student id, so a ciphertext copied to another Student's row won't decrypt. No read in
+the LMS selects a password: the tab and the card both get `has_password` (ciphertext, or a
+non-blank legacy plaintext the backfill has not reached). A stored password shows masked
+with **Show** (roles with `exam_passwords` view), **Change** and **Remove**. Show calls
+`POST /api/students/[id]/exam-records/[recordId]/password` — same gate as the tab, then
+`exam_passwords` view, then the record must be this Student's (404 otherwise) — which
+decrypts, appends a row to `lms_exam_password_reveals` (viewer email + role, Student,
+registration, exam; append-only, schema in db-service), and only then returns the password
+with `no-store`. A reveal that can't be logged isn't made. Teachers reach their schools'
+Students and PMs their assigned schools' through `canAccessStudent`; Programs required
+both to see passwords and allowed admins and program admins to.
+
+The save is tri-state per registration: `application_password` left out keeps what is
+stored (the tab never has it to send back), `null`/blank clears it, a string replaces it.
+A KMS failure fails that registration like a DB Service failure, and the plaintext never
+leaves for the DB Service; the warning says only that the password could not be encrypted
+(KMS errors name the key and IAM user, so they stay in the server log). Writes send
+`application_password: null` alongside the ciphertext, which wipes any legacy plaintext on
+the row, and a password write fails unless the DB Service answers with exactly the
+ciphertext sent and no plaintext — a DB Service without the ciphertext column would
+otherwise drop it and report success. Reveal state in the tab is keyed by record id, and a
+reveal still in flight when the tab reloads or saves is discarded when it lands. `scripts/encrypt-exam-passwords.ts`
+re-encrypts the rest (dry-run by default, round-trips every value before writing); once
+it reports nothing pending, a db-service migration drops `application_password`.
 
 Reads go through Postgres (`src/lib/student-exam-records.ts`), writes through
-`PUT /api/students/[id]/exam-records`, which both verbs gate with
-`canAccessStudent(..., { requireEdit: true })` — not just view, because the response carries
-exam-portal passwords — and then with `isPmuOnlyStudent`, which 403s a JNV NVS Student. The route reconciles against what is stored: removals first (an
+`PUT /api/students/[id]/exam-records`, which both verbs gate with `gateExamRecords`
+(`src/lib/exam-records-gate.ts`): `canAccessStudent(..., { requireEdit: true })`, then
+`isPmuOnlyStudent`, which 403s a JNV NVS Student. The route reconciles against what is stored: removals first (an
 application number moved between exams would otherwise collide with the DB Service's
 upsert), then a PATCH per changed registration and a POST per new one, skipping no-ops.
 Per-call failures come back as `warnings`; everything failing is a 502.
 
-The roster never carries a password — `listExamSummariesForStudents` selects
-`application_password IS NOT NULL` as `has_password`, and the card renders a fixed mask. That
+The roster never carries a password — `listExamSummariesForStudents` selects the same
+`has_password` expression, and the card renders a fixed mask. That
 read is wrapped in a try/catch: the roster is the point of the page, so a database without
 the DB Service migration loses the exam tags rather than the roster.
 
 Deferred, per the issue: exam results (date, score, percentile, ranks), bulk upload of exam
 details, and the ops sheet's email / contact number / roll number — db-service PR #776 adds
 those columns but the tab does not collect them yet.
+
+## Data completeness table (Enrollment tab, #468)
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/468 replaced the Admission row's two
+percentages with a table that says **who is missing what**. Physical centres only (the issue says so
+outright, and #395/#431/#434 each had to be gated afterwards); JNV NVS keeps the Admission row and
+sees no table, `EnrollmentTabContent` picking between them on `showAdmissionRow` / `showCompleteness`.
+
+Three rows, built by `src/lib/data-completeness.ts`:
+
+- **Info** — the fields the Programs team tracks: Date of Birth, Gender, Category, Parents Phone
+  Number, Annual Family Income, Father Name, Mother Name, Address, Uniform Size, APAAR ID and
+  PEN / Grade 10 Roll no. Confirmed with the issue author over the alternatives on 2026-10-26;
+  Uniform Size was asked for on 2026-10-27, after the table reached staging. It is **one** chip for
+  both sizes, not two: Edit Student collects them in a single Uniform Size section, and a Student
+  with only a T-shirt size still can't have a uniform ordered. APAAR ID and PEN / Grade 10
+  Roll no carry a lock, Edit Student being unable to change them; PEN and the roll number are **one**
+  chip, since either identifies the Student to the board. This list is deliberately *not*
+  `INFO_REQUIRED_FIELDS` from `enrollment-readiness.ts`: that one answers "one honest percentage per
+  School" and was cut to five in #338, while this one can afford the rarely-filled fields because each
+  shows as its own chip.
+- **Documents** — all seven types in `document-types.ts`, the two consents starred as required. The
+  product call the old `% Docs` was waiting on. The **caste certificate is counted only for Students
+  in a reserved category**: most states issue none to a general-category Student, so Gen, Gen-EWS,
+  PWD-Gen, PWD-EWS and their case and "General" spellings are left out of its count, its denominator
+  and its filter (`DOCUMENT_APPLIES_TO`, asked for on 2026-10-27). A Student whose category nobody
+  has recorded stays counted — nothing rules it out, and the Category chip is where that gap shows.
+  Where no Student in scope could produce one, the row says so rather than calling it complete, and
+  those slots leave the percentage.
+- **Exams** — **Grade 12 only** (`EXAM_REGISTRATION_GRADE`), one chip per exam the Student's Board
+  Stream calls for (`STREAM_EXPECTED_EXAM_NAMES`), counting candidates with no registration for it.
+  Grade 11 was in scope until the PR review (2026-10-28, decided by Pritam): they sit the exam next
+  year, and counting them read ~0% at every centre — about 3,100 physical-centre Students, 1,617 of
+  them in Grade 11. The narrower scope earns a note of its own ("Grade 12 only — 55 of 77 students")
+  so a count of 40 isn't read against the Info row's denominator, and a roster with no Grade 12 at
+  all says "Not expected yet" instead of showing a bare 100%. An exam no candidate is expected to sit
+  gets a note ("NEET not expected — no Grade 12 Student on PCB or PCMB") rather than silently
+  missing. A candidate with **no Board Stream** gets a chip of its own
+  (`BOARD_STREAM_FILTER_KEY`, filed under Exams by `groupOf`): without a stream nothing can say which
+  exams they owe, and Board Stream is not an Info item, so the gap used to appear nowhere on the
+  table — 152 such Students in prod, 55 of them in Grade 12. A candidate owes either a Board Stream
+  or their registrations, never both, so the row reads 0% when nobody has been streamed instead of
+  the 100% that "no registration is expected" would otherwise give.
+
+Open questions from the review, unanswered and not blocking: whether an exam should count as missing
+only once its registration window is open (NEET's opens around February, so every PCB candidate
+reads red until then), and whether registrations should be scoped to an academic year —
+`student_exam_record` has no year column, so a 2024 registration counts as this year's. Prod holds no
+exam registration for any current physical-centre Student; the only 4,227 rows are a Dec 2024 import.
+
+Every percentage is **slot-based** (filled ÷ Students × items), not all-or-nothing, so it moves as
+gaps close. Chips sort worst first and anything nobody is missing folds into "✓ N complete" with the
+names on hover. Severity on the count pill is red from 50% and amber from 20% **of that item's own
+denominator** (`CompletenessItem.expected`) — every Student in scope for a field or document, but
+only the Students whose Board Stream calls for an exam. Ten of eleven PCB Students with no NEET
+registration is a red chip; against the whole roster it would have read as a pale 10 of 77.
+
+`missingKeysForStudent` answers both the counts and "is this Student in the filter", so a chip's
+number and the roster it opens cannot disagree. Tapping a chip sets `restrictToGroupUserIds` on
+`StudentTable` (active tab only — the table counts the active roster). That key is `group_user_id`,
+not `student_pk_id`: the roster `LEFT JOIN`s `student`, so a row with no Student record still shows
+a card and is still counted, and keying on the record id would count such a Student and then fail to
+list them. A group label filters on "missing any item in this group". Filters compose with Filter by
+Grade and Filter by Stream, and `filterSurviving` drops a filter a grade or stream change leaves
+matching nobody. A scope with no Students says so rather than reporting 100% complete.
+
+Documents arrive from **one bulk read** for the School, `GET /api/schools/[code]/document-status`
+(see `data-access.md` §1) — the consent summary's per-Student fan-out can't answer seven types across
+a roster. A failure never writes to `documents`: null (nothing read yet) keeps the row pending and
+its group label disabled, because "missing any document" would otherwise match nobody and read as
+"nobody is missing one"; a failed *re*fetch after an upload keeps the counts it already had and adds
+a "couldn't refresh" note rather than blanking a table the PM is reading.
+
+The **exam** read fails differently and now says so too (review finding, 2026-10-28).
+`listExamSummariesForStudents` catches its own failure — the registrations are a display extra on a
+page whose point is the roster — but it used to return an empty map, which is exactly what "nobody
+has registered" looks like, so the row went red instead of reporting an error. It now returns
+`{ byStudent, failed }`, `withExamRecords` carries `failed` to `SchoolRoster.examRecordsFailed`, and
+`RosterPage` passes it to the table as `examsError`. Unlike the documents there is no earlier answer
+to fall back on — the exam read happens once, with the roster — so the row shows the error, hides its
+percentage and disables its group label rather than going stale.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

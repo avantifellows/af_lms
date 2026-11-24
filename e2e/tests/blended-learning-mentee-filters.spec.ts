@@ -4,12 +4,13 @@ import { BLENDED_MENTOR_A, MENTEES, fullName } from "../helpers/blended-learning
 
 // Search and filters on Mentor A's Student list (#443). Expected rows come
 // from the hand-written fixture facts in blended-learning-fixtures.ts:
-//   Ira Attempt       Female  Grade 12  STP Voucher Delhi             Talk to first (Last Contact 10 days)
-//   Kabir Never       Male    Grade 13  STP Dropper Delhi             Talk to first (no Last Contact)
-//   Meera Thirty      Female  Grade 12  STP Voucher Punjab            Talk to first (30 days)
-//   Nikhil Legacy     Male    Grade 13  STP Dropper Punjab            Talk to first (legacy date 14 Jun 2026)
-//   Zoya TwentyNine   Female  Grade 12  STP Voucher Himachal Pradesh  Everyone else (29 days)
-//   Rohan Recent      Male    Grade 12  STP Voucher Uttarakhand       Everyone else (3 days)
+//   Ira Attempt       Female  Gen-EWS  Grade 12  STP Voucher Delhi             Talk to first (Last Contact 10 days)
+//   Kabir Never       Male    —        Grade 13  STP Dropper Delhi             Talk to first (no Last Contact)
+//   Meera Thirty      Female  —        Grade 12  STP Voucher Punjab            Talk to first (30 days)
+//   Nikhil Legacy     Male    —        Grade 13  STP Dropper Punjab            Talk to first (legacy date 14 Jun 2026)
+//   Zoya TwentyNine   Female  —        Grade 12  STP Voucher Himachal Pradesh  Everyone else (29 days)
+//   Rohan Recent      Male    OBC      Grade 12  STP Voucher Uttarakhand       Everyone else (3 days)
+// The Program filter and the list show short program names ("Voucher DL").
 // From 1024 px up each group is a named rowgroup of one table; below that, a
 // region of cards. A group with no matching Students is left out.
 const VIEWPORTS = [
@@ -67,6 +68,21 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await expect(entries(group(page, "Everyone else"))).toHaveText(names(recent));
     });
 
+    test("category filter offers the categories in the list, and narrows to one", async ({ page }) => {
+      const category = page.getByRole("combobox", { name: "Category" });
+      await expect(category.getByRole("option")).toHaveText(["All", "Gen-EWS", "OBC"]);
+
+      await category.selectOption("OBC");
+
+      await expect(entries(group(page, "Talk to first"))).toHaveCount(0);
+      await expect(entries(group(page, "Everyone else"))).toHaveText(names(recent));
+
+      await category.selectOption("Gen-EWS");
+
+      await expect(entries(group(page, "Talk to first"))).toHaveText(names(attemptLatest));
+      await expect(group(page, "Everyone else")).toHaveCount(0);
+    });
+
     test("grade filter narrows both groups", async ({ page }) => {
       await page.getByRole("combobox", { name: "Grade" }).selectOption("13");
 
@@ -83,12 +99,12 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
 
     test("program filter narrows both groups", async ({ page }) => {
       const program = page.getByRole("combobox", { name: "Program" });
-      await program.selectOption("STP Voucher Uttarakhand");
+      await program.selectOption("Voucher UK");
 
       await expect(entries(group(page, "Talk to first"))).toHaveCount(0);
       await expect(entries(group(page, "Everyone else"))).toHaveText(names(recent));
 
-      await program.selectOption("STP Dropper Punjab");
+      await program.selectOption("Dropper PB");
 
       await expect(entries(group(page, "Talk to first"))).toHaveText(names(legacy));
       await expect(entries(group(page, "Everyone else"))).toHaveCount(0);
@@ -139,13 +155,14 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
 
     if (label === "mobile 360") {
       test("every control fits the 360 px width as a 44 px tap target, with no horizontal page scroll", async ({ page }) => {
-        // Long program names must not widen the page.
-        await page.getByRole("combobox", { name: "Program" }).selectOption("STP Voucher Himachal Pradesh");
+        // A selected program must not widen the page.
+        await page.getByRole("combobox", { name: "Program" }).selectOption("Voucher HP");
         await page.getByRole("combobox", { name: "Last contact" }).selectOption("30 days or more");
 
         const controls = [
           page.getByRole("searchbox", { name: "Search by name" }),
           page.getByRole("combobox", { name: "Gender" }),
+          page.getByRole("combobox", { name: "Category" }),
           page.getByRole("combobox", { name: "Grade" }),
           page.getByRole("combobox", { name: "Program" }),
           page.getByRole("combobox", { name: "Last contact" }),

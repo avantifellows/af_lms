@@ -25,6 +25,11 @@ frontend:
           echo "BLENDED_LEARNING_SES_SECRET_ACCESS_KEY=$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" >> .env.production
           echo "BLENDED_LEARNING_SES_REGION=$BLENDED_LEARNING_SES_REGION" >> .env.production
           echo "BLENDED_LEARNING_WELLBEING_EMAILS=$BLENDED_LEARNING_WELLBEING_EMAILS" >> .env.production
+          echo "HOLISTIC_DICTATION_ENABLED=$HOLISTIC_DICTATION_ENABLED" >> .env.production
+          echo "HOLISTIC_DICTATION_ELEVENLABS_API_KEY=$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" >> .env.production
+          echo "HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION=$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" >> .env.production
+          echo "HOLISTIC_DICTATION_OPENROUTER_API_KEY=$HOLISTIC_DICTATION_OPENROUTER_API_KEY" >> .env.production
+          echo "HOLISTIC_DICTATION_TRANSLATION_MODEL=$HOLISTIC_DICTATION_TRANSLATION_MODEL" >> .env.production
           echo "GOOGLE_SERVICE_ACCOUNT_JSON=$GOOGLE_SERVICE_ACCOUNT_JSON" >> .env.production
           echo "DYNAMODB_URL=$DYNAMODB_URL" >> .env.production
           echo "DYNAMODB_REGION=$DYNAMODB_REGION" >> .env.production
@@ -39,6 +44,10 @@ frontend:
           echo "S3_DOCS_REGION=$S3_DOCS_REGION" >> .env.production
           echo "S3_DOCS_ACCESS_KEY_ID=$S3_DOCS_ACCESS_KEY_ID" >> .env.production
           echo "S3_DOCS_SECRET_ACCESS_KEY=$S3_DOCS_SECRET_ACCESS_KEY" >> .env.production
+          echo "EXAM_PASSWORD_KMS_KEY_ID=$EXAM_PASSWORD_KMS_KEY_ID" >> .env.production
+          echo "EXAM_PASSWORD_KMS_REGION=$EXAM_PASSWORD_KMS_REGION" >> .env.production
+          echo "EXAM_PASSWORD_KMS_ACCESS_KEY_ID=$EXAM_PASSWORD_KMS_ACCESS_KEY_ID" >> .env.production
+          echo "EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY=$EXAM_PASSWORD_KMS_SECRET_ACCESS_KEY" >> .env.production
           echo "CMS_SERVICE_URL=$CMS_SERVICE_URL" >> .env.production
           echo "CMS_SERVICE_TOKEN=$CMS_SERVICE_TOKEN" >> .env.production
           echo "QUIZ_BACKEND_URL=$QUIZ_BACKEND_URL" >> .env.production

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { latestProfileDocConversationOn } from "./blended-learning-profile-doc-dates";
+import {
+  PROFILE_DOC_ENTRY_TEXT_LIMIT,
+  latestProfileDocConversationOn,
+  latestProfileDocEntry,
+  legacyDateWindow,
+} from "./blended-learning-profile-doc-dates";
 
 // Synthetic Google Docs HTML exports: each Docs tab title is a class="title"
 // paragraph. No real Profile Doc content.
@@ -120,5 +125,71 @@ describe("latestProfileDocConversationOn", () => {
   it("reads a doc with no tabs at all", () => {
     expect(latestProfileDocConversationOn("<p>Sep 1, 2026</p><p>First call</p>", WINDOW)).toBe("2026-09-01");
     expect(latestProfileDocConversationOn("", WINDOW)).toBeNull();
+  });
+});
+
+describe("latestProfileDocEntry", () => {
+  function entry(...parts: string[]) {
+    return latestProfileDocEntry(doc(...parts), WINDOW);
+  }
+
+  it("gives the latest entry's text from its date line to the next date line, tables and lists included", () => {
+    expect(
+      entry(
+        tab("Student Interview"), "<p>Oct 20, 2026: interview</p>",
+        tab("September"),
+        "<p>Date: Sep 24, 2026</p><h3>Action points:</h3><ul><li>Revise organic</li><li>Call the parent</li></ul>",
+        "<table><tr><td><p>Who</p></td><td><p>What</p></td></tr><tr><td><p>Student</p></td><td><p>Finish the DPP</p></td></tr></table>",
+        "<p>Date: Sep 15, 2026</p><p>Older notes</p>"
+      )
+    ).toEqual({
+      occurredOn: "2026-09-24",
+      text: "Date: Sep 24, 2026\nAction points:\n- Revise organic\n- Call the parent\nWho\nWhat\nStudent\nFinish the DPP",
+    });
+  });
+
+  it("runs to the end of its tab, and stops at a placeholder or planned date line", () => {
+    expect(entry(tab("October"), "<p>Oct 8, 2026</p><p>Mentorship summary</p>", tab("Notes"), "<p>Other tab</p>")?.text).toBe(
+      "Oct 8, 2026\nMentorship summary"
+    );
+    expect(entry(tab("Log"), "<p>Oct 8, 2026</p><p>Summary</p><p>Oct 22, 2026</p><p>Oct 30, 2026: plan</p>")?.text).toBe(
+      "Oct 8, 2026\nSummary"
+    );
+  });
+
+  it("joins every entry on the latest date, in doc order", () => {
+    expect(
+      entry(
+        tab("Sep 21, 2026 call"), "<p>The call covered the test plan.</p>",
+        tab("Meet notes"), "<p>abc-defg-hij (2026-09-21 16:05 GMT+5:30)</p><p>Gemini notes</p>"
+      )?.text
+    ).toBe("Sep 21, 2026 call\nThe call covered the test plan.\n\nabc-defg-hij (2026-09-21 16:05 GMT+5:30)\nGemini notes");
+  });
+
+  it("leaves out images and link targets, keeping the link text", () => {
+    expect(
+      entry(
+        tab("Log"),
+        '<p>Sep 5, 2026</p><p><img src="data:image/png;base64,AAAA"></p>',
+        '<p>Shared <a href="https://example.com/x">the sheet</a> https://example.com/y here</p>'
+      )?.text
+    ).toBe("Sep 5, 2026\nShared the sheet here");
+  });
+
+  it("cuts a very long entry, and gives null with no dated entry", () => {
+    const long = "<p>" + "word ".repeat(6000) + "</p>";
+    expect(entry(tab("Log"), "<p>Sep 5, 2026</p>", long)?.text).toHaveLength(PROFILE_DOC_ENTRY_TEXT_LIMIT);
+    expect(entry(tab("Log"), "<p>No dates here</p>")).toBeNull();
+  });
+
+  it("dates the same entry latestProfileDocConversationOn does", () => {
+    const html = doc(tab("Log"), "<p>Jul 2, 2026</p><p>Notes</p>", "<p>17 October</p><p>Later</p>");
+    expect(latestProfileDocEntry(html, WINDOW)?.occurredOn).toBe(latestProfileDocConversationOn(html, WINDOW));
+  });
+});
+
+describe("legacyDateWindow", () => {
+  it("runs from the academic year's first day to as-of", () => {
+    expect(legacyDateWindow("2026-10-23")).toEqual({ from: "2026-04-01", to: "2026-10-23" });
   });
 });

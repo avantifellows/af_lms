@@ -26,6 +26,7 @@ const BODY = {
   stream: "engineering",
   startTime: "2026-10-01T06:30:00.000Z",
   endTime: "2026-10-01T10:30:00.000Z",
+  isRetest: false,
 };
 
 async function loadPost() {
@@ -117,6 +118,25 @@ describe("POST /api/quiz-sessions/from-cms quiz language", () => {
       expect(bodyOf("/quiz/from-cms")).not.toHaveProperty("lang_code");
       expect(bodyOf("db-service.local/session").meta_data).not.toHaveProperty("lang_code");
     }
+  });
+
+  it("stores the creator's retest answer on the session", async () => {
+    const POST = await loadPost();
+
+    for (const isRetest of [true, false]) {
+      fetchMock.mockClear();
+      expect((await post(POST, { isRetest })).status).toBe(200);
+      expect(bodyOf("db-service.local/session").meta_data.is_retest).toBe(isRetest);
+    }
+  });
+
+  it("requires an explicit retest answer before building anything", async () => {
+    const POST = await loadPost();
+
+    for (const isRetest of [undefined, "yes"]) {
+      expect((await post(POST, { isRetest })).status).toBe(400);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed language before building anything", async () => {

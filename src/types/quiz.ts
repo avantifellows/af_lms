@@ -62,6 +62,8 @@ export interface ProgressionTest {
   test_name: string;
   start_date: string;
   stream: string | null;
+  /** The warehouse's test_course ("JEE Mains", "NEET", "State CET" …). */
+  course: string | null;
 }
 
 // AL the student earned on a specific major test. Only populated for tests

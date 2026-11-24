@@ -1,6 +1,6 @@
 ---
 name: pattern-index
-last_updated: 2026-10-22
+last_updated: 2026-11-18
 ---
 
 # Pattern Index
@@ -30,6 +30,7 @@ Lookup table for all pattern files in this directory. Check here before starting
 |---------|----------|
 | [add-api-route.md](add-api-route.md) | Adding any endpoint under `src/app/api/` (gate + read/write) |
 | [add-component.md](add-component.md) | Adding a React component + its colocated Vitest/RTL test |
+| [add-deploy-setting.md](add-deploy-setting.md) | Adding a server env var that staging/production must receive: all three Amplify workflow jobs, `amplify.yml`, env examples, blank handling |
 | [add-student-enrolment-field.md](add-student-enrolment-field.md) | Adding a Student field — choosing between Edit Student and the enrolment form, and the AF LMS + DB Service pair enrolment needs |
 | [add-user-role.md](add-user-role.md) | Adding a `user_permission` role — matrix column, deny-point or pin, Admin Users, Staff Management, Dev Login |
 | [add-visit-action-type.md](add-visit-action-type.md) | Adding a new PM visit action type (the ~8-file registry change) |
@@ -43,10 +44,14 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [deploy-staging-pr.md](deploy-staging-pr.md) | Setting up a reviewed LMS PR on shared staging for QA |
 | [holistic-privacy-erasure.md](holistic-privacy-erasure.md) | Extending Holistic privacy erasure across immutable content and audit tables |
 | [load-blended-learning-links.md](load-blended-learning-links.md) | Loading or refreshing Blended Learning Profile Doc / Screener Links (and the optional legacy last-contact date from Profile Docs) from the Profile Dashboard workbook |
+| [lms-owned-history-write.md](lms-owned-history-write.md) | Writing to an LMS-owned append-only history table (flag updates, Visit Concern events): lock, check, change status, append, in one transaction |
+| [manage-blended-learning-team-leads.md](manage-blended-learning-team-leads.md) | Starting or ending a Blended Learning Supervision (a team-lead Mentor viewing another Mentor's Students, read-only) in Manage → Team leads |
 | [local-browser-qa.md](local-browser-qa.md) | Running a PR branch from a worktree on a spare port and QA-ing it in headless Chromium |
 | [local-enrollment-repair.md](local-enrollment-repair.md) | Rehearsing audit-derived enrollment repairs on a dedicated local snapshot |
 | [mirror-db-service-schema-in-e2e.md](mirror-db-service-schema-in-e2e.md) | Mirroring db-service tables missing from `db-dump.sql` into an e2e fixture migration, proven identical by `pg_dump` diff |
 | [merge-roster-changes.md](merge-roster-changes.md) | Merging overlapping school/centre roster queries and SQL bindings |
+| [pre-pr-review.md](pre-pr-review.md) | Before opening (or marking ready) any af_lms PR, or reviewing an open one: CI checks, base-vs-branch on real cases, recompute numbers, data exposure |
 | [presigned-s3-upload.md](presigned-s3-upload.md) | Letting the browser upload a large file straight to S3 with a presigned PUT, then recording it server-side |
 | [reconcile-local-scaffold.md](reconcile-local-scaffold.md) | Cleaning up local .mex notes left on an older branch after related PRs merge |
 | [refresh-ralph-prd.md](refresh-ralph-prd.md) | Refreshing an existing GitHub issue PRD in a Ralph workspace |
+| [review-with-agents.md](review-with-agents.md) | Running agent reviewers on a PR and handling their findings: briefs, verification, re-review, when to stop, posting, answering review comments |

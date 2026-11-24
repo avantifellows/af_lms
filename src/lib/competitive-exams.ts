@@ -75,6 +75,22 @@ export function requiredExamNamesForBoardStream(
   return REQUIRED_EXAMS_BY_BOARD_STREAM[key] ?? [];
 }
 
+/**
+ * Every exam some Board Stream calls for, in picker order. The Enrollment
+ * tab's Data completeness table (#468) walks this list, so an exam no Student
+ * in scope is expected to sit can say so rather than simply be absent.
+ */
+export const STREAM_EXPECTED_EXAM_NAMES: readonly CompetitiveExamName[] = [
+  ...new Set(Object.values(REQUIRED_EXAMS_BY_BOARD_STREAM).flat()),
+].sort(compareExamNames);
+
+/** The Board Streams that call for this exam, e.g. "JEE Mains" → PCM, PCMB. */
+export function boardStreamsExpecting(examName: string): string[] {
+  return Object.entries(REQUIRED_EXAMS_BY_BOARD_STREAM)
+    .filter(([, names]) => (names as readonly string[]).includes(examName))
+    .map(([stream]) => stream);
+}
+
 // Exams that run the same paper more than once a year, with the sittings a
 // Student can apply for. Only these exams show the "Sessions applied"
 // checkboxes, and only these session numbers are accepted.
@@ -93,22 +109,13 @@ export interface ExamOption {
 }
 
 /**
- * One exam registration as the Exams tab edits it. `application_password` is
- * only ever present on this shape — the roster card gets {@link StudentExamSummary},
- * which says whether a password is stored without carrying it.
+ * One exam registration as the roster card and the Exams tab see it. Neither
+ * carries the password, only whether one is stored: the password is a KMS
+ * ciphertext, decrypted one registration at a time by
+ * `POST /api/students/[id]/exam-records/[recordId]/password`.
  */
-export interface StudentExamRecord {
-  /** `student_exam_record.id`; absent until the row has been saved once. */
-  id: number;
-  exam_id: number;
-  exam_name: string;
-  application_number: string | null;
-  application_password: string | null;
-  sessions_applied: number[] | null;
-}
-
-/** What the roster card shows: no password, only whether one is stored. */
 export interface StudentExamSummary {
+  /** `student_exam_record.id`. */
   id: number;
   exam_id: number;
   exam_name: string;
@@ -116,6 +123,9 @@ export interface StudentExamSummary {
   has_password: boolean;
   sessions_applied: number[] | null;
 }
+
+/** The Exams tab's registration — the same shape as the card's since passwords moved to KMS. */
+export type StudentExamRecord = StudentExamSummary;
 
 export const APPLICATION_NUMBER_MAX_LENGTH = 255;
 export const APPLICATION_PASSWORD_MAX_LENGTH = 255;

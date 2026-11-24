@@ -42,3 +42,34 @@ describe("matchView", () => {
     expect(matchView("/api/quiz-analytics//grades")).toBeNull();
   });
 });
+
+describe("student-support redaction", () => {
+  const view = (p: string) => LMS_VIEWS.find((v) => v.path === `/api/quiz-analytics/[udise]/${p}`)!;
+  const row = { uid: "1", name: "Asha", gender: "Female", category: "OBC", predicted: "M1", mode: "M2" };
+
+  it("drops each student's caste category from the Score journey", () => {
+    const body = { tests: [{ sessionId: "t1" }], students: [row, { ...row, uid: "2", category: null }] };
+    const out = view("student-support").redact!(body, { includeNotes: false }) as typeof body;
+    expect(out.tests).toEqual(body.tests);
+    expect(out.students).toEqual([
+      { uid: "1", name: "Asha", gender: "Female", predicted: "M1", mode: "M2" },
+      { uid: "2", name: "Asha", gender: "Female", predicted: "M1", mode: "M2" },
+    ]);
+    for (const s of out.students) {
+      expect(s).not.toHaveProperty("category");
+      expect(s).not.toHaveProperty("predictedPct");
+    }
+  });
+
+  it("drops the student's caste category from the report, even with notes asked for", () => {
+    const body = { student: row, chapters: [], tests: [] };
+    const out = view("student-report").redact!(body, { includeNotes: true }) as typeof body;
+    expect(out.student).toEqual({ uid: "1", name: "Asha", gender: "Female", predicted: "M1", mode: "M2" });
+    expect(out).toMatchObject({ chapters: [], tests: [] });
+  });
+
+  it("leaves an unexpected body as it is", () => {
+    expect(view("student-support").redact!({ error: "x" }, { includeNotes: false })).toEqual({ error: "x" });
+    expect(view("student-report").redact!(null, { includeNotes: false })).toBeNull();
+  });
+});

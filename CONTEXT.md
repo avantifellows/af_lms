@@ -161,12 +161,28 @@ Setting `deleted_at` timestamp instead of removing the row. Used for actions and
 _Avoid_: Archive, deactivate
 
 **School Visit Summary**:
-An admin-facing read-only dashboard for reviewing all visits across schools. Two pages: a filterable list view (`/school-visit-summary`) and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
+A manager-facing dashboard for reviewing visits across physical-centre Schools: a School-wise view of each School's Visit Concerns and Visit Highlights (with a per-School page), a filterable Visits list (`/school-visit-summary`), and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
 _Avoid_: Visit dashboard, visit report, visit overview
 
 **Remark**:
 A freeform text note attached to a question answer within an action's JSONB `data` payload. Used as "visit notes" on the summary detail page.
 _Avoid_: Note, comment (these imply a separate entity; remarks live inside action data)
+
+**Visit Concern**:
+A durable record of one problem, gap, request or risk needing Avanti's action at a School, distilled from the free text of one or more completed Visits. It keeps its identity as later Visits mention it again, and is either open or resolved.
+_Avoid_: Issue, ticket, theme, remark (a Remark is the raw text; a Visit Concern is what it says)
+
+**Visit Highlight**:
+A durable record of something going well at a School, distilled from the free text of one or more completed Visits. It has no resolve lifecycle.
+_Avoid_: Strength, positive, theme
+
+**Recurring Concern**:
+An open Visit Concern mentioned in two or more distinct Visits among those currently in view, so whether a concern recurs depends on the active filters.
+_Avoid_: Repeated issue, persistent concern
+
+**Concern Resolution**:
+The act of marking a Visit Concern resolved with a required explanation. Resolutions, comments and reopens form the Concern's permanent history; nothing in it is edited or deleted.
+_Avoid_: Closing, dismissal, fix
 
 ### Roles & Access
 
@@ -270,6 +286,14 @@ _Avoid_: Session log, multiple interaction entries, Follow-up Note, Academic Men
 An immutable, timestamped answer set recording one extra offline conversation with a Holistic Mentee in a Holistic Phase whose Post-Session Notes are already submitted. A Mentee and Phase may have many.
 _Avoid_: Additional Notes, Check-in Notes, extra Post-Session Notes, session log
 
+**Dictation**:
+A Holistic Mentor's spoken words turned into English text and added to a Post-Session Notes or Follow-up Note answer they are editing. Speech in any other language is translated in full, never summarised. The audio is not kept.
+_Avoid_: Voice note, voice-to-text, speech note, Call Recording
+
+**Dictation Usage Record**:
+The content-free record of one Dictation recording passed on for transcription: who dictated, where, for how long, and whether it worked.
+_Avoid_: Transcript log, Dictation history, audio log
+
 **Challenge Category**:
 One fixed, coded Academic or Non-academic classification of a challenge a Holistic Mentor selects for a Holistic Mentee in Post-Session Notes.
 _Avoid_: Tag, challenge tag, issue type
@@ -309,7 +333,7 @@ A staff User with the dedicated Blended Learning Mentor LMS role who is responsi
 _Avoid_: Holistic Mentor, Academic Mentor, counsellor, POC
 
 **Blended Learning Admin**:
-A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag, view only: either an LMS Admin or a User with the dedicated Blended Learning Admin role. Only Mentors log, upload or manage drafts; an admin never does.
+A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag: either an LMS Admin or a User with the dedicated Blended Learning Admin role. Only Mentors log, upload or manage drafts; an admin never does. An admin who is not read-only manages Resources and Common Action Items.
 _Avoid_: Program lead, mentor manager
 
 **Blended Learning Mentee**:
@@ -341,8 +365,16 @@ The queued, running, completed, or failed record the LMS creates after a Call Re
 _Avoid_: Regeneration Request, transcription job
 
 **Action Item**:
-A follow-up agreed in a Conversation, owned by the Student, the Mentor, or the Parent, that stays open until a later Conversation marks it done.
+A follow-up agreed in a Conversation, or pushed from a Common Action Item, owned by the Student, the Mentor, or the Parent, that stays open until a later Conversation marks it done.
 _Avoid_: Action (that is a School Visit term), task, to-do
+
+**Common Action Item**:
+An Action Item a Blended Learning Admin pushes to a target (every Mentee, one grade, one Mentor's Mentees, or Student IDs the admin pastes). Pushing adds it, then and there, as one open Action Item for each targeted Mentee, tagged "From program"; Mentees mapped later get it only when the admin pushes it again. Editing it changes the still-open ones; removing it deletes them and keeps the done ones.
+_Avoid_: template, broadcast, recurring task
+
+**Resource**:
+A titled link on the Mentors' Resources tab, in an order the Blended Learning Admins set on the Manage page.
+_Avoid_: Mentor Toolkit (one Resource), Profile Doc
 
 **Mentor Flag**:
 A concern raised on one Conversation for one Flag Recipient, with an optional comment. A Conversation can carry several.
@@ -511,8 +543,9 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - Legacy Student Profile data may use a different identifier contract, so historical migration must map its source identifiers explicitly and must not silently fall back from canonical User ID to business Student ID
 - V1 Student Profile generation sends every answered questionnaire Question and its human-readable answer to the approved OpenRouter model, regardless of Quiz priority, but excludes the Student's name, User ID, Student ID, School, and other direct LMS identifiers from the external payload
 - V1 does not expose raw **Holistic Student Profile Questionnaire** answers in LMS; Mentors and Mentorship Admins see the generated Student Profile summary, while technical investigation uses the protected source system
-- V1 OpenRouter requests prefer Zero Data Retention; if ZDR routing is unavailable they may fall back only with provider data collection denied and OpenRouter prompt/response logging disabled
-- V1 external AI processing is limited to **Holistic Student Profile Questionnaire** answers; Post-Session Notes, Phase Guidance, Mentor-Mentee Mappings, School data, and other LMS records are not sent to OpenRouter
+- V1 Student Profile OpenRouter requests prefer Zero Data Retention; if ZDR routing is unavailable they may fall back only with provider data collection denied and OpenRouter prompt/response logging disabled. **Dictation** translation requests use zero-retention routing only, with no fallback
+- External processing of Holistic Mentorship content is limited to three cases: **Holistic Student Profile Questionnaire** answers sent to OpenRouter for Student Profile generation; **Dictation** audio sent to ElevenLabs for speech-to-text; and the text of a **Dictation** recording that is not already English sent to OpenRouter, and on to the model host, for translation into English (ADR 0013). Saved Post-Session Notes and Follow-up Note text, Phase Guidance, Mentor-Mentee Mappings, School data, and other LMS records are not sent to any external AI service
+- **Dictation** audio, transcripts and translations are not stored by LMS. Audio goes only to ElevenLabs; ElevenLabs zero retention is not in place at launch and is switched on once the account supports it, so until then the provider's standard retention applies to that audio. Dictation text sent for translation may describe Students, who are minors
 - V1 Holistic Mentorship storage keeps the generated Student Profile summary and its provenance but does not duplicate the raw questionnaire answers held by the existing Quiz and BigQuery source path
 - Student Profile summaries and Post-Session Notes remain as historical records after a Student exits a School or Program or an academic year ends; former actors lose access through normal scope rules, while authorized Admin access remains
 - No LMS role may permanently erase a Student's Holistic Mentorship content; the former LMS privacy-erasure endpoint and action are disabled, and any source-system privacy request is coordinated outside LMS
@@ -610,6 +643,12 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A **Follow-up Note** has no draft and cannot be edited or deleted after it is saved; a correction is recorded as another Follow-up Note
 - A **Follow-up Note** records its author and system save time but no manually entered conversation date; a Mentee and Phase have no limit on Follow-up Notes
 - **Follow-up Notes** are readable by the same audience as submitted Post-Session Notes, appear only on their own Phase, do not feed Student Context, do not change Phase progress, and remain as history when a Mapping ends
+- **Dictation** is offered only where a Holistic Mentor can edit the answer: draft Post-Session Notes, the author's Edit of submitted Notes, and a new Follow-up Note; read-only viewers never see it, and Blended Learning and School Visit forms have no Dictation
+- **Dictation** text is always English (owner decision, 2026-11-16: many Mentors and readers speak Hindi but cannot read Devanagari). Speech-to-text output that is already English is used as returned; anything else is translated in full, with only hesitation sounds (uh, um) left out, and never summarised or rewritten. If the translation fails, the recording fails like a failed transcription and the untranslated text is never shown. The text is added to the end of the answer and from then on is ordinary answer text, saved and limited like typed text and carrying no mark that it was dictated
+- One **Dictation** recording lasts at most five minutes, and a Mentor may dictate at most thirty minutes in a day
+- Every **Dictation** recording that LMS passes on for transcription counts toward the day's thirty minutes, whether it returned text, failed, heard nothing, or the Mentor left before the text came back; a recording dropped before it is sent, or one LMS refuses before transcription (the Mentor is signed out or may not write those Notes, or the recording is empty, too long, too large, in an unsupported format, or over the day's time), does not count
+- Every **Dictation** recording passed on for transcription leaves one **Dictation Usage Record** holding the Mentor, School, Program, whether it was for Post-Session Notes or a Follow-up Note, audio seconds, characters returned, outcome, the language code the speech-to-text service reported, whether translation was not run, skipped, succeeded or failed, and time; it never holds the Student, the Question, the text, or the audio
+- **Post-Session Notes** cannot be submitted or saved, and a **Follow-up Note** cannot be saved, while a **Dictation** recording in that form is still being recorded or transcribed; the Mentor finishes dictating first, so the dictated words are part of what is saved. Leaving the form (Cancel, closing, or leaving the page) still drops a recording in progress
 - Draft **Post-Session Notes** allow partial answers and autosave with visible state, but opening or viewing a blank form does not persist data or freeze the Phase
 - An unfinished Notes draft and the fact that it has been saved are visible only to its author while they remain the current Mentor; Program Managers, Program Admins, Holistic Mentorship Admins, and Admins derive progress as though the draft does not exist (normally Pending, while an otherwise Skipped Phase remains Skipped) until Notes are submitted
 - If a Mapping ends before Notes submission, LMS warns when applicable, discards the draft content, records a content-free actor/time/reason audit event, and gives the replacement Mentor a blank form
@@ -748,7 +787,13 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A **Conversation** has zero or more **Action Items**, zero or more photo attachments, and zero or more **Mentor Flags**, at most one per **Flag Recipient**
 - A **Conversation Draft** becomes a **Conversation** only when the Mentor saves it; a draft does not change **Last Contact**, **Talk to First**, counts, or **Mentor Flags**; a Mentee has at most one open draft
 - A saved **Conversation** is not edited; a later Conversation can mark earlier **Action Items** done
+- An **Action Item** belongs to exactly one **Conversation** or one **Common Action Item**; a Mentee gets a **Common Action Item** at most once
 - A **Mentor Flag** to **Emotional Well-being** notifies its recipient by email without the notes or comment; Physics, Chemistry, and Maths Teacher flags notify no one until those people are named
+- The **School Visit Summary** covers only Schools with an active physical **Centre**; JNV NVS Students' data never appears on it
+- A **Visit Concern** or **Visit Highlight** belongs to one **School**, not a **Centre**, because a **Visit** is to a School
+- Only completed **Visits** contribute to **Visit Concerns** and **Visit Highlights**
+- A new mention of an existing **Visit Concern** attaches to it rather than creating a new one, so its **Concern Resolution** history stays with it
+- A resolved **Visit Concern** reopens automatically when a **Visit** dated after its resolution mentions it again; a Visit dated on or before the resolution never reopens it
 
 ## Example dialogue
 
@@ -775,3 +820,4 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - "flag": a **Mentor Flag** belongs to one Conversation and names a Flag Recipient; it is unrelated to the School roster's needs-intervention flag.
 - "action": an **Action** is part of a School Visit; an **Action Item** is a follow-up agreed in a Blended Learning **Conversation**.
 - "mentor" alone is ambiguous across Academic, Holistic, and Blended Learning Mentoring; always use the full term.
+- "voice note" / "voice-to-text": **Dictation** produces answer text in Holistic Mentorship and keeps no audio; a **Call Recording** is a kept audio file of a Blended Learning Conversation. Issue #500's "Post-Mentorship Notes" are **Post-Session Notes**.

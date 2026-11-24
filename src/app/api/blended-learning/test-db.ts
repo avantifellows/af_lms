@@ -20,6 +20,25 @@ export const MENTOR: BlendedLearningAccess = {
   mentorUserId: 9001,
 };
 
+// A team-lead Mentor who supervises the Mentor above: they view that
+// Mentor's Mentees (Student 501 included) and never write for them.
+export const SUPERVISOR: BlendedLearningAccess = {
+  kind: "mentor",
+  role: "blended_mentor",
+  readOnly: false,
+  actorEmail: "supervisor@test.local",
+  mentorUserId: 9003,
+  supervisedMentorUserIds: [9001],
+};
+
+// A Blended Learning Admin who may manage Resources and Common Action Items.
+export const ADMIN: BlendedLearningAccess = {
+  kind: "admin",
+  role: "blended_admin",
+  readOnly: false,
+  actorEmail: "admin@test.local",
+};
+
 export const READ_ONLY_ADMIN: BlendedLearningAccess = {
   kind: "admin",
   role: "blended_admin",

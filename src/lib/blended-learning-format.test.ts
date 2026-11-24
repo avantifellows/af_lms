@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeSession } from "./blended-learning-format";
+import { describeSession, shortProgramName } from "./blended-learning-format";
 
 describe("describeSession", () => {
   it.each([
@@ -10,4 +10,22 @@ describe("describeSession", () => {
   ] as const)("describes %o as the detail page's entry header", (session, expected) => {
     expect(describeSession(session)).toBe(expected);
   });
+});
+
+describe("shortProgramName", () => {
+  it.each([
+    ["STP Voucher Delhi", "Voucher DL"],
+    ["STP Dropper Himachal Pradesh", "Dropper HP"],
+    ["STP Dropper Punjab", "Dropper PB"],
+    ["STP Voucher Uttarakhand", "Voucher UK"],
+  ])("shortens %s to %s", (name, expected) => {
+    expect(shortProgramName(name)).toBe(expected);
+  });
+
+  it.each(["STP Voucher Haryana", "Voucher Delhi", "STP Delhi", "JNV Enable Students"])(
+    "keeps %s as it is",
+    (name) => {
+      expect(shortProgramName(name)).toBe(name);
+    }
+  );
 });

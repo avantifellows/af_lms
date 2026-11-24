@@ -320,6 +320,55 @@ export async function getBatchOverviewData(
   return { tests, ...summariseEnrolment(streamRows, stream) };
 }
 
+export interface StudentAcademicLevelCount {
+  grade: number;
+  // Raw `student_stream`; the caller canonicalises it.
+  stream: string | null;
+  // Null for a student dbt has not levelled yet (no AL-bearing test).
+  academicLevel: string | null;
+  students: number;
+}
+
+/**
+ * Current-year students at a School + programme, counted per grade, stream and
+ * dim_student.academic_level (the Visit Summary School page's academic-level
+ * cards, #470). Reads dim_student, so students with no test are counted too
+ * (with a null level). Every value is a query param.
+ */
+export async function getStudentAcademicLevelCounts(
+  udise: string,
+  program: string,
+  grades: readonly number[]
+): Promise<StudentAcademicLevelCount[]> {
+  const client = getBigQueryClient();
+  const query = `
+    SELECT
+      student_grade AS grade,
+      student_stream AS stream,
+      academic_level,
+      COUNT(DISTINCT enrollment_user_id) AS students
+    FROM ${DIM_STUDENT_TABLE}
+    WHERE academic_year = @academicYear
+      AND student_school_udise_code = @udise
+      AND student_program = @program
+      AND student_grade IN UNNEST(@grades)
+      AND enrollment_user_id IS NOT NULL
+    GROUP BY grade, stream, academic_level
+  `;
+  const [rows] = await client.query({
+    query,
+    params: { udise, program, grades: [...grades], academicYear: CURRENT_ACADEMIC_YEAR },
+  });
+  return (
+    rows as { grade: number; stream: string | null; academic_level: string | null; students: number }[]
+  ).map((r) => ({
+    grade: Number(r.grade),
+    stream: r.stream,
+    academicLevel: r.academic_level,
+    students: Number(r.students),
+  }));
+}
+
 /**
  * Per-student AL + per-test AL progression across all major-test formats, in
  * chronological order.
@@ -375,6 +424,7 @@ export async function getCumulativeALData(
       ANY_VALUE(f.test_name) AS test_name,
       MIN(f.start_date) AS start_date,
       ANY_VALUE(f.test_stream) AS test_stream,
+      ANY_VALUE(f.test_course) AS test_course,
       ANY_VALUE(f.academic_level) AS academic_level,
       ANY_VALUE(f.marks_scored) AS marks_scored,
       ANY_VALUE(f.max_marks_possible) AS max_marks_possible
@@ -413,6 +463,7 @@ export async function getCumulativeALData(
     test_name: string;
     start_date: string;
     test_stream: string | null;
+    test_course: string | null;
     academic_level: string;
     marks_scored: number | string | null;
     max_marks_possible: number | string | null;
@@ -450,6 +501,7 @@ export async function getCumulativeALData(
         test_name: r.test_name,
         start_date: startDate,
         stream: canonicalStream(r.test_stream),
+        course: r.test_course,
       });
     }
 

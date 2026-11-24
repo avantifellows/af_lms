@@ -27,7 +27,7 @@ const INSTRUCTIONS = `Avanti Fellows LMS, read-only, as the signed-in user: you 
 How to answer:
 - Start from list_my_schools to find a school's code/UDISE, then list_views, then get_view.
 - Curriculum: call /api/curriculum/options for a school first; it gives the program, exam tracks, grades and subjects the progress and chapters views require. Progress is keyed by chapter id; join it with /api/curriculum/chapters for chapter names.
-- Quiz analytics: /grades first (it lists the programs you may query; the other quiz views require one of them as the program parameter), then /batch-overview for the tests (each with a session_id), then /test-deep-dive or /cumulative-als.
+- Quiz analytics: /grades first (it lists the programs you may query; the other quiz views require one of them as the program parameter), then /batch-overview for the tests (each with a session_id), then /test-deep-dive; for a physical centre, /student-support for the cumulative report (Predicted vs Mode AL per student) and /student-report for one student.
 - Prefer aggregates (completion %, averages, counts) over per-student rows. Say which school, grade and program a figure covers.
 
 Student data: names and scores are visible to this user in the LMS, but don't copy per-student rows into documents, slides or messages unless the user explicitly asks for individual students.

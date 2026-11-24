@@ -38,6 +38,17 @@ shows only where it belongs: a physical-only feature must not appear on NVS scho
 for any role. If nobody can answer, stop and ask the issue author before building.
 (T-shirt sizes, #395, and the student card fields, #431, were physical-only and got built for NVS too.)
 
+## Before opening a PR — run the pre-PR review
+
+Follow **`.mex/patterns/pre-pr-review.md`** before opening any PR, or marking one ready for review, and when
+reviewing someone else's. Use a session or agent that didn't write the code. It runs what CI runs, compares the
+branch with its base on real cases (including empty and failing ones), recomputes every number the change shows
+across this year's data, and stops on any new data exposure. A diff-only read isn't a review: on #467 every unit test
+passed, and only running the branch proved and sized the problems the reviewers raised.
+
+How to run the reviewers and handle their findings is in **`.mex/patterns/review-with-agents.md`**. A finding is a
+claim until it's reproduced, and nothing is fixed or posted on GitHub without the go of the person running the review.
+
 ## After every task — run GROW
 
 - **Ground** — what actually changed in reality?

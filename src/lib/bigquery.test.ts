@@ -728,6 +728,49 @@ describe("getStudentTimeSpentData", () => {
   });
 });
 
+describe("getStudentAcademicLevelCounts", () => {
+  it("binds the School UDISE, programme label, grades and academic year instead of interpolating them", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getStudentAcademicLevelCounts } = await import("./bigquery");
+    await getStudentAcademicLevelCounts("23010100101", "JNV CoE", [11, 12]);
+
+    const call = mocks.mockQueryFn.mock.calls[0][0];
+    expect(call.params).toEqual({
+      udise: "23010100101",
+      program: "JNV CoE",
+      grades: [11, 12],
+      academicYear: "2026-2027",
+    });
+    expect(call.query).toContain("dim_student");
+    for (const value of ["23010100101", "JNV CoE", "2026-2027"]) {
+      expect(call.query).not.toContain(value);
+    }
+  });
+
+  it("returns one count per grade, stream and level, with numeric counts", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[
+      { grade: 11, stream: "Engineering", academic_level: "M1", students: 4 },
+      { grade: 11, stream: "engineering", academic_level: null, students: 2 },
+    ]]);
+
+    const { getStudentAcademicLevelCounts } = await import("./bigquery");
+    const rows = await getStudentAcademicLevelCounts("23010100101", "JNV CoE", [11]);
+
+    expect(rows).toEqual([
+      { grade: 11, stream: "Engineering", academicLevel: "M1", students: 4 },
+      { grade: 11, stream: "engineering", academicLevel: null, students: 2 },
+    ]);
+  });
+
+  it("propagates BQ errors to the caller", async () => {
+    mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ down"));
+
+    const { getStudentAcademicLevelCounts } = await import("./bigquery");
+    await expect(getStudentAcademicLevelCounts("23010100101", "JNV CoE", [11])).rejects.toThrow("BQ down");
+  });
+});
+
 describe("canonicalStream / streamDisplayLabel", () => {
   it("lowercases and trims stream values", async () => {
     const { canonicalStream } = await import("./bigquery");

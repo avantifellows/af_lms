@@ -124,7 +124,7 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | `pmu_manager` | No (pinned to JNV NVS) | Avanti's internal PMU team, working with JNV NVS Students across Schools |
 | `pmu_govt_school_user` | No (pinned to JNV NVS) | External stakeholder of one JNV NVS School (e.g. its principal), Google sign-in |
 | `blended_mentor` | No (stored as `[]`) | Blended Learning Mentor: sees and logs Conversations with only their own Mentees |
-| `blended_admin` | No (stored as `[]`) | Blended Learning Admin: every Mentor's Mentees, Mentor Flags, Call Recordings and transcripts; view only (never logs) |
+| `blended_admin` | No (stored as `[]`) | Blended Learning Admin: every Mentor's Mentees, Mentor Flags, Call Recordings and transcripts; never logs; manages Resources and Common Action Items unless read-only |
 | `alumni_manager` | No (stored as `{}`; alumni are reached by School) | Alumni team: views and updates alumni of their Schools, nothing else |
 
 ### PMU roles (JNV NVS pinned, ADR 0007)
@@ -158,7 +158,9 @@ page and API denies them (`getUserPermission` returns `null` for them).
 - **Policy:** `src/lib/blended-learning-access.ts` (`getBlendedLearningAccess`,
   `canBlendedLearning`, `canAccessBlendedStudent`). An LMS `admin` acts as a
   Blended Learning Admin. Only a Mentor who is not read-only logs, uploads or
-  manages drafts; every Blended Learning Admin is view only.
+  manages drafts; a Blended Learning Admin never does. The Manage page
+  (`manage`: Resources and Common Action Items) is for Blended Learning Admins
+  who are not read-only; Mentors and read-only admins get no tab and 403.
   Playing Call Recordings and reading transcripts and the Mentors tab are for
   Blended Learning Admins only (read-only ones included). The Flags feed shows an
   admin every flag and a Mentor only the flags on their own Students. A Student is
@@ -190,6 +192,13 @@ page and API denies them (`getUserPermission` returns `null` for them).
 | performance | view | view | view | view |
 | summary_stats | none | view | view | view |
 | pm_dashboard | none | view | view | view |
+| exam_passwords | view | view | view | view |
+
+`exam_passwords` is the right to reveal a Student's decrypted exam-portal password on the
+Edit Student Exams tab. It sits on top of the tab's own gate (edit rights on the Student,
+school-scoped, never a JNV NVS Student), so a teacher sees their schools' Students and a PM
+their assigned schools'. Every reveal is logged to `lms_exam_password_reveals`. Every other
+role is `none`.
 
 ### NVS-Only Users
 

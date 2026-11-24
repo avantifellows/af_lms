@@ -99,6 +99,8 @@ describe("validateEntry: Conversation", () => {
         flags: [],
         completeActionItemIds: [],
         draftId: null,
+        screenerUsed: null,
+        screenerFeedback: null,
       },
     });
   });
@@ -247,6 +249,63 @@ describe("validateEntry: Conversation", () => {
     expect(validateEntry({ ...CONVERSATION, draftId }, TODAY, STUDENT)).toEqual({
       ok: false,
       fieldErrors: { draftId: "This Conversation Draft isn't valid. Reload and try again." },
+    });
+  });
+});
+
+describe("validateEntry: the screener answer", () => {
+  const RATINGS = { helpedUnderstand: 1, moreComfortable: 5 };
+
+  function screener(body: Record<string, unknown>) {
+    const result = validateEntry({ ...CONVERSATION, ...body }, TODAY, STUDENT);
+    return result.ok && result.input.kind === "conversation"
+      ? { screenerUsed: result.input.screenerUsed, screenerFeedback: result.input.screenerFeedback }
+      : result;
+  }
+
+  it("keeps a ticked or unticked box, and no answer as null", () => {
+    expect(screener({ screenerUsed: true })).toEqual({ screenerUsed: true, screenerFeedback: null });
+    expect(screener({ screenerUsed: false })).toEqual({ screenerUsed: false, screenerFeedback: null });
+    expect(screener({ screenerUsed: null })).toEqual({ screenerUsed: null, screenerFeedback: null });
+  });
+
+  it("keeps both ratings with a ticked box", () => {
+    expect(screener({ screenerUsed: true, screenerFeedback: RATINGS })).toEqual({
+      screenerUsed: true,
+      screenerFeedback: RATINGS,
+    });
+  });
+
+  it.each([["yes"], [1]])("refuses a box answer of %j", (screenerUsed) => {
+    expect(screener({ screenerUsed })).toEqual({
+      ok: false,
+      fieldErrors: { screenerUsed: "Say whether the screener form was used." },
+    });
+  });
+
+  it.each([[false], [null]])("refuses ratings unless the box is ticked (%j)", (screenerUsed) => {
+    expect(screener({ screenerUsed, screenerFeedback: RATINGS })).toEqual({
+      ok: false,
+      fieldErrors: { screenerFeedback: "Screener feedback is only given when the screener form was used." },
+    });
+  });
+
+  it.each([[0], [6], [2.5], ["3"], [null]])("refuses a rating of %j, per question", (rating) => {
+    expect(screener({ screenerUsed: true, screenerFeedback: { helpedUnderstand: rating, moreComfortable: 3 } })).toEqual({
+      ok: false,
+      fieldErrors: { "screenerFeedback.helpedUnderstand": "Choose a rating from 1 (not at all) to 5 (a lot)." },
+    });
+  });
+
+  it("refuses a screener answer or feedback on an Attempt", () => {
+    expect(
+      validateEntry({ kind: "attempt", occurredOn: "2026-10-20", screenerUsed: false, screenerFeedback: RATINGS }, TODAY, STUDENT)
+    ).toEqual({
+      ok: false,
+      fieldErrors: {
+        screenerUsed: "Only a Conversation records whether the screener form was used.",
+        screenerFeedback: "Only a Conversation can give screener feedback.",
+      },
     });
   });
 });

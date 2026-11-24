@@ -81,10 +81,12 @@ import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 const TODAY = "2026-10-22";
 const OPEN_ITEMS = [
-  { id: 7, text: "Bring the admit card", owner: "student" as const, agreedOn: "2026-10-01" },
+  { id: 7, text: "Bring the admit card", owner: "student" as const, agreedOn: "2026-10-01", source: "conversation" as const },
 ];
 const MENTEE: MenteeRow = {
   studentId: 501,
+  programStudentId: null,
+  category: null,
   name: "Asha Rao",
   gender: null,
   grade: 11,
@@ -293,6 +295,25 @@ describe("LogEntryForm: Conversation", () => {
     expect(within(saved).getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning");
     // The page title stays above the confirmation.
     expect(screen.getByRole("heading", { level: 1, name: "Log a conversation" })).toBeInTheDocument();
+  });
+
+  it("lists a Profile Doc item with the others, marked as from the Profile Doc, and ticks it the same way", async () => {
+    renderForm({
+      openActionItems: [
+        ...OPEN_ITEMS,
+        { id: 8, text: "Synthetic: pay the hostel fee", owner: "parent", agreedOn: "2026-06-14", source: "profile_doc" },
+      ],
+    });
+    const panel = screen.getByRole("region", { name: "Open Action Items" });
+    expect(within(panel).getByText("From 1 Oct 2026")).toBeInTheDocument();
+    expect(within(panel).getByText("From Profile Doc · 14 Jun 2026")).toBeInTheDocument();
+    await fillConversation();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Synthetic: pay the hostel fee/ }));
+
+    answer({ entry: { id: 9 }, mentee: MENTEE });
+    await save();
+
+    expect(sentBody()).toMatchObject({ completeActionItemIds: [8] });
   });
 
   it("sends a Conversation's photo, Mentor Flags, ticks and notes, and lists them once saved", async () => {
@@ -644,5 +665,118 @@ describe("LogEntryForm: required fields", () => {
     await userEvent.clear(screen.getByLabelText("Date"));
     expect(save).toBeDisabled();
     expect(save).toHaveAccessibleDescription("To save, fill in: Date.");
+  });
+});
+
+describe("LogEntryForm: Screener", () => {
+  const DUE = { hasLink: true, feedbackDue: true };
+  const QUESTION = "Was the screener form used?";
+  const HELPED = "Did the screener help you understand this student better?";
+  const COMFORTABLE = "Did the student seem more comfortable talking to you than before?";
+
+  it("doesn't ask without a Screener link, or on an Attempt", async () => {
+    const { unmount } = renderForm();
+    expect(screen.queryByRole("checkbox", { name: QUESTION })).not.toBeInTheDocument();
+    unmount();
+
+    renderForm({ screener: DUE });
+    expect(screen.getByRole("checkbox", { name: QUESTION })).not.toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: "Attempt" }));
+    expect(screen.queryByRole("checkbox", { name: QUESTION })).not.toBeInTheDocument();
+  });
+
+  it("asks the two required 1-5 questions once ticked, and sends them with the tick", async () => {
+    renderForm({ screener: DUE });
+    await fillConversation();
+    expect(screen.queryByRole("region", { name: "Screener feedback" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: QUESTION }));
+    const feedback = screen.getByRole("region", { name: "Screener feedback" });
+    const helped = within(feedback).getByRole("group", { name: HELPED });
+    const comfortable = within(feedback).getByRole("group", { name: COMFORTABLE });
+    expect(within(helped).getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual([
+      "1, Not at all", "2", "3", "4", "5, A lot",
+    ]);
+    expect(screen.getByRole("button", { name: "Save conversation" })).toBeDisabled();
+    expect(screen.getByText("To save, fill in: Screener ratings.")).toBeInTheDocument();
+
+    await userEvent.click(within(helped).getByRole("radio", { name: "4" }));
+    await userEvent.click(within(comfortable).getByRole("radio", { name: "5, A lot" }));
+    answer({ entry: { id: 9 }, mentee: MENTEE });
+    await save();
+
+    expect(sentBody()).toMatchObject({ screenerUsed: true, screenerFeedback: { helpedUnderstand: 4, moreComfortable: 5 } });
+  });
+
+  it("sends an unticked box as false, without ratings", async () => {
+    renderForm({ screener: DUE });
+    await fillConversation();
+    answer({ entry: { id: 9 }, mentee: MENTEE });
+    await save();
+    expect(sentBody()).toMatchObject({ screenerUsed: false });
+    expect(sentBody()).not.toHaveProperty("screenerFeedback");
+  });
+
+  it("records only the tick when the Student already has feedback", async () => {
+    renderForm({ screener: { hasLink: true, feedbackDue: false } });
+    await fillConversation();
+    await userEvent.click(screen.getByRole("checkbox", { name: QUESTION }));
+    expect(screen.queryByRole("region", { name: "Screener feedback" })).not.toBeInTheDocument();
+
+    answer({ entry: { id: 9 }, mentee: MENTEE });
+    await save();
+    expect(sentBody()).toMatchObject({ screenerUsed: true });
+    expect(sentBody()).not.toHaveProperty("screenerFeedback");
+  });
+
+  it("drops the questions when a save finds the feedback already given, and saves the tick on retry", async () => {
+    renderForm({ screener: DUE, draft: DRAFT });
+    await userEvent.click(screen.getByRole("checkbox", { name: QUESTION }));
+    const feedback = screen.getByRole("region", { name: "Screener feedback" });
+    await userEvent.click(within(within(feedback).getByRole("group", { name: HELPED })).getByRole("radio", { name: "2" }));
+    await userEvent.click(within(within(feedback).getByRole("group", { name: COMFORTABLE })).getByRole("radio", { name: "3" }));
+
+    const given = "Screener feedback for this student was already saved, so it isn't asked again. Save again to log this conversation.";
+    answer({ error: given, fieldErrors: { screenerFeedback: given } }, 409);
+    await save();
+
+    expect(await screen.findByText(given)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Screener feedback" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: QUESTION })).toBeChecked();
+
+    answer({ entry: { id: 12 }, mentee: MENTEE });
+    await save();
+    const [, retry] = mockFetch.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(String(retry.body))).toMatchObject({ draftId: 44, screenerUsed: true });
+    expect(JSON.parse(String(retry.body))).not.toHaveProperty("screenerFeedback");
+  });
+
+  // The form didn't ask (no Screener link), so no field shows the error; it
+  // must not be silent.
+  it("shows an error for a question the form doesn't ask in the save bar", async () => {
+    renderForm();
+    await fillConversation();
+    const unasked = "Say whether the screener form was used.";
+    answer({ error: unasked, fieldErrors: { screenerUsed: unasked } }, 422);
+    await save();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(unasked);
+    expect(screen.getByRole("button", { name: "Save conversation" })).toBeEnabled();
+  });
+
+  it("shows a missing rating's error under its question", async () => {
+    renderForm({ screener: DUE });
+    await fillConversation();
+    await userEvent.click(screen.getByRole("checkbox", { name: QUESTION }));
+    const feedback = screen.getByRole("region", { name: "Screener feedback" });
+    await userEvent.click(within(within(feedback).getByRole("group", { name: HELPED })).getByRole("radio", { name: "1, Not at all" }));
+    await userEvent.click(within(within(feedback).getByRole("group", { name: COMFORTABLE })).getByRole("radio", { name: "2" }));
+
+    answer({ error: "x", fieldErrors: { "screenerFeedback.moreComfortable": "Choose a rating from 1 (not at all) to 5 (a lot)." } }, 422);
+    await save();
+
+    expect(
+      await within(screen.getByRole("group", { name: COMFORTABLE })).findByText("Choose a rating from 1 (not at all) to 5 (a lot).")
+    ).toBeInTheDocument();
   });
 });
