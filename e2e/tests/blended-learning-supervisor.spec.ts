@@ -89,7 +89,7 @@ test.describe("Blended Learning supervisor view", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Team" })).toBeAttached();
     // The Flags badge counts the supervised Mentor's Students' new flags too (Tara's two).
     const tabs = page.getByRole("navigation", { name: "Mentor views" });
-    await expect(tabs.getByRole("link")).toHaveText(["Team", "My Students", "Flags2 new", "Resources"]);
+    await expect(tabs.getByRole("link")).toHaveText(["Team", "My Students", "JEE Form", "Flags2 new", "Resources"]);
     await expect(tabs.getByRole("link", { name: "Team" })).toHaveAttribute("aria-current", "page");
     // Mentor A's Supervision has ended: no card for them.
     await expect(teamCards(page)).toHaveCount(2);
@@ -184,6 +184,9 @@ test.describe("Blended Learning supervisor view", () => {
     // No way to log at all: not a link, and not a greyed-out button either.
     await expect(page.getByRole("link", { name: "Log conversation" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Log conversation" })).toHaveCount(0);
+    // The JEE form is full scope only: no status line and no JEE tab link.
+    await expect(page.getByRole("region", { name: "JEE Main 2027 form" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /JEE tab/ })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^Back to .*'s students$/ })).toHaveAttribute(
       "href",
       `/blended-learning/mentors/${mentorBId}`
@@ -226,6 +229,7 @@ test.describe("Blended Learning supervisor view", () => {
 
     await expect(page.getByRole("note")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Log conversation" }).first()).toBeVisible();
+    await expect(page.getByRole("region", { name: "JEE Main 2027 form" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning?tab=students");
   });
 
@@ -243,6 +247,18 @@ test.describe("Blended Learning supervisor view", () => {
     });
     expect(upload.status()).toBe(404);
     expect(await conversationCount(taraId)).toBe(before);
+
+    // The JEE form is full scope only: no recording, revealing or reading it.
+    const jee = await page.request.post(`/api/blended-learning/students/${taraId}/jee-form`, {
+      multipart: { status: "not_filled", reasons: "not_aware" },
+    });
+    expect(jee.status()).toBe(404);
+    const reveal = await page.request.post(`/api/blended-learning/students/${taraId}/jee-form/password`);
+    expect(reveal.status()).toBe(403);
+    const confirmation = await page.request.get(`/api/blended-learning/students/${taraId}/jee-form/confirmation`, {
+      maxRedirects: 0,
+    });
+    expect(confirmation.status()).toBe(404);
 
     const notes = await page.request.get(`/api/blended-learning/conversations/${await firstConversation(taraId)}/notes`);
     expect(notes.status()).toBe(200);
