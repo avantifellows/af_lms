@@ -145,6 +145,7 @@ jobs:
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
             --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg alumni_journey "on" \
             --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
             --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
             --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
@@ -196,6 +197,7 @@ jobs:
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
               HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              ALUMNI_JOURNEY: $alumni_journey,
               HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
               HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
               HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,
@@ -373,6 +375,7 @@ jobs:
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
             --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg alumni_journey "on" \
             --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
             --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
             --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
@@ -424,6 +427,7 @@ jobs:
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
               HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              ALUMNI_JOURNEY: $alumni_journey,
               HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
               HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
               HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,

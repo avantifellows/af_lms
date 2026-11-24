@@ -26,6 +26,8 @@ frontend:
           echo "BLENDED_LEARNING_SES_REGION=$BLENDED_LEARNING_SES_REGION" >> .env.production
           echo "BLENDED_LEARNING_WELLBEING_EMAILS=$BLENDED_LEARNING_WELLBEING_EMAILS" >> .env.production
           echo "HOLISTIC_DICTATION_ENABLED=$HOLISTIC_DICTATION_ENABLED" >> .env.production
+          # Alumni history (needs DB Service #867): "on" for staging previews only, unset in production.
+          echo "ALUMNI_JOURNEY=$ALUMNI_JOURNEY" >> .env.production
           echo "HOLISTIC_DICTATION_ELEVENLABS_API_KEY=$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" >> .env.production
           echo "HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION=$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" >> .env.production
           echo "HOLISTIC_DICTATION_OPENROUTER_API_KEY=$HOLISTIC_DICTATION_OPENROUTER_API_KEY" >> .env.production
