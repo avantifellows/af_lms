@@ -15,6 +15,10 @@ vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/alumni/schools", () => ({ getSchoolName: vi.fn() }));
 vi.mock("@/lib/alumni/access", () => ({ reachesSchool: vi.fn() }));
+// The History panel has its own tests; here it's a marker of who gets the button.
+vi.mock("@/components/alumni/MassRestore", () => ({
+  default: ({ scopeLabel }: { scopeLabel: string }) => <div>history for {scopeLabel}</div>,
+}));
 vi.mock("@/components/alumni/AlumniTab", () => ({
   default: ({ schoolCode, canEdit }: { schoolCode: string; canEdit?: boolean }) => (
     <div data-testid="alumni-tab" data-can-edit={String(canEdit)}>tab for {schoolCode}</div>
@@ -62,6 +66,12 @@ describe("Alumni school page", () => {
     vi.mocked(getAlumniPermission).mockResolvedValueOnce({ ...manager, read_only: true });
     render(await open());
     expect(screen.getByTestId("alumni-tab")).toHaveAttribute("data-can-edit", "false");
+    expect(screen.queryByText(/history for/)).not.toBeInTheDocument();
+  });
+
+  it("gives an editor the school's History", async () => {
+    render(await open());
+    expect(screen.getByText("history for RSMS Bathinda's alumni")).toBeInTheDocument();
   });
 
   it("refuses a school out of scope, and roles without the alumni feature", async () => {

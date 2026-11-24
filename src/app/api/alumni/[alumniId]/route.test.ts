@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -89,13 +89,18 @@ describe("POST /api/alumni/[alumniId]", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("updates the row (PATCH) with only the changed field", async () => {
+  it("saves the changed field as a call by the person (answers + history together)", async () => {
     const res = await post({ values: { ug_status: "Studying", which_competitive_exam_did_you_appear_for: "State CET" }, version: "v1" });
     expect(await res.json()).toMatchObject({ action: "updated" });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://db.test/api/alumni/8340");
-    expect(init.method).toBe("PATCH");
-    expect(JSON.parse(init.body)).toEqual({ which_competitive_exam_did_you_appear_for: "State CET" });
+    expect(url).toBe("https://db.test/api/alumni/8340/journey");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toMatchObject({
+      source: "call",
+      data: { which_competitive_exam_did_you_appear_for: "State CET" },
+      actor_email: "caller@avantifellows.org",
+      actor_role: "alumni_manager",
+    });
   });
 
   it("never erases a saved value: blanking a field alone is refused", async () => {
@@ -112,24 +117,15 @@ describe("POST /api/alumni/[alumniId]", () => {
   });
 
   describe("call remark", () => {
-    afterEach(() => vi.unstubAllEnvs());
     const values = { ug_status: "Studying", which_competitive_exam_did_you_appear_for: "Other" };
 
-    it("is refused while alumni history is off (it would be lost)", async () => {
-      const res = await post({ values, version: "v1", remark: { option: "Wrong Phone number", details: "" } });
-      expect(res.status).toBe(400);
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
     it("Other without its text is a field error", async () => {
-      vi.stubEnv("ALUMNI_JOURNEY", "on");
       const res = await post({ values, version: "v1", remark: { option: "Other", details: "" } });
       expect(res.status).toBe(400);
       expect((await res.json()).fieldErrors).toEqual({ remark: "Write the remark." });
     });
 
     it("with history on, a remark alone is saved as the call's history row", async () => {
-      vi.stubEnv("ALUMNI_JOURNEY", "on");
       vi.mocked(query).mockResolvedValue([{ id: "8340", data: {}, contact_status: null, version: "v1" }]);
       const res = await post({ values, version: "v1", remark: { option: "Preparing for other exams", details: "GATE" } });
       expect(await res.json()).toMatchObject({ ok: true, changed: [], remark: "Preparing for other exams: GATE" });

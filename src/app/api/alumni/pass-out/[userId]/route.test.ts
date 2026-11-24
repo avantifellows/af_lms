@@ -113,17 +113,17 @@ describe("POST /api/alumni/pass-out/[userId]", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("creates a new alumni row through the DB Service (POST), sending only filled fields", async () => {
+  it("adds the alumnus (an empty record, then a call with only the filled fields)", async () => {
     const res = await post({
       values: { ug_status: "Studying", college_id_ug: "C-19609", degree_ug: "BTech/BE", start_year_ug: "2026", pg_status: "" },
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, alumniId: "8340", action: "inserted" });
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://db.test/api/alumni");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({
-      student_id: 86544,
+    const [[createUrl, create], [callUrl, call]] = fetchMock.mock.calls;
+    expect(createUrl).toBe("https://db.test/api/alumni");
+    expect(JSON.parse(create.body)).toEqual({ student_id: 86544 });
+    expect(callUrl).toBe("https://db.test/api/alumni/8340/journey");
+    expect(JSON.parse(call.body).data).toEqual({
       ug_status: "Studying",
       college_id_ug: 40947,
       degree_ug: "BTech/BE",
@@ -152,7 +152,7 @@ describe("POST /api/alumni/pass-out/[userId]", () => {
 
     const second = await post({ values: { ug_status: "Studying", start_year_ug: "2025" }, confirmed: ["ug-before-g12"] });
     expect(second.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // the empty record, then the call
   });
 
   it("rejects an unknown college code", async () => {

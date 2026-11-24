@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/alumni/access", () => ({ authorizeAlumni: vi.fn() }));
 vi.mock("@/lib/alumni/mass-restore", () => ({ findMarker: vi.fn(), listHistory: vi.fn(), planRestore: vi.fn(), runRestore: vi.fn() }));
@@ -19,13 +19,11 @@ const MARKER = { id: "40", at: "2026-11-23T11:40:00Z" };
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("ALUMNI_JOURNEY", "on");
   vi.mocked(authorizeAlumni).mockResolvedValue({ ok: true, email: "a@avantifellows.org", permission: perm() });
   vi.mocked(planRestore).mockResolvedValue({ items: [], addedAfter: [] });
   vi.mocked(runRestore).mockResolvedValue([]);
   vi.mocked(findMarker).mockImplementation(async (id) => (id === "40" ? MARKER : null));
 });
-afterEach(() => vi.unstubAllEnvs());
 
 describe("POST /api/alumni/restore", () => {
   it("a school needs edit access to that school", async () => {
@@ -66,11 +64,6 @@ describe("POST /api/alumni/restore", () => {
     expect(listHistory).toHaveBeenCalledWith({ kind: "school", code: "59525" });
     vi.mocked(authorizeAlumni).mockResolvedValue({ ok: true, email: "m@x", permission: perm({ role: "alumni_manager", level: 1 }) });
     expect((await post({ scope: { kind: "all" }, history: true })).status).toBe(403);
-  });
-
-  it("is off while alumni history is off", async () => {
-    vi.stubEnv("ALUMNI_JOURNEY", "");
-    expect((await post({ scope: { kind: "all" }, beforeId: AT, dryRun: true })).status).toBe(404);
   });
 
   it("restores 1–25 alumni at a time as the signed-in person", async () => {

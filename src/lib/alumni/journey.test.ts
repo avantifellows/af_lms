@@ -6,7 +6,7 @@ vi.mock("@/lib/db-service-config", () => ({ getDbServiceConfig: vi.fn() }));
 import { query } from "@/lib/db";
 import { getDbServiceConfig } from "@/lib/db-service-config";
 import type { EntryContext } from "./entry";
-import { journeyEnabled, loadJourney, postJourney, revertToJourney } from "./journey";
+import { loadJourney, postJourney, revertToJourney } from "./journey";
 
 const mockQuery = vi.mocked(query);
 const mockFetch = vi.fn();
@@ -48,16 +48,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
-});
-
-describe("journeyEnabled", () => {
-  it("is off unless ALUMNI_JOURNEY=on", () => {
-    vi.stubEnv("ALUMNI_JOURNEY", "");
-    expect(journeyEnabled()).toBe(false);
-    vi.stubEnv("ALUMNI_JOURNEY", "on");
-    expect(journeyEnabled()).toBe(true);
-  });
 });
 
 describe("postJourney", () => {

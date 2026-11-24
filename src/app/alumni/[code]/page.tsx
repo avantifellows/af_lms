@@ -8,7 +8,6 @@ import { getAlumniPermission, getFeatureAccess } from "@/lib/permissions";
 import AlumniShell, { AlumniNotice } from "@/components/alumni/AlumniShell";
 import AlumniTab from "@/components/alumni/AlumniTab";
 import MassRestore from "@/components/alumni/MassRestore";
-import { journeyEnabled } from "@/lib/alumni/journey";
 
 // One school's alumni: pass-outs to add and existing alumni (the same view as
 // the school page's Alumni tab), for anyone with the alumni feature.
@@ -41,7 +40,7 @@ export default async function AlumniSchoolPage({ params }: { params: Promise<{ c
       showHome={!isAlumniRole(permission?.role)}
       back
       actions={
-        journeyEnabled() && access?.canEdit ? <MassRestore scope={{ kind: "school", code }} scopeLabel={`${name}'s alumni`} /> : null
+        access?.canEdit ? <MassRestore scope={{ kind: "school", code }} scopeLabel={`${name}'s alumni`} /> : null
       }
     >
       <AlumniTab schoolCode={code} canEdit={access?.canEdit ?? false} />

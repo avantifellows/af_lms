@@ -4,17 +4,15 @@ import { needsConfirm, type Issue } from "./checks";
 import { CODE_COLUMNS, type EntryContext } from "./entry";
 import { ALUMNI_FIELDS, type Values } from "./fields";
 import { lookupCodes, type CodeLookup } from "./reference";
-import { journeyEnabled, postJourney, type JourneyNote } from "./journey";
+import { postJourney, type JourneyNote } from "./journey";
 import { checkContext, reviewSave } from "./validation";
 
 // Saving one student's alumni answers. Nothing from the browser is trusted
 // except the answers, and those are re-checked here; who the student is,
 // new vs edit, and what's on record all come fresh from Postgres.
 //
-// The write goes to the DB Service (never Postgres directly):
-//   - no alumni row yet → POST  {DB_SERVICE_URL}/alumni      { student_id, ...fields }
-//   - row exists        → PATCH {DB_SERVICE_URL}/alumni/:id  { ...fields }
-// With alumni history on (journey.ts), every save is a call instead:
+// The write goes to the DB Service (never Postgres directly), as a call that
+// also adds the alumnus's history row (journey.ts):
 //   - no alumni row yet → POST {DB_SERVICE_URL}/alumni { student_id } (empty),
 //                         then the answers as below, so the history says who added them
 //   - row exists        → POST {DB_SERVICE_URL}/alumni/:id/journey { data: fields, ... }
@@ -86,11 +84,11 @@ function toDbFields(changed: string[], values: Values, codes: CodeLookup): Recor
 
 type Sent = { ok: true; alumniId: string; action: "inserted" | "updated" } | Failure;
 
-/** POST a new alumni row or PATCH the existing one (looked up fresh — it may be new since the form opened). */
+/** Saves the answers as a call, on the alumni row looked up fresh (it may be new since the form opened). */
 async function sendToDbService(
   context: EntryContext,
   fields: Record<string, string | number>,
-  journey?: JourneyNote,
+  journey: JourneyNote,
 ): Promise<Sent> {
   const dbService = getDbServiceConfig();
   if (!dbService) return { ok: false, status: 503, error: "DB Service is not configured." };
@@ -104,26 +102,10 @@ async function sendToDbService(
   // way round): writing now would merge these answers, unchecked, into a
   // record the person never saw.
   if (Boolean(existing) !== (context.kind === "edit")) return CONFLICT;
-  if (journey && journeyEnabled()) return sendAsCall(context, existing?.id, fields, journey);
-  const request = existing
-    ? { url: `${dbService.baseUrl}/alumni/${existing.id}`, method: "PATCH", body: fields }
-    : { url: `${dbService.baseUrl}/alumni`, method: "POST", body: { student_id: Number(studentId), ...fields } };
-  const response = await fetch(request.url, {
-    method: request.method,
-    headers: dbService.headers,
-    body: JSON.stringify(request.body),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("[alumni] DB service error:", response.status, text.slice(0, 500));
-    return { ok: false, status: 502, error: `Couldn't save — the DB Service answered ${response.status}.` };
-  }
-  const saved = (await response.json()) as { id: number | string };
-  return { ok: true, alumniId: String(saved.id), action: existing ? "updated" : "inserted" };
+  return sendAsCall(context, existing?.id, fields, journey);
 }
 
-/** The save as a call through the journey endpoint (alumni history on). */
+/** The save as a call through the journey endpoint. */
 async function sendAsCall(
   context: EntryContext,
   existingId: string | undefined,
@@ -216,19 +198,19 @@ export const fieldLabels = (columns: string[]) => columns.map((c) => FIELD.get(c
  * to check school access). `confirmed`: ids of the unusual-answer warnings the
  * person has accepted; any other warning stops the save and is sent back.
  * `version`: the record's version when the form loaded it (edits must send it).
- * `journey`: who is saving and how, for the history row (when it's on).
+ * `journey`: who is saving and how, for the history row.
  */
 export async function saveAlumni(
   context: EntryContext,
   submitted: Values,
-  confirmed: string[] = [],
-  version?: string,
-  journey?: JourneyNote,
+  confirmed: string[],
+  version: string | undefined,
+  journey: JourneyNote,
 ): Promise<SaveResult> {
   const prepared = await prepareSave(context, submitted, confirmed, version);
   if (!prepared.ok) {
     // A call where nothing changed but something happened ("Wrong phone number").
-    if (prepared.nothing && journey?.notes && journeyEnabled() && context.kind === "edit") {
+    if (prepared.nothing && journey.notes && context.kind === "edit") {
       return saveRemarkOnly(context, journey, prepared.notCleared ?? []);
     }
     return prepared;
@@ -239,7 +221,7 @@ export async function saveAlumni(
   if (!sent.ok) return sent;
   return {
     ...sent,
-    ...(journey?.notes ? { remark: journey.notes } : {}),
+    ...(journey.notes ? { remark: journey.notes } : {}),
     version: await currentVersion(sent.alumniId),
     changed: fieldLabels(changed),
     notCleared: fieldLabels(notCleared),

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import type { EntryContext } from "./entry";
-import { journeyEnabled } from "./journey";
 import { remarkNote, type Remark } from "./remarks";
 import { saveAlumni } from "./save";
 
@@ -53,9 +52,6 @@ export async function respondWithSave(context: EntryContext, body: SaveBody, act
   const remark = remarkNote(body.remark);
   if ("error" in remark) {
     return NextResponse.json({ error: "Some fields need fixing.", fieldErrors: { remark: remark.error } }, { status: 400 });
-  }
-  if (remark.note && !journeyEnabled()) {
-    return NextResponse.json({ error: "Remarks can't be saved yet (alumni history is off)." }, { status: 400 });
   }
   try {
     const journey = {

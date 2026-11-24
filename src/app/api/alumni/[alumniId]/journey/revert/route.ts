@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authorizeAlumnus } from "@/lib/alumni/access";
 import { getAlumnusContext } from "@/lib/alumni/entry";
-import { journeyEnabled, revertToJourney } from "@/lib/alumni/journey";
+import { revertToJourney } from "@/lib/alumni/journey";
 
 // Restore this alumnus's record to an earlier history entry:
 // { journeyId, version }. Needs edit access, like a save.
@@ -10,7 +10,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ alu
   const { alumniId } = await params;
   const auth = await authorizeAlumnus(alumniId, true);
   if (!auth.ok) return auth.response;
-  if (!journeyEnabled()) return NextResponse.json({ error: "History is not turned on." }, { status: 404 });
 
   let body: { journeyId?: unknown; version?: unknown };
   try {

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { authorizeAlumni } from "@/lib/alumni/access";
-import { journeyEnabled } from "@/lib/alumni/journey";
 import { loadPassOut, type PassOutLoad } from "@/lib/alumni/pass-out";
 import { readSaveBody, respondWithSave } from "@/lib/alumni/save-request";
 
@@ -17,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ use
   const auth = await authorizeAlumni();
   if (!auth.ok) return auth.response;
   const loaded = await loadPassOut((await params).userId, auth.permission);
-  return loaded.ok ? NextResponse.json({ ...loaded.context, journeyEnabled: journeyEnabled() }) : refusal(loaded);
+  return loaded.ok ? NextResponse.json(loaded.context) : refusal(loaded);
 }
 
 /** Add this pass-out to the alumni table through the DB Service: { values, confirmed? }. */

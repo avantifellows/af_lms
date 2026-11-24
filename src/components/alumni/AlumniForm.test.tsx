@@ -193,16 +193,16 @@ describe("AlumniForm", () => {
     expect(postedBody().version).toBe("v1");
   });
 
-  it("has no call remark while alumni history is off", async () => {
+  it("has no call remark for view-only access", async () => {
     server(context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version: "v1" }));
-    render(<AlumniForm entry={ALUMNUS} />);
+    render(<AlumniForm entry={ALUMNUS} canEdit={false} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
     expect(screen.queryByLabelText("Call remark")).not.toBeInTheDocument();
   });
 
   it("sends a call remark; Other needs its text first", async () => {
     server(
-      context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version: "v1", journeyEnabled: true }),
+      context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version: "v1" }),
       [json({ ok: true, action: "updated", alumniId: "8340", changed: [], notCleared: [], version: "v2", remark: "Other: Moved abroad" })],
     );
     render(<AlumniForm entry={ALUMNUS} />);
@@ -228,7 +228,6 @@ describe("AlumniForm", () => {
       kind: "edit",
       ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" },
       version: "v2",
-      journeyEnabled: true,
       alumni: { ug_status: "Graduated", current_status: "Employed" },
     });
     const entries = [

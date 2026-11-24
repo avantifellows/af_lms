@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { authorizeAlumni } from "@/lib/alumni/access";
-import { journeyEnabled } from "@/lib/alumni/journey";
 import { findMarker, listHistory, planRestore, runRestore } from "@/lib/alumni/mass-restore";
 import { RESTORE_CHUNK, type RestoreScope } from "@/lib/alumni/mass-restore-types";
 import { reachesAllSchools } from "@/lib/alumni/scope";
@@ -81,7 +80,6 @@ export async function POST(request: Request) {
 
   const auth = await authorize(scope);
   if (!auth.ok) return auth.response;
-  if (!journeyEnabled()) return NextResponse.json({ error: "Alumni history is not turned on." }, { status: 404 });
 
   if (body.history === true) {
     return guarded("[alumni/history]", "Couldn't load the history.", async () => NextResponse.json({ groups: await listHistory(scope) }));

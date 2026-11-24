@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/alumni/access", () => ({ authorizeAlumnus: vi.fn() }));
 vi.mock("@/lib/alumni/entry", () => ({ getAlumnusContext: vi.fn() }));
@@ -20,23 +20,15 @@ const revert = (body: unknown) =>
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("ALUMNI_JOURNEY", "on");
   vi.mocked(authorizeAlumnus).mockResolvedValue({ ok: true, email: "a@avantifellows.org", role: "alumni_manager" });
   vi.mocked(getAlumnusContext).mockResolvedValue({ ids: { alumniId: "8340" } } as never);
 });
-afterEach(() => vi.unstubAllEnvs());
 
 describe("GET /api/alumni/[alumniId]/journey", () => {
   it("needs view access to the alumnus", async () => {
     vi.mocked(authorizeAlumnus).mockResolvedValue({ ok: false, response: NextResponse.json({}, { status: 403 }) });
     expect((await GET(new Request("http://localhost"), params)).status).toBe(403);
     expect(authorizeAlumnus).toHaveBeenCalledWith("8340", false);
-  });
-
-  it("says history is off without reading anything", async () => {
-    vi.stubEnv("ALUMNI_JOURNEY", "");
-    expect(await (await GET(new Request("http://localhost"), params)).json()).toEqual({ enabled: false, entries: [] });
-    expect(loadJourney).not.toHaveBeenCalled();
   });
 
   it("returns the entries", async () => {

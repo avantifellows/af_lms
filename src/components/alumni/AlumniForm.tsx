@@ -33,8 +33,6 @@ interface EntryContext {
   codeNames: Record<string, string>;
   /** The record's version; sent back on save so another person's save isn't overwritten. */
   version: string;
-  /** Alumni history is on: saves get a history row, and a call remark can be added. */
-  journeyEnabled?: boolean;
 }
 
 interface SavedEntry {
@@ -365,7 +363,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
         />
       ))}
 
-      {context.journeyEnabled && canEdit && (
+      {canEdit && (
         <RemarkBlock
           remark={remark}
           isNew={context.kind === "new"}
@@ -526,7 +524,7 @@ function FormHeader({ context, actions }: { context: EntryContext; actions?: Rea
  * goes back to the current record.
  */
 function useHistoryView(context: EntryContext | null, reloadKey: number) {
-  const alumniId = context?.kind === "edit" && context.journeyEnabled ? context.ids.alumniId : null;
+  const alumniId = context?.kind === "edit" ? context.ids.alumniId : null;
   const journey = useJourney(alumniId, reloadKey);
   const [open, setOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);

@@ -9,7 +9,6 @@ import AlumniShell, { AlumniNotice } from "@/components/alumni/AlumniShell";
 import AlumniDataTable from "@/components/alumni/AlumniDataTable";
 import FindAlumnus from "@/components/alumni/FindAlumnus";
 import MassRestore from "@/components/alumni/MassRestore";
-import { journeyEnabled } from "@/lib/alumni/journey";
 import { reachesAllSchools } from "@/lib/alumni/scope";
 import StatCard from "@/components/StatCard";
 import { Card } from "@/components/ui";
@@ -46,7 +45,7 @@ export default async function AlumniHomePage({ searchParams }: { searchParams?: 
       showHome={!isAlumniRole(permission.role)}
       actions={
         // Restoring all alumni: edit access to every school (admins, full-access Alumni Managers).
-        journeyEnabled() && reachesAllSchools(permission) && getFeatureAccess(permission, "alumni").canEdit
+        reachesAllSchools(permission) && getFeatureAccess(permission, "alumni").canEdit
           ? <MassRestore scope={{ kind: "all" }} scopeLabel="all alumni" />
           : null
       }

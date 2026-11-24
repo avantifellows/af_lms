@@ -13,11 +13,6 @@ import { ALUMNI_FIELDS, type Values } from "./fields";
 // `changed_fields`, keeps an `initial` copy before an alumnus's first change,
 // and lets `source: "correction"` clear fields (how a restore works). Rows are
 // insert-only and read here from Postgres, in the order they were recorded.
-//
-// Off unless ALUMNI_JOURNEY=on: production's DB Service doesn't have the
-// endpoint yet; without it, saves use the plain alumni POST/PATCH.
-
-export const journeyEnabled = () => process.env.ALUMNI_JOURNEY === "on";
 
 export type JourneySource = "initial" | "call" | "form" | "bulk_upload" | "correction";
 

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeAlumnus } from "@/lib/alumni/access";
 import { getAlumnusContext } from "@/lib/alumni/entry";
-import { journeyEnabled } from "@/lib/alumni/journey";
 import { readSaveBody, respondWithSave } from "@/lib/alumni/save-request";
 
 // One existing alumnus, addressed by alumni.id — alumni are not Students
@@ -17,7 +16,7 @@ export async function GET(_request: Request, { params }: Params) {
   const auth = await authorizeAlumnus(alumniId, false);
   if (!auth.ok) return auth.response;
   const context = await getAlumnusContext(alumniId);
-  return context ? NextResponse.json({ ...context, journeyEnabled: journeyEnabled() }) : notFound();
+  return context ? NextResponse.json(context) : notFound();
 }
 
 /** Update this alumnus through the DB Service: { values, confirmed? }. */

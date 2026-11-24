@@ -13,6 +13,11 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/alumni/schools", () => ({ listAlumniSchools: vi.fn(), loadAlumniTotals: vi.fn() }));
 // The table tab is a client component with its own tests.
 vi.mock("@/components/alumni/AlumniDataTable", () => ({ default: () => <div>missing-data table</div> }));
+// The History panel has its own tests; here it's a marker of who gets the button.
+vi.mock("@/components/alumni/MassRestore", () => ({
+  default: ({ scopeLabel }: { scopeLabel: string }) => <div>history for {scopeLabel}</div>,
+}));
+
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
   return { ...actual, getAlumniPermission: vi.fn() };
@@ -64,6 +69,14 @@ describe("Alumni home page", () => {
     expect(bathinda).toHaveTextContent("9 to add");
     expect(bathinda).toHaveTextContent("7 alumni");
     expect(screen.getByLabelText("Find an alumnus")).toBeInTheDocument();
+  });
+
+  it("History for all alumni: only with edit access to every school", async () => {
+    render(await AlumniHomePage());
+    expect(screen.queryByText("history for all alumni")).not.toBeInTheDocument(); // a level-1 manager
+    vi.mocked(getAlumniPermission).mockResolvedValue({ ...manager, level: 3 });
+    render(await AlumniHomePage());
+    expect(screen.getByText("history for all alumni")).toBeInTheDocument();
   });
 
   it("opens the missing-data table on ?view=table", async () => {
