@@ -59,6 +59,10 @@ import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type U
 //   Action Item is ticked done. Saving the same Filled form again adds no
 //   update but still ticks an open reminder (by the latest update); a typed
 //   password always counts as a change.
+//   The number shown for a Filled status is the exam record's (an Exams tab
+//   edit shows here), else the one the update recorded; earlier updates keep
+//   the number recorded at the time. "The same form" compares with the
+//   number shown.
 // - Not filled: the reasons and details are stored and a Mentor Flag with
 //   recipient `jee_form` is raised for the program team's Flags feed.
 //
@@ -157,32 +161,56 @@ function byStudent<T extends { student_id: number | string }>(rows: T[]): Map<nu
   return groups;
 }
 
-// The Students whose JEE Mains 2027 record holds a password ciphertext. Only
-// the flag is selected, never the ciphertext (and never the legacy column).
-async function listPasswordSaved(studentIds: number[], examId: number): Promise<Set<number>> {
-  const rows = await query<{ student_id: number | string }>(
-    `SELECT DISTINCT ser.student_id
+type SavedRecord = { applicationNumber: string | null; passwordSaved: boolean };
+
+// Each Student's JEE Mains 2027 record: its application number (the first
+// non-blank one, should there ever be two records) and whether it holds a
+// password ciphertext. Named columns only: of the ciphertext only whether it
+// is there, and never the legacy plaintext column.
+async function listSavedRecords(studentIds: number[], examId: number): Promise<Map<number, SavedRecord>> {
+  const rows = await query<{ student_id: number | string; application_number: string | null; ciphertext_saved: boolean }>(
+    `SELECT ser.student_id,
+            (array_agg(btrim(ser.application_number) ORDER BY ser.id)
+               FILTER (WHERE btrim(ser.application_number) <> ''))[1] AS application_number,
+            bool_or(ser.application_password_ciphertext IS NOT NULL) AS ciphertext_saved
      FROM student_exam_record ser
      WHERE ser.student_id = ANY($1::bigint[]) AND ser.exam_id = $2 AND ser.exam_year = $3
-       AND ser.application_password_ciphertext IS NOT NULL`,
+     GROUP BY ser.student_id`,
     [studentIds, examId, JEE_FORM_EXAM.examYear]
   );
-  return new Set(rows.map((row) => Number(row.student_id)));
+  return new Map(
+    rows.map((row) => [
+      Number(row.student_id),
+      { applicationNumber: row.application_number, passwordSaved: Boolean(row.ciphertext_saved) },
+    ])
+  );
+}
+
+// The application number shown for a Filled status: the exam record's, so an
+// edit in the Exams tab shows here too, else (no 2027 record, or one without
+// a number) the number the update recorded. Earlier updates keep theirs.
+function currentNumber(recorded: string | null, record: SavedRecord | undefined): string | null {
+  return record?.applicationNumber ?? recorded;
 }
 
 // Each Student's form: the current update, the earlier ones and the reminder.
 async function jeeFormViews(studentIds: number[], examId: number): Promise<Map<number, JeeFormView>> {
   if (studentIds.length === 0) return new Map();
-  const [updates, reminders, passwordSaved] = await Promise.all([
+  const [updates, reminders, records] = await Promise.all([
     listUpdates(studentIds, examId),
     listReminderItems(studentIds),
-    listPasswordSaved(studentIds, examId),
+    listSavedRecords(studentIds, examId),
   ]);
   const updatesByStudent = byStudent(updates);
   const remindersByStudent = byStudent(reminders);
   return new Map(
     studentIds.map((studentId) => {
-      const [current, ...earlier] = (updatesByStudent.get(studentId) ?? []).map(toUpdate);
+      const record = records.get(studentId);
+      const [latest, ...earlier] = (updatesByStudent.get(studentId) ?? []).map(toUpdate);
+      const current =
+        latest?.status === "filled"
+          ? { ...latest, applicationNumber: currentNumber(latest.applicationNumber, record) }
+          : latest;
       const reminderItems: JeeReminderItem[] = (remindersByStudent.get(studentId) ?? []).map((row) => ({
         id: Number(row.id),
         text: row.text,
@@ -190,7 +218,7 @@ async function jeeFormViews(studentIds: number[], examId: number): Promise<Map<n
       }));
       return [
         studentId,
-        { current: current ?? null, earlier, reminderItems, passwordSaved: passwordSaved.has(studentId) },
+        { current: current ?? null, earlier, reminderItems, passwordSaved: record?.passwordSaved ?? false },
       ];
     })
   );
@@ -374,17 +402,29 @@ export function planExamRecordWrite(
   return { kind: "create" };
 }
 
-// The plan, the record it writes (null for a create) and whether that record
-// already holds a password ciphertext.
-type ExamRecordTarget = { plan: ExamRecordPlan; recordId: number | null; passwordSaved: boolean };
+// The plan, the record it writes (null for a create), whether that record
+// already holds a password ciphertext, and the number the Student's JEE Mains
+// 2027 record held before this save (null without one).
+type ExamRecordTarget = {
+  plan: ExamRecordPlan;
+  recordId: number | null;
+  passwordSaved: boolean;
+  savedNumber: string | null;
+};
 
 function planTarget(rows: ExamRecordRow[], examId: number, plan: ExamRecordPlan): ExamRecordTarget {
+  const saved = rows.find(
+    (candidate) => Number(candidate.exam_id) === examId && Number(candidate.exam_year) === JEE_FORM_EXAM.examYear
+  );
   let row: ExamRecordRow | undefined;
   if (plan.kind === "patch") row = rows.find((candidate) => Number(candidate.id) === plan.id);
-  else if (plan.kind === "none") {
-    row = rows.find((candidate) => Number(candidate.exam_id) === examId && Number(candidate.exam_year) === JEE_FORM_EXAM.examYear);
-  }
-  return { plan, recordId: row ? Number(row.id) : null, passwordSaved: Boolean(row?.has_password) };
+  else if (plan.kind === "none") row = saved;
+  return {
+    plan,
+    recordId: row ? Number(row.id) : null,
+    passwordSaved: Boolean(row?.has_password),
+    savedNumber: saved?.application_number ?? null,
+  };
 }
 
 async function examRecordPlan(
@@ -544,14 +584,29 @@ type LatestRow = {
   details: string | null;
 };
 
-// The same status and values as the latest update, with no new PDF and, for
-// Filled, no password typed: a typed password can't be compared with the
-// saved ciphertext (and is written to the exam record before the update is
-// appended), so it always counts as a change and records a new update.
-function unchanged(latest: LatestRow | undefined, input: JeeFormInput, newDocument: boolean): boolean {
+// The application number the tab showed for a Filled latest update: the
+// exam record's as it was before this save (so an Exams tab edit counts), else
+// the number the update recorded. Matches currentNumber on the read side.
+function shownNumber(latest: LatestRow, savedNumber: string | null): string | null {
+  return savedNumber !== null && savedNumber.trim() !== "" ? savedNumber : latest.application_number;
+}
+
+// The same status and values as the tab showed, with no new PDF and, for
+// Filled, no password typed. For Filled the number is compared with the one
+// shown (shownNumber), so re-saving the form after an Exams tab edit, as the
+// tab pre-fills it, is no change: nothing is appended, and an open reminder is
+// still ticked. A typed password can't be compared with the saved ciphertext
+// (and is written to the exam record before the update is appended), so it
+// always counts as a change and records a new update.
+function unchanged(
+  latest: LatestRow | undefined,
+  input: JeeFormInput,
+  newDocument: boolean,
+  savedNumber: string | null
+): boolean {
   if (!latest || latest.status !== input.status || newDocument) return false;
   if (input.status === "filled") {
-    return input.password === null && latest.application_number === input.applicationNumber;
+    return input.password === null && shownNumber(latest, savedNumber) === input.applicationNumber;
   }
   return (latest.reasons ?? []).join(",") === input.reasons.join(",") && latest.details === input.details;
 }
@@ -625,10 +680,10 @@ async function tickReminder(
   );
 }
 
-// A re-save of the same number keeps the confirmation already uploaded.
-function keptDocument(latest: LatestRow | undefined, input: JeeFormInput): number | null {
+// A re-save of the number shown keeps the confirmation already uploaded.
+function keptDocument(latest: LatestRow | undefined, input: JeeFormInput, savedNumber: string | null): number | null {
   if (input.status !== "filled" || latest?.status !== "filled") return null;
-  if (latest.application_number !== input.applicationNumber || latest.confirmation_document_id === null) return null;
+  if (shownNumber(latest, savedNumber) !== input.applicationNumber || latest.confirmation_document_id === null) return null;
   return Number(latest.confirmation_document_id);
 }
 
@@ -659,11 +714,13 @@ async function appendUpdate(
     input: JeeFormInput;
     latest: LatestRow | undefined;
     stored: StoredConfirmation | null;
+    // The JEE Mains 2027 record's number before this save (Filled only).
+    savedNumber: string | null;
     mapping: MappingSnapshot;
   }
 ): Promise<boolean> {
-  const { studentId, examId, input, latest, stored, mapping } = values;
-  if (unchanged(latest, input, stored !== null)) {
+  const { studentId, examId, input, latest, stored, savedNumber, mapping } = values;
+  if (unchanged(latest, input, stored !== null, savedNumber)) {
     if (latest?.status === "filled") await tickReminder(client, access, studentId, Number(latest.id));
     return false;
   }
@@ -672,7 +729,7 @@ async function appendUpdate(
     studentId,
     examId,
     input,
-    confirmationDocumentId: stored?.documentId ?? keptDocument(latest, input),
+    confirmationDocumentId: stored?.documentId ?? keptDocument(latest, input, savedNumber),
     mapping,
   });
   if (input.status === "not_filled") await raiseFlag(client, access, studentId, updateId, input);
@@ -697,7 +754,9 @@ function validateFile(input: JeeFormInput, file: ConfirmationFile | null): JeeFo
   return error ? { confirmation: error } : null;
 }
 
-type ExternalWrite = { ok: true; stored: StoredConfirmation | null } | { ok: false; result: RecordJeeFormResult };
+type ExternalWrite =
+  | { ok: true; stored: StoredConfirmation | null; savedNumber: string | null }
+  | { ok: false; result: RecordJeeFormResult };
 
 const NVS_REFUSED: RecordJeeFormResult = {
   ok: false,
@@ -737,9 +796,10 @@ async function passwordCiphertext(
 // save's open transaction (its reads use the transaction client), after the
 // locks and before the update is appended. The password is encrypted before
 // anything is written; on failure the stored PDF is withdrawn. A same-form
-// re-save runs this too: with no password or PDF it sends nothing unless the
-// record no longer holds the number (edited elsewhere), and it still answers
-// 409 / 422 when the number now clashes or the record lost its password.
+// re-save runs this too: with no password or PDF it sends nothing while the
+// record holds the number shown, writes the record again when it was removed
+// (or lost its number) elsewhere, and still answers 409 / 422 when the number
+// now clashes or the record has no password.
 async function writeApplication(
   client: PoolClient,
   access: BlendedLearningAccess,
@@ -756,7 +816,7 @@ async function writeApplication(
   try {
     if (file) stored = await storeConfirmation(studentId, file, access.actorEmail);
     await applyExamRecordPlan(client, target, studentId, examId, input.applicationNumber, secret.ciphertext);
-    return { ok: true, stored };
+    return { ok: true, stored, savedNumber: target.savedNumber };
   } catch (error) {
     // Never log keys, bodies or the number: the error's name is enough.
     console.error("JEE form external write failed:", error instanceof Error ? error.name : "unknown");
@@ -804,7 +864,7 @@ export async function recordJeeForm(
   if (examId === null) return { ok: false, status: 503, error: "The JEE Mains exam isn't set up yet." };
 
   // Set once the PDF is stored, so a failure after that withdraws it.
-  const written: { stored: StoredConfirmation | null } = { stored: null };
+  const written: { stored: StoredConfirmation | null; savedNumber: string | null } = { stored: null, savedNumber: null };
   let created: boolean;
   try {
     created = await withTransaction(async (client) => {
@@ -816,8 +876,10 @@ export async function recordJeeForm(
         const external = await writeApplication(client, access, studentId, examId, input, file);
         if (!external.ok) throw new SaveRefused(external.result);
         written.stored = external.stored;
+        written.savedNumber = external.savedNumber;
       }
-      return appendUpdate(client, access, { studentId, examId, input, latest, stored: written.stored, mapping });
+      const { stored, savedNumber } = written;
+      return appendUpdate(client, access, { studentId, examId, input, latest, stored, savedNumber, mapping });
     });
   } catch (error) {
     await discardConfirmation(written.stored);

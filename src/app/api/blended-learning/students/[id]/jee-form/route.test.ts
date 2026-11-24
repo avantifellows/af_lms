@@ -91,6 +91,8 @@ let dbServiceStoresCiphertext: boolean;
 // The legacy plaintext the (fake) record holds, and whether the DB Service
 // clears it when sent `application_password: null`.
 let legacyPlaintext: string | null;
+// The number the (fake) DB Service last wrote to the JEE record, if any.
+let writtenNumber: string | null;
 let dbServiceClearsLegacy: boolean;
 
 function matchesPermission(sqlText: string, params?: unknown[]) {
@@ -115,9 +117,12 @@ async function fakeQuery(text: string, params?: unknown[]) {
   }
   if (text.includes("FROM exam WHERE name")) return params?.[0] === "JEE Mains" ? [{ id: JEE_EXAM_ID }] : [];
   if (text.includes("FROM student s")) return [{ nvs: NVS_ONLY.has(Number(params?.[0])), other: false }];
-  if (text.includes("SELECT DISTINCT ser.student_id")) {
+  if (text.includes("bool_or(ser.application_password_ciphertext IS NOT NULL)")) {
     const [studentId] = params?.[0] as number[];
-    return storedCiphertext ? [{ student_id: studentId }] : [];
+    const record = examRecords.find((row) => row.exam_id === JEE_EXAM_ID && row.exam_year === 2027);
+    const number = writtenNumber ?? record?.application_number ?? null;
+    if (!record && writtenNumber === null && !storedCiphertext) return [];
+    return [{ student_id: studentId, application_number: number, ciphertext_saved: storedCiphertext !== null }];
   }
   if (text.includes("application_password_ciphertext = $4")) {
     const legacyCleared = !text.includes("ser.application_password IS NULL") || legacyPlaintext === null;
@@ -255,6 +260,7 @@ beforeEach(() => {
   dbServiceStoresCiphertext = true;
   legacyPlaintext = null;
   dbServiceClearsLegacy = true;
+  writtenNumber = null;
   mockQuery.mockImplementation(fakeQuery as typeof query);
   // As withTransaction does: COMMIT after the callback, ROLLBACK when it throws.
   mockWithTransaction.mockImplementation(async (fn) => {
@@ -288,6 +294,9 @@ beforeEach(() => {
         storedCiphertext = sent.application_password_ciphertext;
       }
       if (status < 300 && dbServiceClearsLegacy && sent.application_password === null) legacyPlaintext = null;
+      if (status < 300 && url.includes("student-exam-record") && typeof sent.application_number === "string") {
+        writtenNumber = sent.application_number;
+      }
       const record = {
         id: 77,
         student_id: 501,
@@ -460,6 +469,58 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     expect(tick.params).toEqual([501, "JEE Form Filling (Reminder)", 900, MENTOR_A]);
     expect(again.body.form.current).toMatchObject({ id: 900, status: "filled" });
     expect(again.body.form.reminderItems).toEqual([{ id: 81, text: "JEE Form Filling (Reminder)", status: "done" }]);
+  });
+
+  describe("after the number was edited in the Exams tab", () => {
+    const EDITED = "270310000099";
+    const FILLED_EDITED: [string, string][] = [["status", "filled"], ["applicationNumber", EDITED]];
+
+    // Recorded Filled with a PDF; then the Exams tab changed the record's number.
+    async function filledThenEdited() {
+      signedInAs(MENTOR_A);
+      expect((await record("501", FILLED, PDF)).status).toBe(201);
+      examRecords = [{ id: 77, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2027, application_number: EDITED, has_password: true }];
+      writtenNumber = null;
+      txWrites = [];
+      fetchCalls = [];
+    }
+
+    it("re-saving the number the tab shows (the record's) is no change (200) and still ticks by the latest update", async () => {
+      await filledThenEdited();
+
+      const again = await record("501", FILLED_EDITED);
+      expect(again.status).toBe(200);
+      expect(fetchCalls).toEqual([]);
+      expect(writesTo("INSERT INTO blended_learning_jee_form_updates")).toEqual([]);
+      expect(writesTo("UPDATE blended_learning_action_items").map((write) => write.params[2])).toEqual([900]);
+      // The tab shows the record's number; the update keeps what it recorded.
+      expect(again.body.form.current).toMatchObject({ id: 900, status: "filled", applicationNumber: EDITED });
+      expect(updates.map((update) => update.application_number)).toEqual(["270310000001"]);
+    });
+
+    it("a new password with the number shown records a new update (201) that keeps the confirmation, and ticks", async () => {
+      await filledThenEdited();
+
+      const again = await record("501", [...FILLED_EDITED, ["password", TYPED_PASSWORD]]);
+      expect(again.status).toBe(201);
+      const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
+      expect(insert.params.slice(3, 6)).toEqual(["filled", EDITED, 4401]);
+      expect(writesTo("UPDATE blended_learning_action_items").map((write) => write.params[2])).toEqual([901]);
+    });
+
+    it("saving the old number again is a change: the record is patched back and a new update recorded (201)", async () => {
+      await filledThenEdited();
+
+      const again = await record("501", FILLED_KEEP);
+      expect(again.status).toBe(201);
+      expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
+        ["PATCH", "http://db-service.test/api/student-exam-record/77", JSON.stringify({ application_number: "270310000001" })],
+      ]);
+      const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
+      // Not the number shown, so the confirmation isn't carried over.
+      expect(insert.params.slice(3, 6)).toEqual(["filled", "270310000001", null]);
+      expect(again.body.form.current).toMatchObject({ id: 901, applicationNumber: "270310000001" });
+    });
   });
 
   it("counts a typed password as a change: the same number with a password records a new update (201) and ticks", async () => {
@@ -723,7 +784,7 @@ describe("POST /api/blended-learning/students/[id]/jee-form: not filled", () => 
     expect(fetchCalls).toEqual([]);
     expect(kms.commandCalls(EncryptCommand)).toEqual([]);
     // Only the read of whether a password is saved, for the form it returns.
-    expect(sql.filter((text) => text.includes("student_exam_record")).every((text) => text.includes("SELECT DISTINCT ser.student_id"))).toBe(true);
+    expect(sql.filter((text) => text.includes("student_exam_record")).every((text) => text.includes("bool_or("))).toBe(true);
     const [insert] = writesTo("INSERT INTO blended_learning_jee_form_updates");
     // Reasons in the list's order, whatever order they were ticked in.
     expect(insert.params.slice(3, 8)).toEqual([

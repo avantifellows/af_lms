@@ -104,7 +104,7 @@ describe("listJeeFormRows", () => {
       if (text.includes("FROM blended_learning_action_items item")) {
         return [{ student_id: 502, id: 81, text: "JEE Form Filling (Reminder)", status: "open" }];
       }
-      if (text.includes("FROM student_exam_record ser")) return [{ student_id: 501 }];
+      if (text.includes("FROM student_exam_record ser")) return [{ student_id: 501, application_number: null, ciphertext_saved: true }];
       throw new Error(`Unexpected query: ${text}`);
     }) as typeof query);
   });
@@ -142,6 +142,43 @@ describe("listJeeFormRows", () => {
     const saved = sql.filter(({ text }) => text.includes("FROM student_exam_record ser"));
     expect(saved.map(({ params }) => params)).toEqual([[[501, 502], 1, 2027]]);
     expect(saved[0].text).toMatch(/application_password_ciphertext IS NOT NULL/);
+  });
+
+  it("shows a Filled Student's number from the exam record, earlier updates keeping theirs", async () => {
+    const records = [
+      { student_id: 501, application_number: "2799", ciphertext_saved: true },
+      { student_id: 502, application_number: "2788", ciphertext_saved: false },
+    ];
+    mockQuery.mockImplementation((async (text: string, params: unknown[] = []) => {
+      sql.push({ text, params });
+      if (text.includes("FROM exam WHERE name")) return [{ id: 1 }];
+      if (text.includes("FROM blended_learning_mentor_mentee_mappings")) return MAPPED.slice(0, 2);
+      if (text.includes("FROM blended_learning_jee_form_updates u")) {
+        // 501: Filled (recorded 2712) after an earlier Filled (2711);
+        // 502: Not filled, though a 2027 record holds a number.
+        return [update(501, 12, "filled"), update(501, 11, "filled"), update(502, 13, "not_filled")];
+      }
+      if (text.includes("FROM blended_learning_action_items item")) return [];
+      if (text.includes("FROM student_exam_record ser")) return records;
+      throw new Error(`Unexpected query: ${text}`);
+    }) as typeof query);
+
+    const [asha, biren] = (await listJeeFormRows(MENTOR))!;
+    if (asha.viewOnly || biren.viewOnly) throw new Error("own rows");
+    expect(asha.form.current).toMatchObject({ id: 12, status: "filled", applicationNumber: "2799" });
+    expect(asha.form.earlier).toMatchObject([{ id: 11, applicationNumber: "2711" }]);
+    expect(biren.form.current).toMatchObject({ id: 13, status: "not_filled", applicationNumber: null });
+
+    // A record without a number (or none at all): the number the update recorded.
+    records[0] = { student_id: 501, application_number: null, ciphertext_saved: true };
+    expect((await listJeeFormRows(MENTOR))![0].form.current).toMatchObject({ applicationNumber: "2712" });
+    records.length = 0;
+    expect((await listJeeFormRows(MENTOR))![0].form.current).toMatchObject({ applicationNumber: "2712" });
+
+    // Named columns only, the JEE Mains 2027 record, blank numbers skipped.
+    const read = sql.find(({ text }) => text.includes("FROM student_exam_record ser"))!;
+    expect(read.params).toEqual([[501, 502], 1, 2027]);
+    expect(read.text).toContain("FILTER (WHERE btrim(ser.application_number) <> '')");
   });
 
   it("gives a team lead their own Students' forms and their reportees' Students' status only", async () => {
@@ -233,7 +270,7 @@ describe("getJeeFormLine", () => {
       if (text.includes("SELECT DISTINCT ON (u.student_id)")) return [STATUS_ROW];
       if (text.includes("FROM blended_learning_jee_form_updates u")) return [update(501, 12, "filled")];
       if (text.includes("FROM blended_learning_action_items item")) return [];
-      if (text.includes("FROM student_exam_record ser")) return [{ student_id: 501 }];
+      if (text.includes("FROM student_exam_record ser")) return [{ student_id: 501, application_number: null, ciphertext_saved: true }];
       throw new Error(`Unexpected query: ${text}`);
     }) as typeof query);
   });
@@ -247,6 +284,19 @@ describe("getJeeFormLine", () => {
     }
     expect(await getJeeFormLine(ADMIN, 601)).toMatchObject({ earlier: [], passwordSaved: false });
     expect(sql.some(({ text }) => text.includes("SELECT DISTINCT ON (u.student_id)"))).toBe(false);
+  });
+
+  it("shows the exam record's number on the Mentee page's line", async () => {
+    mockQuery.mockImplementation((async (text: string, params: unknown[] = []) => {
+      sql.push({ text, params });
+      if (text.includes("FROM blended_learning_mentor_mentee_mappings")) return [{ mentor_user_id: 9001 }];
+      if (text.includes("FROM exam WHERE name")) return [{ id: 1 }];
+      if (text.includes("FROM blended_learning_jee_form_updates u")) return [update(501, 12, "filled")];
+      if (text.includes("FROM blended_learning_action_items item")) return [];
+      if (text.includes("FROM student_exam_record ser")) return [{ student_id: 501, application_number: "2799", ciphertext_saved: true }];
+      throw new Error(`Unexpected query: ${text}`);
+    }) as typeof query);
+    expect(await getJeeFormLine(MENTOR, 501)).toMatchObject({ current: { applicationNumber: "2799" } });
   });
 
   it("gives a team lead only the status of a supervised Mentor's Mentee, from a read of the status alone", async () => {

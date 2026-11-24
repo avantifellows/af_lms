@@ -870,11 +870,14 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   update + flag/tick → commit. The lock is held across those HTTP calls (accepted). Left as is: if
   the insert/commit fails after the exam record write, the record keeps the new number/password
   while the tab shows the old status (the PDF is still withdrawn); saving again repairs it. A
-  same-form re-save still runs `writeApplication`, which sends nothing unless the record no longer
-  holds the number (edited elsewhere). E2E: the JEE spec holds the lock, ends the Mapping, and
-  expects 404 with no stub write. Re-saving the same values
+  same-form re-save still runs `writeApplication`, which sends nothing while the record holds the
+  number shown (it writes the record again if it was removed elsewhere). E2E: the JEE spec holds
+  the lock, ends the Mapping, and expects 404 with no stub write. Re-saving the same values
   (no new PDF, no password typed) appends nothing (200), but a Filled re-save still ticks an open
-  reminder, done by the latest update; the POST's `form` is read after the save, so the tab's
+  reminder, done by the latest update. For Filled, "the same" compares with the number the tab
+  shows (`shownNumber`: the exam record's as it was before the save, else the latest update's), so
+  re-saving the form after an Exams tab edit is no change (200, ticks), a different number is a
+  change (201, the record patched), and a typed password with the number shown keeps the PDF; the POST's `form` is read after the save, so the tab's
   "Reminder" line shows Done. A typed password can't be compared with the saved ciphertext, so it
   always counts as a change (201, a new update that keeps the PDF). A failed DB Service/S3 call is
   a 502 and withdraws the stored PDF.
@@ -912,6 +915,15 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   read the DB Service's response body (it contains the legacy password); failures log the status
   only. Nothing logs a password or ciphertext (error names only). E2E encrypts against a fake KMS in
   the DB Service stub (`EXAM_PASSWORD_KMS_ENDPOINT`, e2e only).
+- **Current number from the exam record:** for a Filled current status, the tab's rows, the
+  Student's form (the POST's `form`, `getJeeForm`) and the Mentee page's status line show the
+  application number of the Student's JEE Mains 2027 `student_exam_record` (`listSavedRecords`, one
+  grouped read with `passwordSaved`; named columns only, never `application_password`), so an Exams
+  tab edit shows here. Without a 2027 record, or one with a blank number, they show the number the
+  update recorded (not "—": Filled was recorded with that number, and blanking it would hide it).
+  Not filled shows no number. Earlier updates (history) keep the number recorded at the time; the
+  updates table stays the record of who recorded Filled / Not filled and when. Team leads'
+  status-only rows still never read the exam record or carry a number.
 - **Read/UI:** the JEE Form tab `/blended-learning/jee-form` (`view_list`) reads `listJeeFormRows`:
   the Students with an active current-year Mapping (a Mentor's own; a team lead's own and their
   reportees', the latter `viewOnly` with the status only from a separate status-only read; every

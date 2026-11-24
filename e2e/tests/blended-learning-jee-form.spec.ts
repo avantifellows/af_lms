@@ -212,6 +212,18 @@ async function jeeRecords(studentId: number) {
   });
 }
 
+// Change the Student's JEE Mains 2027 application number directly, as an
+// Exams tab edit would.
+async function setJeeRecordNumber(studentId: number, applicationNumber: string) {
+  await withPool((pool) =>
+    pool.query(
+      `UPDATE student_exam_record ser SET application_number = $2
+       FROM exam WHERE exam.id = ser.exam_id AND exam.name = 'JEE Mains' AND ser.student_id = $1 AND ser.exam_year = 2027`,
+      [studentId, applicationNumber]
+    )
+  );
+}
+
 async function reminder(studentId: number) {
   return withPool(async (pool) => {
     const result = await pool.query<{
@@ -446,6 +458,35 @@ test.describe("Blended Learning JEE Form tab — Mentor, desktop", () => {
     await open.getByRole("button", { name: "Save" }).click();
     await expect(open.getByRole("status")).toHaveText("Saved");
     expect(await jeeRecords(studentIds[mentee.key])).toEqual([expect.objectContaining({ ciphertext_saved: true })]);
+  });
+
+  test("shows the exam record's number after an edit outside the form, and re-saving it records nothing new", async ({ page }) => {
+    const studentId = studentIds[mentee.key];
+    const before = await updates(studentId);
+    await setJeeRecordNumber(studentId, "E2E-JEE-0002");
+    try {
+      await fetch(`${STUB}/__requests`, { method: "DELETE" });
+      await signInAs(page, BLENDED_MENTOR_C);
+      await page.goto(tabFor(mentee));
+      await expect(rowToggle(page, mentee)).toContainText("E2E-JEE-0002");
+      const open = row(page, mentee);
+      await expect(open.getByLabel("Application number")).toHaveValue("E2E-JEE-0002");
+
+      // Saving the form as shown is no change: no update, no DB Service write.
+      await page.waitForLoadState("networkidle");
+      const response = page.waitForResponse((res) => res.url().endsWith(jeeFormUrl(mentee)));
+      await open.getByRole("button", { name: "Save" }).click();
+      expect((await response).status()).toBe(200);
+      expect(await updates(studentId)).toEqual(before);
+      expect(await stubRequests()).toEqual([]);
+
+      // The Mentee page's line shows it too; the history keeps what was recorded.
+      await page.goto(detailPath(mentee));
+      await expect(statusLine(page)).toContainText("E2E-JEE-0002");
+      expect((await updates(studentId)).at(-1)?.application_number).toBe("E2E-JEE-0001");
+    } finally {
+      await setJeeRecordNumber(studentId, "E2E-JEE-0001");
+    }
   });
 
   test("a read-only admin sees the tab and opens a row, but can't record or reveal the password", async ({ page }) => {
