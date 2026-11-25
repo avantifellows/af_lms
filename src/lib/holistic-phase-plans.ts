@@ -118,6 +118,7 @@ type ReorderPhaseRow = Pick<
   PhaseRow,
   "id" | "position" | "revision" | "state" | "frozen_at" | "ever_opened" | "used"
 > & { phase_plan_id: number | string };
+type ReorderPlanRow = ReorderPhaseRow & { grade: number | string };
 
 type PhaseMutationAction = "created" | "definition_updated" | "reordered" | "deleted";
 
@@ -203,20 +204,28 @@ async function gradeChangeRenumbersOpenedPhase(
 // Only a Grade change is checked, so a Phase can always be saved in the Grade it is in.
 // A Grade change renumbers the later Phases of the old and the new Grade. Their
 // revision moves too, as it does after a delete or a reorder, so an Admin acting
-// on a page that still shows the old number gets "Phase changed".
+// on a page that still shows the old number gets "Phase changed". Each of them
+// also gets a "reordered" audit row in Plan order, after the changed Phase's own
+// row, as the later Phases do after a delete.
 async function bumpPhasesRenumberedByGradeChange(
   client: PoolClient,
   phase: MutablePhaseRow,
   grade: 11 | 12,
+  actor: AuditActor,
 ) {
-  await client.query(
+  const renumbered = await client.query<{ id: number | string; position: number }>(
     `UPDATE holistic_mentorship_phases later
      SET revision = later.revision + 1, updated_at = NOW()
      FROM grade
      WHERE grade.id = later.grade_id AND later.phase_plan_id = $1 AND later.position > $2
-       AND grade.number = ANY($3::int[])`,
+       AND grade.number = ANY($3::int[])
+     RETURNING later.id, later.position`,
     [Number(phase.phase_plan_id), phase.position, [Number(phase.grade), grade]]
   );
+  const inPlanOrder = [...renumbered.rows].sort((a, b) => a.position - b.position);
+  for (const later of inPlanOrder) {
+    await recordPhaseMutation(client, Number(phase.phase_plan_id), Number(later.id), "reordered", actor);
+  }
 }
 
 async function validateGradeChange(
@@ -395,7 +404,6 @@ async function updatePhaseTransaction(
     [input.phaseId, input.grade, input.title.trim(), input.guidanceMarkdown, input.expectedRevision]
   );
   if (!updated.rows[0]) return { ok: false, status: 409, error: "Phase changed" };
-  if (Number(phase.grade) !== input.grade) await bumpPhasesRenumberedByGradeChange(client, phase, input.grade);
   await replaceQuestions(client, input);
   await recordPhaseMutation(
     client,
@@ -404,6 +412,9 @@ async function updatePhaseTransaction(
     "definition_updated",
     input
   );
+  if (Number(phase.grade) !== input.grade) {
+    await bumpPhasesRenumberedByGradeChange(client, phase, input.grade, input);
+  }
   return { ok: true, id: input.phaseId, revision: updated.rows[0].revision };
 }
 
@@ -805,9 +816,11 @@ async function loadReorderPhases(
   client: PoolClient,
   academicYear: string,
   programId: number,
-): Promise<ReorderPhaseRow[]> {
-  const result = await client.query<ReorderPhaseRow>(
+): Promise<ReorderPlanRow[]> {
+  const result = await client.query<ReorderPlanRow>(
+    // Grade is a subquery so the shared grade row is not locked.
     `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.frozen_at,
+            (SELECT number FROM grade WHERE id = p.grade_id) AS grade,
             EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
                     WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
             EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
@@ -821,20 +834,30 @@ async function loadReorderPhases(
   return result.rows;
 }
 
+// A Phase's number depends on the Grades of the Phases before it (issue #516), so a
+// Phase that stays in place could still be renumbered by others moving past it.
+// Every position therefore keeps its Grade: Phases only trade places within a Grade,
+// so the place in its Grade of every position, and of every Phase that does not
+// move, stays the same. Revisions are checked first, so a stale page gets 409.
 function validateReorder(
-  rows: ReorderPhaseRow[],
+  rows: ReorderPlanRow[],
   requestedPhases: { id: number; expectedRevision: number }[]
 ): PhasePlanResult | null {
   if (!samePhaseSet(rows, requestedPhases)) {
     return { ok: false, status: 409, error: "Phase order changed" };
   }
   const byId = new Map(rows.map((row) => [Number(row.id), row]));
-  for (const [index, requested] of requestedPhases.entries()) {
-    const row = byId.get(requested.id);
-    const revisionError = reorderRevisionError(row, requested.expectedRevision);
+  for (const requested of requestedPhases) {
+    const revisionError = reorderRevisionError(byId.get(requested.id), requested.expectedRevision);
     if (revisionError) return revisionError;
-    if (row!.position === rows[index].position) continue;
-    if (immutablePhase(row!)) {
+  }
+  for (const [index, requested] of requestedPhases.entries()) {
+    const row = byId.get(requested.id)!;
+    if (row.position === rows[index].position) continue;
+    if (String(row.grade) !== String(rows[index].grade)) {
+      return { ok: false, status: 422, error: "Phases can be reordered only within their Grade" };
+    }
+    if (immutablePhase(row)) {
       return {
         ok: false,
         status: 422,
