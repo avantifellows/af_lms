@@ -339,6 +339,26 @@ describe("Holistic Phase Plans", () => {
     }
   });
 
+  // A Grade change updates the later Phases while it holds the Plan row, so a save
+  // or a state change that locked a Phase first could deadlock with it.
+  it("locks the Plan row before the Phase row on a definition save", async () => {
+    const client = { query: vi.fn().mockResolvedValueOnce(planLock).mockResolvedValueOnce({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    const result = await updateHolisticPhase({
+      programId: 1, phaseId: 21, expectedRevision: 2, ...actor,
+      title: "Belonging", grade: 11, guidanceMarkdown: "", questions: [{ text: "What matters?" }], confirmed: false,
+    });
+
+    const [planSql, planParams] = client.query.mock.calls[0];
+    expect(String(planSql)).toContain("FOR UPDATE OF plan");
+    expect(planParams).toEqual([21, 1]);
+    const [phaseSql] = client.query.mock.calls[1];
+    expect(String(phaseSql)).toContain("FOR UPDATE OF p");
+    expect(String(phaseSql)).not.toContain("FOR UPDATE OF plan");
+    expect(result).toEqual({ ok: false, status: 404, error: "Phase not found" });
+  });
+
   it("locks the Plan row before the Phase row on a state change", async () => {
     const client = { query: vi.fn().mockResolvedValueOnce(planLock).mockResolvedValueOnce({ rows: [] }) };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));

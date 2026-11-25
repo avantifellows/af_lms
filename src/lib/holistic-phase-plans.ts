@@ -317,8 +317,9 @@ function checkRevision(row: MutablePhaseRow | null, expectedRevision: number): P
 type CheckedPhase = { phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult };
 
 // Plan first, then Phase: the order reorder, delete and the Mentor write scope
-// use, so none of them can deadlock with another. The Plan lock is also what
-// makes a Mentor save wait for a Phase state change in flight (#536).
+// use, so none of them can deadlock with another, nor with a Grade change, which
+// updates the later Phases of the Plan while it holds the Plan row. The Plan lock
+// is also what makes a Mentor save wait for a Phase state change in flight (#536).
 async function checkedPhase(
   client: PoolClient,
   phaseId: number,
