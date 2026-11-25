@@ -264,6 +264,15 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   Questions the form was loaded with before that refresh: an Admin's definition edit made
   just before the Phase closed must not rebuild the editor and drop the text. The Follow-up pop-up does the
   same on that refusal: it stays open with the text read-only, Save off, and the page refreshed.
+  **Dictation (#500) in that form:** a clip refused with the same message (the Phase closed
+  before any save noticed) freezes the form the same way (`useDictationRecorder`'s
+  `onPhaseClosed`). Once a form is frozen its recorder is dropped (`discard()`), as when the
+  Mentor leaves it: a recording stops and releases the mic without uploading, a clip being
+  transcribed is ignored when its words arrive, a failed clip's Retry goes, every mic and the
+  "Finish dictating first" hint go with the inputs (the pop-up's mics stay, disabled), and the
+  recorder no longer holds the page's one recording slot. The frozen text is exactly what was on
+  screen when it froze; the server refuses a Closed Phase's clips anyway. The leave-page guard is
+  unchanged (it never waited for a clip). Pinned in `StudentPhaseWorkspace.dictation.test.tsx`.
 - **Progress:** `phaseState` / the CSV **Availability** column is `active` | `closed` | `locked`
   (`closed` replaced `open`). Derived Pending / Skipped / Completed progress is unchanged.
 - **Phase Setup:** `setHolisticPhaseState` refuses to open a Phase ordered before an Open Phase

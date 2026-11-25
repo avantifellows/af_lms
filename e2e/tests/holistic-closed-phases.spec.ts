@@ -45,6 +45,81 @@ function query() {
   return `school_code=${fixture.schoolCode}&program_id=1&academic_year=2026-2027`;
 }
 
+type Pool = ReturnType<typeof getTestPool>;
+
+// A Mentee of the fixture Teacher with no submitted Notes in Grade 11's Active
+// Phase (so the form is shown), and Grade 11's next, still Locked, Phase.
+async function activeFormMentee(pool: Pool) {
+  const result = await pool.query<{ student_id: string; active_id: string; locked_id: string; school_code: string }>(
+    `WITH grade11 AS (
+       SELECT phase.id, phase.state, phase.position
+       FROM holistic_mentorship_phases phase
+       JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+         AND plan.program_id = 1 AND plan.academic_year = '2026-2027'
+       JOIN grade ON grade.id = phase.grade_id AND grade.number = 11
+     )
+     SELECT mapping.student_id, school.code AS school_code,
+            (SELECT id FROM grade11 WHERE state = 'open' ORDER BY position DESC LIMIT 1) AS active_id,
+            (SELECT id FROM grade11 WHERE state = 'locked' ORDER BY position LIMIT 1) AS locked_id
+     FROM holistic_mentorship_mentor_mentee_mappings mapping
+     JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
+       AND LOWER(mentor.email) = 'e2e-holistic-teacher@test.local'
+     JOIN school ON school.id = mapping.school_id
+     JOIN holistic_mentorship_post_session_notes earlier ON earlier.student_id = mapping.student_id
+       AND earlier.phase_id = $1
+     WHERE mapping.program_id = 1 AND mapping.academic_year = '2026-2027' AND mapping.ended_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM holistic_mentorship_post_session_notes notes
+         WHERE notes.student_id = mapping.student_id AND notes.state = 'submitted'
+           AND notes.phase_id = (SELECT id FROM grade11 WHERE state = 'open' ORDER BY position DESC LIMIT 1))
+     ORDER BY mapping.student_id LIMIT 1`,
+    [fixture.closedPhaseId]
+  );
+  const row = result.rows[0];
+  expect(row, "the fixture needs a Grade 11 Mentee without submitted Notes in the Active Phase").toBeTruthy();
+  return {
+    ...row,
+    lockedPhaseId: Number(row.locked_id),
+    url: `/holistic-mentorship/students/${row.student_id}/phases/${row.active_id}`
+      + `?school_code=${row.school_code}&program_id=1&academic_year=2026-2027`,
+  };
+}
+
+async function notesAnswers(pool: Pool, studentId: string, phaseId: string) {
+  const result = await pool.query(
+    `SELECT answer.answer FROM holistic_mentorship_post_session_answers answer
+     JOIN holistic_mentorship_post_session_notes notes ON notes.id = answer.notes_id
+     WHERE notes.student_id = $1 AND notes.phase_id = $2 ORDER BY answer.question_id`,
+    [studentId, phaseId]);
+  return result.rows;
+}
+
+async function teacherDictationRecords() {
+  const pool = getTestPool();
+  try {
+    const result = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM holistic_mentorship_dictation_usage_records record
+       JOIN "user" mentor ON mentor.id = record.mentor_user_id
+       WHERE LOWER(mentor.email) = 'e2e-holistic-teacher@test.local'`);
+    return Number(result.rows[0].count);
+  } finally {
+    await pool.end();
+  }
+}
+
+// Chromium's fake device needs a launch flag; a Web Audio tone stands in for
+// the microphone instead (as in holistic-mentorship.spec.ts).
+function installWebAudioMicrophone() {
+  navigator.mediaDevices.getUserMedia = async () => {
+    const audio = new AudioContext();
+    const tone = audio.createOscillator();
+    const microphone = audio.createMediaStreamDestination();
+    tone.connect(microphone);
+    tone.start();
+    return microphone.stream;
+  };
+}
+
 test.describe("Closed Holistic Phases", () => {
   test.beforeAll(async () => {
     const pool = getTestPool();
@@ -107,6 +182,8 @@ test.describe("Closed Holistic Phases", () => {
     await expect(page.getByRole("button", { name: "Edit Notes" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Submit Notes" })).toHaveCount(0);
     await expect(page.getByRole("textbox")).toHaveCount(0);
+    // Dictation is on in e2e, but a Closed Phase offers no mic anywhere.
+    await expect(page.getByRole("button", { name: /^Dictate/ })).toHaveCount(0);
     const addFollowUp = page.getByRole("region", { name: "Follow-up Notes" })
       .getByRole("button", { name: "Add notes" });
     await expect(addFollowUp).toBeDisabled();
@@ -134,6 +211,21 @@ test.describe("Closed Holistic Phases", () => {
     });
     expect(followUp.status()).toBe(422);
     expect(await followUp.json()).toMatchObject({ error: CLOSED_ERROR });
+    // Dictation goes through the same write check: refused before any provider
+    // call, so no usage record is written.
+    const recordsBefore = await teacherDictationRecords();
+    for (const kind of ["post_session", "follow_up"]) {
+      const dictation = await page.request.post(`/api${phasePath}/dictation?${query()}`, {
+        multipart: {
+          audio: { name: "dictation.webm", mimeType: "audio/webm", buffer: Buffer.from("spoken clip") },
+          kind,
+          duration_ms: "2000",
+        },
+      });
+      expect(dictation.status(), kind).toBe(422);
+      expect(await dictation.json(), kind).toEqual({ error: CLOSED_ERROR });
+    }
+    expect(await teacherDictationRecords()).toBe(recordsBefore);
 
     expect(await closedPhaseNotes()).toEqual(before);
   });
@@ -144,46 +236,14 @@ test.describe("Closed Holistic Phases", () => {
     const pool = getTestPool();
     let lockedPhaseId = 0;
     try {
-      // A Mentee of this Teacher with no submitted Notes in Grade 11's Active
-      // Phase (so the form is shown), and Grade 11's next, still Locked, Phase.
-      const result = await pool.query<{ student_id: string; active_id: string; locked_id: string; school_code: string }>(
-        `WITH grade11 AS (
-           SELECT phase.id, phase.state, phase.position
-           FROM holistic_mentorship_phases phase
-           JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
-             AND plan.program_id = 1 AND plan.academic_year = '2026-2027'
-           JOIN grade ON grade.id = phase.grade_id AND grade.number = 11
-         )
-         SELECT mapping.student_id, school.code AS school_code,
-                (SELECT id FROM grade11 WHERE state = 'open' ORDER BY position DESC LIMIT 1) AS active_id,
-                (SELECT id FROM grade11 WHERE state = 'locked' ORDER BY position LIMIT 1) AS locked_id
-         FROM holistic_mentorship_mentor_mentee_mappings mapping
-         JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
-           AND LOWER(mentor.email) = 'e2e-holistic-teacher@test.local'
-         JOIN school ON school.id = mapping.school_id
-         JOIN holistic_mentorship_post_session_notes earlier ON earlier.student_id = mapping.student_id
-           AND earlier.phase_id = $1
-         WHERE mapping.program_id = 1 AND mapping.academic_year = '2026-2027' AND mapping.ended_at IS NULL
-           AND NOT EXISTS (
-             SELECT 1 FROM holistic_mentorship_post_session_notes notes
-             WHERE notes.student_id = mapping.student_id AND notes.state = 'submitted'
-               AND notes.phase_id = (SELECT id FROM grade11 WHERE state = 'open' ORDER BY position DESC LIMIT 1))
-         ORDER BY mapping.student_id LIMIT 1`,
-        [fixture.closedPhaseId]
-      );
-      const row = result.rows[0];
-      expect(row, "the fixture needs a Grade 11 Mentee without submitted Notes in the Active Phase").toBeTruthy();
-      lockedPhaseId = Number(row.locked_id);
-      const activePath = `/holistic-mentorship/students/${row.student_id}/phases/${row.active_id}`;
-      const answersBefore = await pool.query(
-        `SELECT answer.answer FROM holistic_mentorship_post_session_answers answer
-         JOIN holistic_mentorship_post_session_notes notes ON notes.id = answer.notes_id
-         WHERE notes.student_id = $1 AND notes.phase_id = $2 ORDER BY answer.question_id`,
-        [row.student_id, row.active_id]);
+      const row = await activeFormMentee(pool);
+      lockedPhaseId = row.lockedPhaseId;
+      const answersBefore = await notesAnswers(pool, row.student_id, row.active_id);
 
-      await page.goto(`${activePath}?school_code=${row.school_code}&program_id=1&academic_year=2026-2027`);
+      await page.goto(row.url);
       const answer = page.getByRole("textbox").first();
       await expect(answer).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Dictate/ }).first()).toBeVisible();
       await page.waitForLoadState("networkidle");
 
       // An Admin opens Grade 11's next Phase: this one stops being the Active Phase.
@@ -201,6 +261,7 @@ test.describe("Closed Holistic Phases", () => {
       await expect(page.getByRole("textbox")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Submit Notes" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Dictate/ })).toHaveCount(0);
       // The rest of the page catches up by itself, with no reload: this Phase's tab
       // now reads Closed, and the typed text is still on screen.
       await expect(page.getByRole("tab", { name: /Synthetic Grade 11 Active/ })).toContainText("Closed");
@@ -210,12 +271,59 @@ test.describe("Closed Holistic Phases", () => {
       await page.getByRole("tab", { name: /Synthetic Grade 11 Completed/ }).click();
       await expect(page).toHaveURL(new RegExp(`/phases/${fixture.closedPhaseId}\\b`));
 
-      const answersAfter = await pool.query(
-        `SELECT answer.answer FROM holistic_mentorship_post_session_answers answer
-         JOIN holistic_mentorship_post_session_notes notes ON notes.id = answer.notes_id
-         WHERE notes.student_id = $1 AND notes.phase_id = $2 ORDER BY answer.question_id`,
-        [row.student_id, row.active_id]);
-      expect(answersAfter.rows).toEqual(answersBefore.rows);
+      expect(await notesAnswers(pool, row.student_id, row.active_id)).toEqual(answersBefore);
+    } finally {
+      if (lockedPhaseId) {
+        await pool.query(`UPDATE holistic_mentorship_phases SET state = 'locked' WHERE id = $1`, [lockedPhaseId]);
+      }
+      await pool.end();
+    }
+  });
+
+  // #536 with Dictation (#500): the Phase closes before any save notices, and the
+  // Mentor's next clip is the first write. The real recorder and route are used;
+  // the route's write check refuses the clip, and the form freezes as after a save.
+  test("a Mentor who dictates after the Phase closed is told so, and nothing is saved or counted", async ({
+    holisticTeacherPage: page,
+  }) => {
+    const pool = getTestPool();
+    let lockedPhaseId = 0;
+    try {
+      const row = await activeFormMentee(pool);
+      lockedPhaseId = row.lockedPhaseId;
+      const answersBefore = await notesAnswers(pool, row.student_id, row.active_id);
+      const recordsBefore = await teacherDictationRecords();
+      await page.addInitScript(installWebAudioMicrophone);
+      // Passed on unchanged, so the real route answers.
+      await page.route("**/dictation?**", (route) => route.continue());
+
+      await page.goto(row.url);
+      const answer = page.getByRole("textbox").first();
+      await expect(answer).toBeVisible();
+      await page.waitForLoadState("networkidle");
+      const shown = await answer.inputValue();
+
+      // Nothing is typed (that would autosave, and the save would find the Phase closed first).
+      await pool.query(`UPDATE holistic_mentorship_phases SET state = 'open' WHERE id = $1`, [lockedPhaseId]);
+      const mic = page.getByRole("button", { name: /^Dictate/ }).first();
+      await mic.click();
+      await expect(page.getByText("Recording 0:01", { exact: true })).toBeVisible();
+      const refused = page.waitForResponse((response) => response.url().includes("/dictation?"));
+      await mic.click();
+      const reply = await refused;
+      expect(reply.status()).toBe(422);
+      expect(await reply.json()).toEqual({ error: CLOSED_ERROR });
+
+      await expect(page.getByRole("alert").filter({ hasText: "This Phase was closed while you were writing." }))
+        .toContainText("Nothing more can be saved or submitted here.");
+      if (shown.trim()) await expect(page.getByText(shown.trim(), { exact: false }).first()).toBeVisible();
+      await expect(page.getByRole("textbox")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Dictate/ })).toHaveCount(0);
+      await expect(page.getByText("Couldn't send that recording. Reload the page and try again.")).toHaveCount(0);
+      await expect(page.getByRole("tab", { name: /Synthetic Grade 11 Active/ })).toContainText("Closed");
+
+      expect(await teacherDictationRecords()).toBe(recordsBefore);
+      expect(await notesAnswers(pool, row.student_id, row.active_id)).toEqual(answersBefore);
     } finally {
       if (lockedPhaseId) {
         await pool.query(`UPDATE holistic_mentorship_phases SET state = 'locked' WHERE id = $1`, [lockedPhaseId]);

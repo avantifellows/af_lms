@@ -421,9 +421,12 @@ function useNotesEditorState(props: NotesEditorProps) {
     setConflict(refusal?.status === 409);
     if (refusal?.message === HOLISTIC_PHASE_CLOSED_ERROR) setClosedWhileWriting(true);
   }, []);
+  // Dictation was refused because the Phase closed: nothing failed to save, but
+  // the form freezes exactly as after a refused save.
+  const markClosedWhileWriting = useCallback(() => setClosedWhileWriting(true), []);
 
   return {
-    initialValue, closedWhileWriting, failSave,
+    initialValue, closedWhileWriting, failSave, markClosedWhileWriting,
     initialRevision: initialEditor.revision,
     value, setValue, savedValue, setSavedValue, notesState, setNotesState,
     editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
@@ -601,7 +604,8 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
 function useNotesDictation(
   props: NotesEditorProps,
   answers: NotesValue["answers"],
-  updateAnswer: (questionId: number, answer: string) => void
+  updateAnswer: (questionId: number, answer: string) => void,
+  phase: { closedWhileWriting: boolean; onPhaseClosed: () => void }
 ) {
   const applyDictation = (target: string, text: string) => {
     const questionId = Number(target);
@@ -610,7 +614,7 @@ function useNotesDictation(
     updateAnswer(questionId, appended.value);
     return null;
   };
-  return useDictationRecorder({
+  const recorder = useDictationRecorder({
     url: dictationApiUrl(props),
     kind: "post_session",
     remainingSeconds: props.dictation.remainingSeconds,
@@ -618,7 +622,22 @@ function useNotesDictation(
     busyKind: props.dictation.busyKind,
     onBusy: props.dictation.onBusy,
     onText: applyDictation,
+    onPhaseClosed: phase.onPhaseClosed,
   });
+  useDictationDroppedWhenClosed(phase.closedWhileWriting, recorder);
+  return recorder;
+}
+
+// A form frozen because its Phase closed (#536) has ended, as if the Mentor had
+// left it (#500): a recording stops and releases the mic without uploading, a
+// failed clip is dropped, and words of a clip still in flight are ignored (the
+// server refuses a Closed Phase's clips anyway), so the read-only text is what
+// was on screen when the form froze.
+function useDictationDroppedWhenClosed(closed: boolean, recorder: DictationRecorder) {
+  const { discard } = recorder;
+  useEffect(() => {
+    if (closed) discard();
+  }, [closed, discard]);
 }
 
 function PostSessionNotesEditor(props: NotesEditorProps) {
@@ -705,7 +724,9 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     if (validationError && !hasBlankAnswer(props.questions, nextAnswers)) setValidationError("");
     setSuccess("");
   };
-  const dictation = useNotesDictation(props, value.answers, updateAnswer);
+  const dictation = useNotesDictation(props, value.answers, updateAnswer, {
+    closedWhileWriting, onPhaseClosed: state.markClosedWhileWriting,
+  });
   const submit = async () => {
     if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
@@ -1934,10 +1955,20 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
     busyKind: dictation.busyKind,
     onBusy: dictation.onBusy,
     onText: applyDictation,
+    onPhaseClosed: () => closeForPhase(),
   });
+  // The Phase closed under this note (its Save or a clip was refused): the text
+  // stays read-only for copying, and the recorder is dropped as when the modal closes.
+  useDictationDroppedWhenClosed(phaseClosed, recorder);
   // A saved Follow-up Note can't be edited, so a clip's words would be lost for good.
   const dictating = dictationBusy(recorder.state);
   const saveHintId = dictationSaveHintId(recorder, `${fieldId}-dictating`);
+
+  function closeForPhase() {
+    setError(FOLLOW_UP_PHASE_CLOSED);
+    setPhaseClosed(true);
+    router.refresh();
+  }
 
   function close() {
     recorder.discard();
@@ -1974,9 +2005,7 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
       return;
     }
     if (result?.error === HOLISTIC_PHASE_CLOSED_ERROR) {
-      setError(FOLLOW_UP_PHASE_CLOSED);
-      setPhaseClosed(true);
-      router.refresh();
+      closeForPhase();
       return;
     }
     if (!response.ok) {
