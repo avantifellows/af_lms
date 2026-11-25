@@ -101,3 +101,39 @@ export async function schoolHasAlumni(schoolId: string | number): Promise<boolea
   );
   return Boolean(row?.has_alumni);
 }
+
+export interface AlumniTotals {
+  alumni: number;
+  studying: number;
+  employed: number;
+}
+
+/**
+ * Alumni in the person's scope, and how many are studying or employed now
+ * (current status). Level 3 counts the whole alumni table, alumni with no
+ * school included; anyone else, the alumni whose latest school is theirs —
+ * the same rule as canAccessAlumni.
+ */
+export async function loadAlumniTotals(permission: UserPermission): Promise<AlumniTotals> {
+  const scope = schoolScopeSql(permission, "sch.code", "sch.region", 1);
+  const scoped = scope.sql !== "TRUE";
+  const [row] = await query<{ alumni: number; studying: number; employed: number }>(
+    `SELECT COUNT(*)::int AS alumni,
+            COUNT(*) FILTER (WHERE lower(trim(a.current_status)) = 'studying')::int AS studying,
+            COUNT(*) FILTER (WHERE lower(trim(a.current_status)) = 'employed')::int AS employed
+     FROM alumni a
+     ${scoped
+       ? `JOIN student s ON s.id = a.student_id
+          JOIN LATERAL (
+            SELECT sc.code, sc.region
+            FROM enrollment_record er JOIN school sc ON sc.id = er.group_id
+            WHERE er.user_id = s.user_id AND er.group_type = 'school'
+            ORDER BY er.academic_year DESC NULLS LAST, er.is_current DESC, er.id DESC
+            LIMIT 1
+          ) sch ON true
+          WHERE ${scope.sql}`
+       : ""}`,
+    scope.params,
+  );
+  return { alumni: Number(row?.alumni ?? 0), studying: Number(row?.studying ?? 0), employed: Number(row?.employed ?? 0) };
+}

@@ -257,6 +257,9 @@ type LogEntryFormProps = {
   // An open draft that isn't ready yet; its progress shows in the form.
   pendingDraft?: PendingDraft | null;
   canManageDraft?: boolean;
+  // The saved confirmation's "Back to students": the Mentor's own list
+  // (default the landing; a team lead's My Students tab).
+  studentsHref?: string;
 };
 
 function EntryForm({
@@ -374,6 +377,7 @@ export function LogEntryForm(props: LogEntryFormProps) {
           studentId={props.studentId}
           firstName={props.firstName}
           groupBefore={props.listGroup ?? null}
+          studentsHref={props.studentsHref}
         />
       ) : (
         <EntryForm props={props} values={values} change={change} setValues={setValues} onSaved={setSaved} />

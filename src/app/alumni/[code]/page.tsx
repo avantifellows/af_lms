@@ -3,9 +3,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { reachesSchool } from "@/lib/alumni/access";
 import { getSchoolName } from "@/lib/alumni/schools";
+import { isAlumniRole } from "@/lib/constants";
 import { getAlumniPermission, getFeatureAccess } from "@/lib/permissions";
 import AlumniShell, { AlumniNotice } from "@/components/alumni/AlumniShell";
 import AlumniTab from "@/components/alumni/AlumniTab";
+import MassRestore from "@/components/alumni/MassRestore";
 
 // One school's alumni: pass-outs to add and existing alumni (the same view as
 // the school page's Alumni tab), for anyone with the alumni feature.
@@ -24,14 +26,23 @@ export default async function AlumniSchoolPage({ params }: { params: Promise<{ c
   const allowed = !!permission && !!access?.canView && (await reachesSchool(permission, code));
   if (!allowed) {
     return (
-      <AlumniShell title="Alumni" email={email} back>
+      <AlumniShell title="Alumni" email={email} showHome={!isAlumniRole(permission?.role)} back>
         <AlumniNotice>You don&apos;t have access to this school&apos;s alumni.</AlumniNotice>
       </AlumniShell>
     );
   }
 
   return (
-    <AlumniShell title={`${name} · Alumni`} email={email} back>
+    <AlumniShell
+      title={name}
+      subtitle={`School ${code} · Alumni`}
+      email={email}
+      showHome={!isAlumniRole(permission?.role)}
+      back
+      actions={
+        access?.canEdit ? <MassRestore scope={{ kind: "school", code }} scopeLabel={`${name}'s alumni`} /> : null
+      }
+    >
       <AlumniTab schoolCode={code} canEdit={access?.canEdit ?? false} />
     </AlumniShell>
   );

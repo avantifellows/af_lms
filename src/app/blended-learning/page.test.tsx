@@ -7,6 +7,7 @@ const {
   mockGetBlendedLearningAccess,
   mockListMentees,
   mockListMentorCards,
+  mockListSupervisedMentors,
   mockCountNewFlags,
   mockListFlags,
   mockReadFlagsCutoff,
@@ -20,6 +21,7 @@ const {
   mockGetBlendedLearningAccess: vi.fn(),
   mockListMentees: vi.fn(),
   mockListMentorCards: vi.fn(),
+  mockListSupervisedMentors: vi.fn(),
   mockCountNewFlags: vi.fn(),
   mockListFlags: vi.fn(),
   mockReadFlagsCutoff: vi.fn(),
@@ -42,6 +44,7 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
 vi.mock("@/lib/blended-learning-mentees", () => ({
   listMentees: mockListMentees,
   listMentorCards: mockListMentorCards,
+  listSupervisedMentors: mockListSupervisedMentors,
 }));
 vi.mock("@/lib/blended-learning-flags", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/blended-learning-flags")>()),
@@ -80,6 +83,7 @@ describe("BlendedLearningPage", () => {
     vi.clearAllMocks();
     mockListMentees.mockResolvedValue({ talkToFirst: [], everyoneElse: [] });
     mockListMentorCards.mockResolvedValue([]);
+    mockListSupervisedMentors.mockResolvedValue([]);
     mockCountNewFlags.mockResolvedValue(0);
     mockLoadDashboardChrome.mockResolvedValue(null);
     mockListFlags.mockResolvedValue({ flags: [], nextCursor: null, newCount: 0 });
@@ -166,6 +170,89 @@ describe("BlendedLearningPage", () => {
     const filters = screen.getByRole("search", { name: "Filter flags" });
     expect(within(filters).queryByLabelText("Mentor")).not.toBeInTheDocument();
     expect(within(filters).getByLabelText("Flag Recipient")).toHaveValue("maths");
+  });
+
+  describe("a supervisor (a Mentor who supervises another Mentor)", () => {
+    const SUPERVISOR = { ...MENTOR, supervisedMentorUserIds: [9002] };
+    const IRA = {
+      studentId: 502, name: "Ira Attempt", gender: "Female", grade: 12, programId: 80,
+      programName: "STP Voucher Delhi", lastContact: "2026-10-12", lastContactSource: "conversation",
+      latestEntryKind: "attempt", openDraftState: null, reasons: ["attempt"], daysSince: 10,
+    };
+
+    beforeEach(() => {
+      signedInAs("lead@test.local");
+      mockGetBlendedLearningAccess.mockResolvedValue(SUPERVISOR);
+      mockListSupervisedMentors.mockResolvedValue([{ mentorUserId: 9002, name: "Synthetic Reportee" }]);
+      mockListMentees.mockResolvedValue({ talkToFirst: [IRA], everyoneElse: [] });
+    });
+
+    const CARDS = [
+      { mentorUserId: 9001, name: "Synthetic Lead", assigned: 1, grade12: 1, grade13: 0, talkedLast7: 0, notSpoken30Plus: 1 },
+      { mentorUserId: 9002, name: "Synthetic Reportee", assigned: 2, grade12: 1, grade13: 1, talkedLast7: 1, notSpoken30Plus: 0 },
+    ];
+
+    it("lands on the Team tab: their own card and their reportees', with the admin cards' stats", async () => {
+      mockListMentorCards.mockResolvedValue(CARDS);
+
+      render(await BlendedLearningPage());
+
+      expect(mockListMentorCards).toHaveBeenCalledWith(SUPERVISOR, "2026-10-22");
+      expect(mockListMentees).not.toHaveBeenCalled();
+      expect(screen.getByRole("heading", { level: 1, name: "Team" })).toBeInTheDocument();
+      const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+      expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
+        "Team",
+        "My Students",
+        "Flags",
+        "Resources",
+      ]);
+      expect(within(tabs).getByRole("link", { name: "Team" })).toHaveAttribute("aria-current", "page");
+      expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("href", "/blended-learning?tab=students");
+      const cards = within(screen.getByRole("list", { name: "Mentors" })).getAllByRole("link");
+      // Their own card opens their own list; a reportee's, that Mentor's page.
+      expect(cards[0]).toHaveTextContent("Synthetic LeadYou");
+      expect(cards[0]).toHaveAttribute("href", "/blended-learning?tab=students");
+      expect(cards[1]).toHaveTextContent("Synthetic Reportee");
+      expect(cards[1]).toHaveAttribute("href", "/blended-learning/mentors/9002");
+      expect(within(cards[1]).getByText("Assigned").nextSibling).toHaveTextContent("2");
+      // The old "whose students" switch is gone.
+      expect(screen.queryByRole("navigation", { name: "Whose students" })).not.toBeInTheDocument();
+    });
+
+    it("keeps their own list, which they log for, under My Students", async () => {
+      render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "students", mentor: "9002" }) }));
+
+      // A Mentor id in the URL never opens a reportee's list here.
+      expect(mockListMentees).toHaveBeenCalledWith({ access: SUPERVISOR, today: "2026-10-22" });
+      expect(mockListMentorCards).not.toHaveBeenCalled();
+      expect(screen.getByRole("heading", { level: 1, name: "My Students" })).toBeInTheDocument();
+      const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+      expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("aria-current", "page");
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("link", { name: "New log for Ira Attempt" }).length).toBeGreaterThan(0);
+    });
+
+    it("filters the Flags tab by their own or the supervised Mentor's Students, ignoring any other Mentor", async () => {
+      render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "flags", mentor: "9002" }) }));
+
+      expect(mockListFlags).toHaveBeenCalledWith(
+        SUPERVISOR,
+        { mentorUserId: 9002, recipient: null, cursor: null },
+        { lastSeenAt: "2026-10-21T09:30:00" }
+      );
+      const mentor = within(screen.getByRole("search", { name: "Filter flags" })).getByLabelText("Mentor");
+      expect(within(mentor).getAllByRole("option").map((option) => option.textContent)).toEqual([
+        "All Mentors",
+        "My students",
+        "Synthetic Reportee",
+      ]);
+      expect(mentor).toHaveValue("9002");
+
+      mockListFlags.mockClear();
+      render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "flags", mentor: "9003" }) }));
+      expect(mockListFlags.mock.calls[0][1]).toMatchObject({ mentorUserId: null });
+    });
   });
 
   it("tells a Mentor with no Students that none are mapped to them", async () => {
