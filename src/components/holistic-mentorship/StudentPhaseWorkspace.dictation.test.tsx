@@ -1800,6 +1800,58 @@ describe("Follow-up Note Dictation", () => {
       expect(addNotes).toHaveAccessibleDescription("This Phase is closed");
     });
 
+    // The latch only bridges the wait for fresh page data; then the server decides.
+    describe("after a refusal, Cancel, and new page data", () => {
+      const rerenderWith = (view: ReturnType<typeof renderWorkspace>, detail: HolisticStudentPhaseDetail) =>
+        view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} dictation={ON} />);
+      const closedDetail = () => {
+        const closed = completedDetail();
+        Object.assign(closed.phases[0], { active: false, closed: true });
+        Object.assign(closed.selectedPhase, { active: false, closed: true, canEditNotes: false });
+        return closed;
+      };
+
+      async function refuseThenCancel() {
+        stubNetwork(() => json({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422));
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        const detail = completedDetail();
+        const view = renderWorkspace(detail);
+        const dialog = openModal();
+        fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+        await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeDisabled();
+        return { view, detail };
+      }
+
+      it("keeps Add notes off through a re-render that brings no new data", async () => {
+        const { view, detail } = await refuseThenCancel();
+
+        rerenderWith(view, detail);
+
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeDisabled();
+      });
+
+      it("offers Add notes again when the refreshed page shows the Phase Active", async () => {
+        const { view } = await refuseThenCancel();
+
+        // An Admin returned the newer, unused Phase to Locked: this one is Active again.
+        rerenderWith(view, completedDetail());
+
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeEnabled();
+      });
+
+      it("offers Add notes again when a Closed refresh is followed by an Active one", async () => {
+        const { view } = await refuseThenCancel();
+
+        rerenderWith(view, closedDetail());
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeDisabled();
+        rerenderWith(view, completedDetail());
+
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeEnabled();
+      });
+    });
+
     it("says so, and drops the clip, when Dictation is refused because the Phase closed", async () => {
       const network = stubNetwork();
       vi.useFakeTimers();

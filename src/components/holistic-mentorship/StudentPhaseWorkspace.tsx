@@ -1932,10 +1932,17 @@ function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
 }) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
-  // Latched when the pop-up learns the Phase closed, until the refreshed page
-  // says so too: a closed and reopened pop-up must not take a new note or clip.
-  const [closedHere, setClosedHere] = useState(false);
-  const closed = phase.closed || closedHere;
+  // Latched when the pop-up learns the Phase closed, so a closed and reopened
+  // pop-up takes no new note or clip before the refreshed page arrives. It holds
+  // only for the page data in hand at the refusal: every server render brings a
+  // new followUpNotes array, client re-renders pass the same one through, so once
+  // newer data arrives its `closed` decides (an Admin may have made the Phase
+  // Active again by returning the newer, unused Phase to Locked).
+  const serverData = phase.followUpNotes;
+  const serverDataRef = useRef(serverData);
+  useEffect(() => { serverDataRef.current = serverData; });
+  const [closedWithData, setClosedWithData] = useState<typeof serverData | null>(null);
+  const closed = phase.closed || closedWithData === serverData;
   // A Closed Phase takes no new Follow-up Notes, even with submitted Notes.
   const blocked = closed ? "This Phase is closed"
     : phase.progress === "completed" ? null : "Submit Post-Session Notes first";
@@ -1947,7 +1954,7 @@ function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
         aria-describedby={canAdd ? undefined : hintId} onClick={() => setOpen(true)}>Add notes</Button>
     </div>} />
     <AddFollowUpNoteModal open={open} apiUrl={apiUrl} dictation={dictation} dictationUrl={dictationUrl}
-      closed={closed} onPhaseClosed={() => setClosedHere(true)} onClose={() => setOpen(false)} />
+      closed={closed} onPhaseClosed={() => setClosedWithData(serverDataRef.current)} onClose={() => setOpen(false)} />
   </>;
 }
 
