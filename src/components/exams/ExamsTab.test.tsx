@@ -58,6 +58,7 @@ const storedJee: StudentExamRecord = {
   application_number: "JEE123",
   has_password: true,
   sessions_applied: [1],
+  acknowledgements: [],
 };
 
 /** The tab opened on a Student with a stored JEE Mains password. */
@@ -348,5 +349,161 @@ describe("ExamsTab", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByLabelText("Add exam")).toBeInTheDocument();
+  });
+});
+
+describe("ExamsTab exam acknowledgements", () => {
+  const ack = {
+    id: 501,
+    exam_session: 2,
+    pages: [{ page_number: 1, mime_type: "application/pdf" }],
+    uploaded_by: "teacher@avantifellows.org",
+    uploaded_at: "2026-11-25T10:00:00.000Z",
+  };
+  const jeeBoth: StudentExamRecord = {
+    ...storedJee,
+    has_password: false,
+    sessions_applied: [1, 2],
+    acknowledgements: [ack],
+  };
+
+  function serveWithAcks(records: StudentExamRecord[], available = true) {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        exams: EXAMS,
+        records,
+        can_reveal_password: false,
+        acknowledgements_available: available,
+      }),
+    );
+  }
+
+  async function open(records: StudentExamRecord[], available = true, boardStream = "PCM") {
+    serveWithAcks(records, available);
+    render(<ExamsTab studentId={7} boardStream={boardStream} onSaved={vi.fn()} />);
+    await screen.findByLabelText("Add exam");
+  }
+
+  it("gives JEE Mains one slot per saved session, with the stored acknowledgement", async () => {
+    await open([jeeBoth]);
+
+    const s1 = screen.getByTestId("ack-slot-10-1");
+    const s2 = screen.getByTestId("ack-slot-10-2");
+    expect(within(s1).getByText("Session 1 exam acknowledgement")).toBeInTheDocument();
+    expect(
+      within(s1).getByRole("button", { name: "Upload JEE Mains session 1 exam acknowledgement" }),
+    ).toBeInTheDocument();
+    expect(within(s2).getByRole("link", { name: /^Open JEE Mains session [12] exam acknowledgement$/ })).toHaveAttribute(
+      "href",
+      "/api/students/7/documents/501/page/1",
+    );
+    expect(
+      within(s2).getByRole("button", { name: "Replace JEE Mains session 2 exam acknowledgement" }),
+    ).toBeInTheDocument();
+  });
+
+  it("gives an exam without sessions a single slot", async () => {
+    await open([
+      { ...storedJee, id: 11, exam_id: 2, exam_name: "NEET", sessions_applied: null },
+    ], true, "PCB");
+
+    expect(within(screen.getByTestId("ack-slot-11-single")).getByText("Exam acknowledgement"))
+      .toBeInTheDocument();
+  });
+
+  it("asks for a save before an unsaved exam can take an upload", async () => {
+    await open([]);
+    expect(
+      screen.getByText("Save this exam to upload its exam acknowledgement."),
+    ).toBeInTheDocument();
+  });
+
+  it("asks for a saved session before JEE Mains can take an upload", async () => {
+    await open([{ ...storedJee, sessions_applied: null }]);
+    expect(
+      screen.getByText("Tick a session and save to upload its exam acknowledgement."),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no uploads while acknowledgements can't be read", async () => {
+    await open([jeeBoth], false);
+    expect(screen.queryByText("Exam acknowledgement")).not.toBeInTheDocument();
+  });
+
+  it("warns that unticking a session removes its acknowledgement", async () => {
+    const user = userEvent.setup();
+    await open([jeeBoth]);
+
+    await user.click(screen.getByLabelText("Session 2"));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Saving will also remove: JEE Mains session 2 exam acknowledgement.",
+    );
+  });
+
+  it("warns that removing an exam removes its acknowledgements", async () => {
+    const user = userEvent.setup();
+    await open([jeeBoth]);
+
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Saving will also remove: JEE Mains session 2 exam acknowledgement.",
+    );
+  });
+
+  it("uploads a PDF for a session and shows it without a save", async () => {
+    const user = userEvent.setup();
+    await open([{ ...jeeBoth, acknowledgements: [] }]);
+    const stored = { ...ack, id: 601, exam_session: 1 };
+    mockFetch.mockResolvedValueOnce(jsonResponse(stored, 201));
+
+    const slot = screen.getByTestId("ack-slot-10-1");
+    await user.upload(
+      within(slot).getByLabelText("Choose JEE Mains session 1 exam acknowledgement file"),
+      new File(["%PDF"], "confirmation.pdf", { type: "application/pdf" }),
+    );
+    await user.click(
+      within(slot).getByRole("button", { name: "Save JEE Mains session 1 exam acknowledgement" }),
+    );
+
+    await waitFor(() =>
+      expect(within(slot).getByRole("link", { name: /^Open JEE Mains session [12] exam acknowledgement$/ })).toHaveAttribute(
+        "href",
+        "/api/students/7/documents/601/page/1",
+      ),
+    );
+    const [url, init] = mockFetch.mock.calls[1];
+    expect(url).toBe("/api/students/7/exam-records/10/acknowledgement");
+    expect(init.method).toBe("POST");
+    expect((init.body as FormData).get("exam_session")).toBe("1");
+    expect((init.body as FormData).get("page_1")).toBeInstanceOf(Blob);
+    expect(mockFetch.mock.calls.some((call) => call[1]?.method === "PUT")).toBe(false);
+  });
+
+  it("removes an acknowledgement after a confirm", async () => {
+    const user = userEvent.setup();
+    await open([jeeBoth]);
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const slot = screen.getByTestId("ack-slot-10-2");
+    await user.click(
+      within(slot).getByRole("button", { name: "Remove JEE Mains session 2 exam acknowledgement" }),
+    );
+    await user.click(
+      within(slot).getByRole("button", {
+        name: "Confirm removing JEE Mains session 2 exam acknowledgement",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(
+        within(slot).getByRole("button", { name: "Upload JEE Mains session 2 exam acknowledgement" }),
+      ).toBeInTheDocument(),
+    );
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      "/api/students/7/exam-records/10/acknowledgement?document_id=501",
+    );
+    expect(mockFetch.mock.calls[1][1].method).toBe("DELETE");
   });
 });

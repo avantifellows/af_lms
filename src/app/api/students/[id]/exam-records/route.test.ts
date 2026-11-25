@@ -15,6 +15,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 vi.mock("@/lib/student-exam-records", () => ({
   listExamOptions: vi.fn(),
   listStudentExamRecords: vi.fn(),
+  attachAcknowledgements: vi.fn(),
 }));
 vi.mock("@/lib/db-service-exam-records", () => ({
   createExamRecord: vi.fn(),
@@ -25,7 +26,11 @@ vi.mock("@/lib/exam-password-crypto", () => ({ encryptExamPassword: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
-import { listExamOptions, listStudentExamRecords } from "@/lib/student-exam-records";
+import {
+  attachAcknowledgements,
+  listExamOptions,
+  listStudentExamRecords,
+} from "@/lib/student-exam-records";
 import {
   createExamRecord,
   deleteExamRecord,
@@ -38,6 +43,7 @@ const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
 const mockListExams = vi.mocked(listExamOptions);
 const mockListRecords = vi.mocked(listStudentExamRecords);
+const mockAttach = vi.mocked(attachAcknowledgements);
 const mockCreate = vi.mocked(createExamRecord);
 const mockUpdate = vi.mocked(updateExamRecord);
 const mockDelete = vi.mocked(deleteExamRecord);
@@ -59,6 +65,10 @@ beforeEach(() => {
   mockDelete.mockReset();
   mockListExams.mockResolvedValue([JEE, NEET]);
   mockListRecords.mockResolvedValue([]);
+  mockAttach.mockImplementation(async (_studentId, records) => ({
+    records: records.map((record) => ({ ...record, acknowledgements: [] })),
+    acknowledgementsAvailable: true,
+  }));
   mockEncrypt.mockImplementation(async (plaintext, studentId) => `enc(${plaintext}|${studentId})`);
 });
 
@@ -138,8 +148,42 @@ describe("GET /api/students/[id]/exam-records", () => {
       application_number: "JEE123",
       has_password: true,
       sessions_applied: [1],
+      acknowledgements: [],
     });
     expect(body.can_reveal_password).toBe(true);
+    expect(body.acknowledgements_available).toBe(true);
+    expect(mockAttach).toHaveBeenCalledWith(7, expect.any(Array));
+  });
+
+  it("returns each registration's acknowledgements, and says when they can't be read", async () => {
+    authorize();
+    mockQuery.mockResolvedValueOnce([permissionRow()]);
+    const record = {
+      id: 10,
+      exam_id: 1,
+      exam_name: "JEE Mains",
+      application_number: "JEE123",
+      has_password: false,
+      sessions_applied: [1, 2],
+    };
+    mockListRecords.mockResolvedValue([record]);
+    const ack = {
+      id: 501,
+      exam_session: 2,
+      pages: [{ page_number: 1, mime_type: "application/pdf" }],
+      uploaded_by: "teacher@avantifellows.org",
+      uploaded_at: "2026-11-25T10:00:00.000Z",
+    };
+    mockAttach.mockResolvedValueOnce({
+      records: [{ ...record, acknowledgements: [ack] }],
+      acknowledgementsAvailable: false,
+    });
+
+    const res = await GET(new Request("http://test"), routeParams({ id: "7" }));
+
+    const body = await res.json();
+    expect(body.records[0].acknowledgements).toEqual([ack]);
+    expect(body.acknowledgements_available).toBe(false);
   });
 
   it("tells a role without exam_passwords that it cannot reveal", async () => {

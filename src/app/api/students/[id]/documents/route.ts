@@ -4,28 +4,14 @@ import { randomUUID } from "node:crypto";
 import { authOptions } from "@/lib/auth";
 import { canAccessStudent } from "@/lib/permissions";
 import { isValidDocumentType } from "@/lib/document-types";
-import {
-  uploadDocumentPages,
-  deleteDocumentObjects,
-  S3UploadError,
-  type PageUpload,
-} from "@/lib/s3";
+import { readDocumentPages } from "@/lib/document-upload";
+import { EXAM_ACK_DOCUMENT_TYPE } from "@/lib/exam-acknowledgements";
+import { uploadDocumentPages, deleteDocumentObjects, S3UploadError } from "@/lib/s3";
 import {
   listDocuments,
   createDocument,
   DbServiceError,
 } from "@/lib/db-service-documents";
-
-const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB raw (pre-downscale)
-const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024; //  5 MB
-const MAX_PHOTOS = 10;
-
-const ALLOWED_PHOTO_MIMES: ReadonlySet<string> = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-]);
 
 function parseStudentId(raw: string): number | null {
   // Require an exact integer match (`Number.parseInt` accepts trailing junk
@@ -77,8 +63,12 @@ export async function GET(
   if (!gate.ok) return gate.response;
 
   try {
+    // Exam acknowledgements belong to the Exams tab, where each
+    // sits under its exam and session; listed here they would lose both.
     const docs = await listDocuments(gate.studentId);
-    return NextResponse.json(docs);
+    return NextResponse.json(
+      docs.filter((doc) => doc.document_type !== EXAM_ACK_DOCUMENT_TYPE),
+    );
   } catch (err) {
     if (err instanceof DbServiceError) {
       console.error("db-service listDocuments failed:", err.status, err.body);
@@ -90,41 +80,6 @@ export async function GET(
     console.error("Unexpected error in GET documents:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
-}
-
-interface CollectedFile {
-  buffer: Buffer;
-  mimeType: string;
-  pageNumber: number;
-  size: number;
-}
-
-// Walk `page_1`, `page_2`, ... in order; stop at the first missing index.
-// Anything beyond a gap is ignored — clients should send contiguous page
-// numbers starting at 1.
-async function collectPageFiles(form: FormData): Promise<CollectedFile[]> {
-  const out: CollectedFile[] = [];
-  // Walk up to MAX_PHOTOS + 1 so that 11+ files in photos mode trip the
-  // "too many pages" check downstream rather than being silently truncated.
-  for (let i = 1; i <= MAX_PHOTOS + 1; i++) {
-    const value = form.get(`page_${i}`);
-    if (value === null) break;
-    // FormData entries are either string or file-like. Use duck typing on
-    // arrayBuffer() because `instanceof Blob` breaks across realms (jsdom Blob
-    // ≠ undici File when the test environment is jsdom).
-    if (typeof value === "string" || typeof (value as Blob).arrayBuffer !== "function") {
-      throw new Error(`page_${i} is not a file`);
-    }
-    const blob = value as Blob;
-    const arrayBuf = await blob.arrayBuffer();
-    out.push({
-      buffer: Buffer.from(arrayBuf),
-      mimeType: blob.type || "application/octet-stream",
-      pageNumber: i,
-      size: blob.size,
-    });
-  }
-  return out;
 }
 
 function badRequest(message: string): NextResponse {
@@ -173,47 +128,9 @@ export async function POST(
     }
   }
 
-  let files: CollectedFile[];
-  try {
-    files = await collectPageFiles(form);
-  } catch (err) {
-    console.error("Failed to collect page files:", err);
-    return badRequest("Invalid page upload");
-  }
-
-  if (files.length === 0) {
-    return badRequest("At least one page is required");
-  }
-
-  const firstMime = files[0].mimeType;
-  const isPdf = firstMime === "application/pdf";
-
-  if (isPdf) {
-    if (files.length !== 1) {
-      return badRequest("PDF mode accepts exactly one file (page_1)");
-    }
-    if (files[0].size > MAX_PDF_SIZE_BYTES) {
-      return badRequest(`PDF exceeds ${MAX_PDF_SIZE_BYTES} bytes`);
-    }
-  } else {
-    if (files.length > MAX_PHOTOS) {
-      return badRequest(`At most ${MAX_PHOTOS} pages allowed`);
-    }
-    for (const f of files) {
-      if (!ALLOWED_PHOTO_MIMES.has(f.mimeType)) {
-        return badRequest(`Unsupported MIME type: ${f.mimeType}`);
-      }
-      if (f.size > MAX_PHOTO_SIZE_BYTES) {
-        return badRequest(`page_${f.pageNumber} exceeds ${MAX_PHOTO_SIZE_BYTES} bytes`);
-      }
-    }
-  }
-
-  const pages: PageUpload[] = files.map((f) => ({
-    buffer: f.buffer,
-    mimeType: f.mimeType,
-    pageNumber: f.pageNumber,
-  }));
+  const read = await readDocumentPages(form);
+  if (!read.ok) return badRequest(read.error);
+  const { pages } = read;
 
   const documentUuid = randomUUID();
   const uploaderEmail = session?.user?.email || "unknown";

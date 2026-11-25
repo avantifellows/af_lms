@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, FormSection } from "@/components/ui";
+import { ExamAcknowledgementSlot } from "@/components/exams/ExamAcknowledgementSlot";
+import {
+  acknowledgementLabel,
+  acknowledgementSlots,
+  type ExamAcknowledgement,
+} from "@/lib/exam-acknowledgements";
 import {
   MASKED_PASSWORD,
   examSessionsFor,
@@ -31,6 +37,10 @@ interface ExamRow {
   /** The stored password is removed on save. */
   clearPassword: boolean;
   sessionsApplied: number[];
+  /** The sittings as stored: acknowledgement slots follow these, not unsaved ticks. */
+  savedSessions: number[];
+  /** Current exam acknowledgements of the stored registration. */
+  acknowledgements: ExamAcknowledgement[];
 }
 
 function emptyRow(exam: ExamOption): ExamRow {
@@ -43,6 +53,8 @@ function emptyRow(exam: ExamOption): ExamRow {
     newPassword: "",
     clearPassword: false,
     sessionsApplied: [],
+    savedSessions: [],
+    acknowledgements: [],
   };
 }
 
@@ -61,7 +73,30 @@ function toRow(record: StudentExamRecord): ExamRow {
     newPassword: record.has_password ? null : "",
     clearPassword: false,
     sessionsApplied: record.sessions_applied ?? [],
+    savedSessions: record.sessions_applied ?? [],
+    acknowledgements: record.acknowledgements ?? [],
   };
+}
+
+function retiredLabel(row: ExamRow, ack: ExamAcknowledgement): string {
+  return `${row.examName} ${acknowledgementLabel(ack.exam_session).toLowerCase()}`;
+}
+
+/**
+ * The acknowledgements a save would retire: every one of a registration being
+ * removed, and those whose session is being unticked. The DB Service retires
+ * them; this only lets the tab say so before Save.
+ */
+function acknowledgementsRetiredBySave(rows: ExamRow[], removed: ExamRow[]): string[] {
+  const lines = removed.flatMap((row) => row.acknowledgements.map((ack) => retiredLabel(row, ack)));
+  for (const row of rows) {
+    if (row.recordId === null) continue;
+    const kept = new Set(acknowledgementSlots(row.examName, row.sessionsApplied));
+    for (const ack of row.acknowledgements) {
+      if (!kept.has(ack.exam_session)) lines.push(retiredLabel(row, ack));
+    }
+  }
+  return lines;
 }
 
 /**
@@ -108,6 +143,9 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
   const [exams, setExams] = useState<ExamOption[]>([]);
   const [rows, setRows] = useState<ExamRow[]>([]);
   const [removedRecordIds, setRemovedRecordIds] = useState<number[]>([]);
+  // Stored rows removed in this edit, kept to say which acknowledgements go.
+  const [removedRows, setRemovedRows] = useState<ExamRow[]>([]);
+  const [acknowledgementsAvailable, setAcknowledgementsAvailable] = useState(false);
   const [canRevealPassword, setCanRevealPassword] = useState(false);
   // `showTyped` is keyed by exam id and toggles a new password's input. The
   // reveal state is keyed by record id: a revealed password belongs to one
@@ -148,11 +186,14 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
         exams: ExamOption[];
         records: StudentExamRecord[];
         can_reveal_password?: boolean;
+        acknowledgements_available?: boolean;
       } = await res.json();
       setExams(data.exams ?? []);
       setRows(initialRows(data.records ?? [], data.exams ?? [], boardStream));
       setCanRevealPassword(Boolean(data.can_reveal_password));
+      setAcknowledgementsAvailable(Boolean(data.acknowledgements_available));
       setRemovedRecordIds([]);
+      setRemovedRows([]);
       forgetPasswords();
       setRowErrors({});
     } catch (err) {
@@ -260,6 +301,11 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
         setRemovedRecordIds((ids) =>
           ids.includes(row.recordId!) ? ids : [...ids, row.recordId!],
         );
+        setRemovedRows((removed) =>
+          removed.some((candidate) => candidate.recordId === row.recordId)
+            ? removed
+            : [...removed, row],
+        );
       }
       return current.filter((candidate) => candidate.examId !== examId);
     });
@@ -268,6 +314,24 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
       delete next[examId];
       return next;
     });
+  }
+
+  /** An upload or removal in one slot; it is already stored, so not an edit. */
+  function setAcknowledgement(
+    recordId: number,
+    session: number | null,
+    acknowledgement: ExamAcknowledgement | null,
+  ) {
+    setRows((current) =>
+      current.map((row) => {
+        if (row.recordId !== recordId) return row;
+        const others = row.acknowledgements.filter((ack) => ack.exam_session !== session);
+        return {
+          ...row,
+          acknowledgements: acknowledgement ? [...others, acknowledgement] : others,
+        };
+      }),
+    );
   }
 
   function toggleSession(row: ExamRow, session: number) {
@@ -325,7 +389,9 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
         return;
       }
       setRows(initialRows(data.records ?? [], exams, boardStream));
+      setAcknowledgementsAvailable(Boolean(data.acknowledgements_available));
       setRemovedRecordIds([]);
+      setRemovedRows([]);
       forgetPasswords();
       setWarnings(data.warnings ?? []);
       setSaved(true);
@@ -337,6 +403,8 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
       setSaving(false);
     }
   }
+
+  const retiredBySave = acknowledgementsRetiredBySave(rows, removedRows);
 
   if (loading) {
     return <p className="px-6 py-5 text-sm text-text-muted">Loading exams…</p>;
@@ -487,6 +555,13 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
                       </div>
                     </fieldset>
                   )}
+                  {acknowledgementsAvailable && (
+                    <AcknowledgementSlots
+                      studentId={studentId}
+                      row={row}
+                      onChange={setAcknowledgement}
+                    />
+                  )}
                 </div>
               </FormSection>
             );
@@ -494,11 +569,74 @@ export function ExamsTab({ studentId, boardStream, onSaved }: ExamsTabProps) {
         )}
       </div>
 
+      {retiredBySave.length > 0 && (
+        <div
+          role="status"
+          className="mx-6 mb-3 rounded-lg border border-warning/30 bg-warning-bg p-3 text-sm text-warning"
+        >
+          Saving will also remove: {retiredBySave.join(", ")}.
+        </div>
+      )}
       <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
         <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>
           {saving ? "Saving…" : "Save Exams"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+interface AcknowledgementSlotsProps {
+  studentId: number;
+  row: ExamRow;
+  onChange: (
+    recordId: number,
+    session: number | null,
+    acknowledgement: ExamAcknowledgement | null,
+  ) => void;
+}
+
+/**
+ * The exam's exam acknowledgement uploads: one per saved session for
+ * JEE Mains, one for any other exam. The registration must be saved first, and
+ * JEE Mains needs a session ticked and saved.
+ */
+function AcknowledgementSlots({ studentId, row, onChange }: AcknowledgementSlotsProps) {
+  const heading = <p className={labelClassName}>Exam acknowledgement</p>;
+  if (row.recordId === null) {
+    return (
+      <div className="md:col-span-2">
+        {heading}
+        <p className="mt-1 text-sm text-text-muted">
+          Save this exam to upload its exam acknowledgement.
+        </p>
+      </div>
+    );
+  }
+  const recordId = row.recordId;
+  const slots = acknowledgementSlots(row.examName, row.savedSessions);
+  return (
+    <div className="md:col-span-2">
+      {heading}
+      {slots.length === 0 ? (
+        <p className="mt-1 text-sm text-text-muted">
+          Tick a session and save to upload its exam acknowledgement.
+        </p>
+      ) : (
+        <div className="mt-1 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {slots.map((session) => (
+            <ExamAcknowledgementSlot
+              key={session ?? "single"}
+              studentId={studentId}
+              recordId={recordId}
+              examName={row.examName}
+              session={session}
+              acknowledgement={row.acknowledgements.find((ack) => ack.exam_session === session)}
+              onChange={(ack) => onChange(recordId, session, ack)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

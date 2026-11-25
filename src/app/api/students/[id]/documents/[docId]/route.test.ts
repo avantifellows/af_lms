@@ -35,7 +35,13 @@ function authorizedAdmin() {
 // belongs to that student, then softDeleteDocument(docId). Both go through
 // fetch — sequence the responses.
 function mockListThenDelete(opts: {
-  listDocs?: Array<{ id: number; student_id: number; deleted_at?: string | null; pages?: unknown[] }>;
+  listDocs?: Array<{
+    id: number;
+    student_id: number;
+    deleted_at?: string | null;
+    pages?: unknown[];
+    document_type?: string;
+  }>;
   deleteResponse?: { ok: boolean; status: number; text?: string };
 }) {
   const docs = opts.listDocs ?? [];
@@ -164,6 +170,22 @@ describe("DELETE /api/students/[id]/documents/[docId]", () => {
     const { DELETE } = await import("./route");
     const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));
     expect(res.status).toBe(404);
+  });
+
+  it("refuses an exam acknowledgement — those are removed from the Exams tab", async () => {
+    authorizedAdmin();
+    const fetchMock = mockListThenDelete({
+      listDocs: [{ id: 77, student_id: 1, document_type: "exam_acknowledgement" }],
+    });
+
+    const { DELETE } = await import("./route");
+    const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "Remove an exam acknowledgement from the Exams tab",
+    });
+    // Only the ownership read went out; no DELETE reached the DB Service.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns 502 when db-service returns 5xx on delete", async () => {
