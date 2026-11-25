@@ -53,7 +53,7 @@ page opens fine, which is what left `% Docs` on "—" for them (#338). Both Scho
 routes share it.
 
 ## 2. DB Service (Elixir/Phoenix) — proxied writes
-External HTTP API. **Student, batch, quiz-session, and document writes go here**, never direct to Postgres.
+External HTTP API. **Student, batch, quiz-session, document and alumni writes go here**, never direct to Postgres. Alumni history (`alumni_journey`) is written only through `POST /alumni/:id/journey` and read from Postgres.
 ```ts
 const res = await fetch(`${process.env.DB_SERVICE_URL}/student/${id}`, {
   method: "PATCH",
