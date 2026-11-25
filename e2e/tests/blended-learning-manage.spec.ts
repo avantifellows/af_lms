@@ -9,6 +9,7 @@ import {
   MANAGE_MENTEES,
   programStudentId,
 } from "../helpers/blended-learning-fixtures";
+import { formatCalendarDate } from "../../src/lib/blended-learning-format";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
 // The admin Manage page against the real fixture DDL (db-service
@@ -267,8 +268,72 @@ test.describe("Blended Learning Manage — Team leads", () => {
         pool.query(
           `UPDATE blended_learning_mentor_supervisions
            SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
-               end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
-           WHERE ended_at IS NULL AND supervisor_user_id = $1`,
+               ended_by_email = 'e2e-cleanup@example.com', end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
+           WHERE (ended_at IS NULL OR ended_at > (now() AT TIME ZONE 'UTC')) AND supervisor_user_id = $1`,
+          [mentorDUserId]
+        )
+      );
+    }
+  });
+
+  test("a link given a future end is listed with its end date, still grants, blocks a re-add, and End cuts it short", async ({ page, browser }) => {
+    // As db-service could write it: running from now (earlier specs' D → C
+    // periods end before it, so no overlap), planned to end in 10 days.
+    const endsOn = await withPool(async (pool) => {
+      const inserted = await pool.query<{ ends_on: string }>(
+        `INSERT INTO blended_learning_mentor_supervisions
+           (supervisor_user_id, mentor_user_id, academic_year, started_at, assigned_by_email, assignment_source,
+            ended_at, ended_by_email, end_source, end_reason)
+         SELECT $1, permission.user_id, $2,
+                date_trunc('second', now() AT TIME ZONE 'UTC'), $3, 'e2e_fixture',
+                date_trunc('second', now() AT TIME ZONE 'UTC') + interval '10 days', 'e2e-planner@example.com',
+                'e2e_fixture', 'planned_end'
+         FROM user_permission permission WHERE LOWER(permission.email) = LOWER($4) AND permission.role = 'blended_mentor'
+         RETURNING (((ended_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date)::text AS ends_on`,
+        [mentorDUserId, CURRENT_ACADEMIC_YEAR, BLENDED_ADMIN.email, BLENDED_MENTOR_C.email]
+      );
+      return formatCalendarDate(inserted.rows[0].ends_on);
+    });
+    const leadContext = await browser.newContext();
+    try {
+      await signInAs(page, BLENDED_ADMIN);
+      await openManage(page);
+      const row = teamLeadRow(page);
+      await expect(row).toContainText(`ending on ${endsOn}`);
+
+      // It is in force until then: the lead lands on the Team cards.
+      const lead = await leadContext.newPage();
+      await signInAs(lead, BLENDED_MENTOR_D);
+      await lead.goto("/blended-learning");
+      await expect(lead.getByRole("heading", { level: 1, name: "Team" })).toBeAttached();
+
+      // Adding the pair again clashes with it, and says when it ends.
+      const add = page.getByRole("form", { name: "Add a team lead" });
+      await add.getByLabel("Team lead").selectOption({ label: BLENDED_MENTOR_D.name });
+      await add.getByLabel("Mentor they lead").selectOption({ label: BLENDED_MENTOR_C.name });
+      await add.getByRole("button", { name: "Add team lead" }).click();
+      await expect(add.getByText(`This team lead already leads this mentor until ${endsOn}.`)).toBeVisible();
+
+      await row.getByRole("button", { name: `End ${BLENDED_MENTOR_D.name} → ${BLENDED_MENTOR_C.name}` }).click();
+      const dialog = page.getByRole("dialog", { name: "End this team lead?" });
+      await expect(dialog).toContainText(`students from now, instead of from ${endsOn}.`);
+      await dialog.getByRole("button", { name: "End" }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(teamLeadRow(page)).toHaveCount(0);
+      const ended = await latestSupervision();
+      expect(ended).toMatchObject({ ended_by_email: BLENDED_ADMIN.email, end_source: "af_lms_manage_ui", end_reason: "supervision_ended" });
+      expect(ended!.ended_at!.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
+
+      await lead.reload();
+      await expect(lead.getByRole("heading", { level: 1, name: "My Students" })).toBeAttached();
+    } finally {
+      await leadContext.close();
+      await withPool((pool) =>
+        pool.query(
+          `UPDATE blended_learning_mentor_supervisions
+           SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
+               ended_by_email = 'e2e-cleanup@example.com', end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
+           WHERE (ended_at IS NULL OR ended_at > (now() AT TIME ZONE 'UTC')) AND supervisor_user_id = $1`,
           [mentorDUserId]
         )
       );
@@ -321,8 +386,8 @@ test.describe("Blended Learning Manage — Team leads", () => {
         pool.query(
           `UPDATE blended_learning_mentor_supervisions
            SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
-               end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
-           WHERE ended_at IS NULL AND supervisor_user_id = $1`,
+               ended_by_email = 'e2e-cleanup@example.com', end_source = 'e2e_cleanup', end_reason = 'e2e_cleanup'
+           WHERE (ended_at IS NULL OR ended_at > (now() AT TIME ZONE 'UTC')) AND supervisor_user_id = $1`,
           [mentorDUserId]
         )
       );
@@ -528,7 +593,7 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
       pool.query(
         `INSERT INTO blended_learning_mentor_mentee_mappings
            (student_id, mentor_user_id, program_id, academic_year, started_at, assignment_source)
-         VALUES ($1, $2, $3, $4, now(), 'e2e_fixture')`,
+         VALUES ($1, $2, $3, $4, date_trunc('second', now() AT TIME ZONE 'UTC'), 'e2e_fixture')`,
         [studentIds[mappedLater.key], mentorDUserId, mappedLater.programId, CURRENT_ACADEMIC_YEAR]
       )
     );

@@ -360,8 +360,14 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `20260921120000` + its ensure migration; the other eight: PR #804,
   `20261022120000`–`20261022120700`). af_lms reads and writes them directly over SQL (ADR 0005)
   through `query()`/`withTransaction`, never through DB Service HTTP.
-- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`
-  whose Student is not marked a dropout (`student.status = 'dropout'`; NULL or any other
+- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR`, i.e. whose period contains now:
+  `started_at <= (now() AT TIME ZONE 'UTC') AND (ended_at IS NULL OR ended_at > (now() AT TIME ZONE 'UTC'))`
+  (columns are UTC `timestamp`; half-open, so a zero-length row contains nothing). A Mapping the
+  db-service import sheet dates in the future grants nothing until it starts, though it already
+  holds the partial unique index's one running slot; on a reassignment db-service ends the old
+  Mapping at the new one's `started_at`, so the old Mentor keeps the Student until then. A
+  db-service exclusion constraint (added alongside this change) keeps one Student's periods in a year from overlapping, so at
+  most one row is active at any instant. Only Students not marked a dropout count (`student.status = 'dropout'`; NULL or any other
   status stays in), written once as `activeBlendedMappingSql(alias, yearParam)` in
   `src/lib/blended-learning-access.ts` (`notBlendedDropoutSql(studentIdSql)` is the dropout
   half). Every Blended Learning scope uses it: `canAccessBlendedStudent` (so a dropout's page,
@@ -371,7 +377,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   Item targets (count, preview, Mentor "(N students)", push and push again never reach a
   dropout; a pasted dropout ID is listed as "found but with no active mentor"). Mapping rows
   are never changed, so a Student whose status changes back reappears. Only the links import
-  reads the raw rows (`currentBlendedMappingRowSql`), so a dropout's links stay loaded.
+  reads the raw rows (`currentBlendedMappingRowSql`: not yet ended, i.e. running or ending in the
+  future, started or not), so a dropout's, a future-dated Mapping's and a future-ended Mapping's
+  links stay loaded. It reads Students through `EXISTS`, so one mid-handover (old row ending as its
+  successor starts) is matched once.
   Already-materialised Common Action Items on a dropout keep counting in the item's Open/Done.
 - **Read model:** `listMentees({ access, mentorUserId?, studentId?, today })` in
   `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
@@ -629,8 +638,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.
 - **Links load script (#455):** `blended_learning_student_links` is filled outside the app by the
   operator script `npm run blended:import-links` (`runBlendedLinksImport` in
-  `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the active Mapping
-  source (`activeBlendedMappingSql`), the existing links (`student_id = ANY($1::bigint[])`), and
+  `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the raw
+  not-yet-ended Mapping rows (`currentBlendedMappingRowSql`, one row per Student), the existing links (`student_id = ANY($1::bigint[])`), and
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
@@ -673,7 +682,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `supervisor_user_id`, `mentor_user_id` (both `user` FKs, `<>` each other), `academic_year`,
   `started_at`, then the Mapping table's audit and lifecycle columns and CHECKs. One running row per
   (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
-  `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings.
+  `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings
+  (period contains now). The Manage list and End take every link not yet ended (`ended_at IS NULL
+  OR ended_at > now`): a future-dated link is listed and can be ended (at its `started_at`), and
+  one given a future `ended_at` outside the app is listed with "ending on <date>" and End cuts it
+  short. The team-lead INSERT's `ON CONFLICT` still matches the partial unique index (`ended_at IS
+  NULL`).
 - Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
   `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
   filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an
@@ -687,8 +701,15 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `supervision_ended`). Add: both people must hold a live `blended_mentor` permission (Mappings alone
   do not count), checked inside the insert's transaction with their permission rows locked
   `FOR SHARE`, then `INSERT … ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; self-supervision is a
-  422, a running pair a 409. End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND ended_at IS
-  NULL`, a 404 when nothing matched (so a pair ended and re-added meanwhile keeps its new row).
+  422, a running pair a 409 (also when the insert hits db-service's
+  `blm_supervisions_no_overlapping_periods` exclusion constraint, `23P01` with that constraint name:
+  a racing add won, or the pair has a link given a future end, and then the message says "until
+  <date>" from a lookup after the rollback; other errors, other constraints included, still throw).
+  End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND (ended_at IS NULL OR ended_at > now)`
+  setting `ended_at = GREATEST(started_at, now)` and the admin as ender (`ended_by_user_id` cleared,
+  `ended_by_email`, `end_source`, `end_reason` overwritten for a link cut short), a 404 when nothing
+  matched (an end already past is never touched; a pair ended and re-added meanwhile keeps its new
+  row).
 - Flags tab Mentor filter: for a team lead ("My students" or a reportee) it matches the Student's
   current active Mapping's Mentor (dropouts left out), not who logged the flagged Conversation; an
   admin's filter still matches the Conversation's Mentor.

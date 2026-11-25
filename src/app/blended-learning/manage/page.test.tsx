@@ -81,6 +81,7 @@ beforeEach(() => {
       teamLead: { userId: 78, name: "Synthetic Lead", email: "lead@test.local" },
       reportee: { userId: 77, name: "Synthetic Reportee", email: "reportee@test.local" },
       startedOn: "2026-11-12",
+      endsOn: null,
     },
   ]);
   mockListBlendedMentorOptions.mockResolvedValue([

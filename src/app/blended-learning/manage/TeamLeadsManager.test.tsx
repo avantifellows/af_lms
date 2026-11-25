@@ -15,6 +15,7 @@ const LINK = {
   teamLead: { ...LEAD, isMentor: true },
   reportee: { ...REPORTEE, isMentor: true },
   startedOn: "2026-11-12",
+  endsOn: null,
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -39,9 +40,28 @@ describe("TeamLeadsManager", () => {
     const row = within(screen.getByRole("list", { name: "Team leads" })).getByRole("listitem");
     expect(row).toHaveTextContent("Synthetic LeadleadsSynthetic Reportee");
     expect(row).toHaveTextContent("Since 12 Nov 2026");
+    expect(row).not.toHaveTextContent("ending on");
 
     rerender(<TeamLeadsManager links={[]} mentors={[LEAD, REPORTEE]} />);
     expect(screen.getByText("No team leads yet.")).toBeInTheDocument();
+  });
+
+  it("shows when a link given a future end stops, and End cuts it short", async () => {
+    const user = userEvent.setup();
+    const ending = { ...LINK, endsOn: "2026-12-31" };
+    render(<TeamLeadsManager links={[ending]} mentors={[LEAD, REPORTEE]} />);
+
+    const row = within(screen.getByRole("list", { name: "Team leads" })).getByRole("listitem");
+    expect(row).toHaveTextContent("Since 12 Nov 2026 · ending on 31 Dec 2026");
+
+    await user.click(within(row).getByRole("button", { name: "End Synthetic Lead → Synthetic Reportee" }));
+    const dialog = screen.getByRole("dialog", { name: "End this team lead?" });
+    expect(dialog).toHaveTextContent(
+      "Synthetic Lead will no longer see Synthetic Reportee's students from now, instead of from 31 Dec 2026. The record is kept."
+    );
+    respond(204);
+    await user.click(within(dialog).getByRole("button", { name: "End" }));
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/blended-learning/team-leads/4/end", expect.objectContaining({ method: "POST" }));
   });
 
   it("says nothing extra about a link whose two people are both still Mentors", () => {
@@ -58,6 +78,7 @@ describe("TeamLeadsManager", () => {
       teamLead: { ...OTHER, isMentor: false },
       reportee: { userId: 83, name: "Synthetic Departed", email: null, isMentor: false },
       startedOn: "2026-11-13",
+      endsOn: null,
     };
     render(<TeamLeadsManager links={[reporteeGone, leadGone, bothGone]} mentors={[LEAD, REPORTEE, OTHER]} />);
 
@@ -135,7 +156,7 @@ describe("TeamLeadsManager", () => {
     const user = userEvent.setup();
     const twinA = { userId: 80, name: "Synthetic Twin", email: "twin.a@test.local" };
     const twinB = { userId: 81, name: "Synthetic Twin", email: "twin.b@test.local" };
-    const link = { id: 5, teamLead: { ...LEAD, isMentor: true }, reportee: { ...twinA, isMentor: true }, startedOn: "2026-11-12" };
+    const link = { id: 5, teamLead: { ...LEAD, isMentor: true }, reportee: { ...twinA, isMentor: true }, startedOn: "2026-11-12", endsOn: null };
     render(<TeamLeadsManager links={[link]} mentors={[LEAD, twinA, twinB]} />);
 
     const form = screen.getByRole("form", { name: "Add a team lead" });
@@ -158,7 +179,7 @@ describe("TeamLeadsManager", () => {
     const departed = { userId: 82, name: "Synthetic Reportee", email: "departed@test.local", isMentor: false };
     render(
       <TeamLeadsManager
-        links={[{ id: 6, teamLead: { ...LEAD, isMentor: true }, reportee: departed, startedOn: "2026-11-12" }]}
+        links={[{ id: 6, teamLead: { ...LEAD, isMentor: true }, reportee: departed, startedOn: "2026-11-12", endsOn: null }]}
         mentors={[LEAD, REPORTEE]}
       />
     );

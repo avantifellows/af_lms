@@ -8,6 +8,7 @@ import {
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import type { FieldErrors } from "./blended-learning-manage-input";
+import { formatCalendarDate } from "./blended-learning-format";
 import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 
 // The Manage page's Team leads (server-only): Blended Learning Admins who may
@@ -24,7 +25,15 @@ export type TeamLeadPerson = { userId: number; name: string; email: string | nul
 // Supervision with either side no longer one stays listed (so it can be
 // ended) but has no effect: the access check skips it.
 export type TeamLeadLinkPerson = TeamLeadPerson & { isMentor: boolean };
-export type TeamLeadLink = { id: number; teamLead: TeamLeadLinkPerson; reportee: TeamLeadLinkPerson; startedOn: string };
+// `endsOn`: the IST date a link given a future end (outside the app, e.g. by
+// db-service) stops, or null for one that runs until it is ended.
+export type TeamLeadLink = {
+  id: number;
+  teamLead: TeamLeadLinkPerson;
+  reportee: TeamLeadLinkPerson;
+  startedOn: string;
+  endsOn: string | null;
+};
 
 export type TeamLeadResult =
   | { ok: true }
@@ -32,6 +41,17 @@ export type TeamLeadResult =
 
 const TEAM_LEAD_SOURCE = "af_lms_manage_ui";
 const END_REASON = "supervision_ended";
+
+const ALREADY_LEADS = "This team lead already leads this mentor.";
+
+// A link is still in force or yet to come: not ended, or ended in the future
+// (it grants until then, blended-learning-access's period rule). These are the
+// links the Manage page lists and can end. UTC, like the columns.
+const NOT_YET_ENDED_SQL = (alias: string) =>
+  `(${alias}.ended_at IS NULL OR ${alias}.ended_at > (now() AT TIME ZONE 'UTC'))`;
+
+// A UTC timestamp column as its IST calendar date, `YYYY-MM-DD`.
+const IST_DATE_SQL = (column: string) => `((${column} AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text`;
 
 const FORBIDDEN: TeamLeadResult = { ok: false, status: 403, error: "Forbidden" };
 const NOT_FOUND: TeamLeadResult = { ok: false, status: 404, error: "Not found" };
@@ -77,11 +97,15 @@ type LinkRow = {
   supervisor_is_mentor: boolean;
   mentor_is_mentor: boolean;
   started_on: string;
+  ended_on: string | null;
 };
 
-// The running current-year Supervisions, by team lead then reportee, each
-// with whether the lead and the reportee are still live Mentors, so the page
-// can say why one has no effect.
+// The current-year Supervisions not yet ended (running, or given a future
+// end), by team lead then reportee, each with whether the lead and the
+// reportee are still live Mentors, so the page can say why one has no effect,
+// and when one given a future end stops. A future-dated one (import sheet
+// only) is listed too, as it holds the pair's slot and can be ended; the
+// access check skips it until it starts.
 export async function listTeamLeadLinks(access: BlendedLearningAccess): Promise<TeamLeadLink[]> {
   if (!canBlendedLearning(access, "manage")) return [];
   const rows = await query<LinkRow>(
@@ -90,11 +114,12 @@ export async function listTeamLeadLinks(access: BlendedLearningAccess): Promise<
             supervision.mentor_user_id, ${NAME_SQL("reportee")} AS mentor_name, reportee.email AS mentor_email,
             ${liveBlendedMentorSql("supervision.supervisor_user_id", "$2")} AS supervisor_is_mentor,
             ${liveBlendedMentorSql("supervision.mentor_user_id", "$2")} AS mentor_is_mentor,
-            ((supervision.started_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS started_on
+            ${IST_DATE_SQL("supervision.started_at")} AS started_on,
+            ${IST_DATE_SQL("supervision.ended_at")} AS ended_on
      FROM blended_learning_mentor_supervisions supervision
      JOIN "user" lead ON lead.id = supervision.supervisor_user_id
      JOIN "user" reportee ON reportee.id = supervision.mentor_user_id
-     WHERE supervision.academic_year = $1 AND supervision.ended_at IS NULL
+     WHERE supervision.academic_year = $1 AND ${NOT_YET_ENDED_SQL("supervision")}
      ORDER BY supervisor_name, mentor_name, supervision.id`,
     [CURRENT_ACADEMIC_YEAR, BLENDED_MENTOR_ROLE]
   );
@@ -113,6 +138,7 @@ export async function listTeamLeadLinks(access: BlendedLearningAccess): Promise<
       isMentor: row.mentor_is_mentor === true,
     },
     startedOn: row.started_on,
+    endsOn: row.ended_on ?? null,
   }));
 }
 
@@ -177,32 +203,78 @@ async function insertSupervision(client: PoolClient, pair: Pair, actorEmail: str
   return result.rows.length;
 }
 
+const NO_OVERLAP_CONSTRAINT = "blm_supervisions_no_overlapping_periods";
+
+// Postgres exclusion_violation (23P01) on db-service's
+// blm_supervisions_no_overlapping_periods, which keeps a pair's [started_at,
+// ended_at) periods in a year from overlapping. The insert hits it instead of
+// the ON CONFLICT when the pair has a link given a future end, or when two
+// adds race: either way the pair already has a link in force. Any other
+// constraint is not this, and still throws.
+function isOverlappingPeriod(error: unknown): boolean {
+  const pg = error as { code?: unknown; constraint?: unknown } | null;
+  return pg?.code === "23P01" && pg.constraint === NO_OVERLAP_CONSTRAINT;
+}
+
+// The 409 for a pair that already has a link in force: when that link was
+// given a future end, says when it ends (so the admin can find it on the list
+// or add the pair again from then); else the plain "already leads".
+async function alreadyLeads(pair: Pair): Promise<TeamLeadResult> {
+  const rows = await query<{ ended_on: string | null }>(
+    `SELECT ${IST_DATE_SQL("supervision.ended_at")} AS ended_on
+     FROM blended_learning_mentor_supervisions supervision
+     WHERE supervision.supervisor_user_id = $1 AND supervision.mentor_user_id = $2
+       AND supervision.academic_year = $3 AND ${NOT_YET_ENDED_SQL("supervision")}
+     ORDER BY supervision.ended_at DESC NULLS FIRST
+     LIMIT 1`,
+    [pair.supervisorUserId, pair.mentorUserId, CURRENT_ACADEMIC_YEAR]
+  );
+  const endsOn = rows[0]?.ended_on;
+  const error = endsOn
+    ? `This team lead already leads this mentor until ${formatCalendarDate(endsOn)}.`
+    : ALREADY_LEADS;
+  return { ok: false, status: 409, error };
+}
+
 // Starts a team lead's Supervision of a Mentor; a 409 when it already runs.
 export async function createTeamLeadLink(access: BlendedLearningAccess, raw: unknown): Promise<TeamLeadResult> {
   if (!canBlendedLearning(access, "manage")) return FORBIDDEN;
   const parsed = parsePair(raw);
   if (!parsed.ok) return invalid(parsed.fieldErrors);
-  // Field errors when either is not a live Mentor, else the rows inserted.
-  const outcome = await withTransaction(async (client) => {
-    const people = await notMentors(client, parsed.pair);
-    return people ?? (await insertSupervision(client, parsed.pair, access.actorEmail));
-  });
+  // Field errors when either is not a live Mentor, else the rows inserted. An
+  // overlapping period is caught outside the transaction, so it has rolled
+  // back before the clashing link is looked up.
+  let outcome: FieldErrors | number;
+  try {
+    outcome = await withTransaction(async (client) => {
+      const people = await notMentors(client, parsed.pair);
+      return people ?? (await insertSupervision(client, parsed.pair, access.actorEmail));
+    });
+  } catch (error) {
+    if (!isOverlappingPeriod(error)) throw error;
+    return alreadyLeads(parsed.pair);
+  }
   if (typeof outcome !== "number") return invalid(outcome);
-  if (outcome === 0) return { ok: false, status: 409, error: "This team lead already leads this mentor." };
+  if (outcome === 0) return { ok: false, status: 409, error: ALREADY_LEADS };
   return { ok: true };
 }
 
-// Ends a running current-year Supervision by its id, in one conditional
-// UPDATE, so a pair ended and started again meanwhile keeps its new row; a 404
-// when that row is not running (ended already, another year, or no such id).
+// Ends a current-year Supervision not yet ended by its id, now (or at its
+// start, if that is later), in one conditional UPDATE, so a pair ended and
+// started again meanwhile keeps its new row; a 404 when that row has already
+// ended (or is another year's, or no such id). A link given a future end is
+// cut short: its end moves forward to now and the record names the admin and
+// the Manage page as who ended it, replacing the earlier planned end's. An
+// end already past is never touched, and the end only ever moves earlier.
 export async function endTeamLeadLink(access: BlendedLearningAccess, id: number): Promise<TeamLeadResult> {
   if (!canBlendedLearning(access, "manage")) return FORBIDDEN;
   if (!Number.isSafeInteger(id) || id <= 0) return NOT_FOUND;
   const rows = await query<{ id: number | string }>(
     `UPDATE blended_learning_mentor_supervisions
      SET ended_at = GREATEST(started_at, date_trunc('second', now() AT TIME ZONE 'UTC')),
-         ended_by_email = $3, end_source = $4, end_reason = $5, end_audit_reason = NULL, updated_at = now()
-     WHERE id = $1 AND academic_year = $2 AND ended_at IS NULL
+         ended_by_user_id = NULL, ended_by_email = $3, end_source = $4, end_reason = $5, end_audit_reason = NULL,
+         updated_at = now()
+     WHERE id = $1 AND academic_year = $2 AND ${NOT_YET_ENDED_SQL("blended_learning_mentor_supervisions")}
      RETURNING id`,
     [id, CURRENT_ACADEMIC_YEAR, access.actorEmail, TEAM_LEAD_SOURCE, END_REASON]
   );

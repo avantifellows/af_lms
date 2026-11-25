@@ -16,8 +16,9 @@ import { manageRequest } from "./manageRequest";
 // The Manage page's Team leads: who leads whom this academic year. A team lead
 // lands on cards for themselves and the Mentors they lead, and sees those
 // Mentors' Students view only; they never log for them. Add a team lead and a
-// Mentor they lead, or end one after a confirmation (the record stays). Every
-// change re-reads the page.
+// Mentor they lead, or end one after a confirmation (the record stays); a link
+// given a future end outside the app shows when it ends, and End cuts it
+// short. Every change re-reads the page.
 
 type Errors = Record<string, string>;
 
@@ -162,6 +163,11 @@ function LinkRow({
         </p>
         <p className="text-xs text-text-muted">
           Since <span className="font-mono">{formatCalendarDate(link.startedOn)}</span>
+          {link.endsOn && (
+            <>
+              {" · "}ending on <span className="font-mono">{formatCalendarDate(link.endsOn)}</span>
+            </>
+          )}
         </p>
         {note && (
           <p className="mt-1 flex items-start gap-1.5 text-xs text-warning-text">
@@ -254,7 +260,8 @@ export function TeamLeadsManager({ links, mentors }: { links: TeamLeadLink[]; me
           <p>
             <span className="font-bold text-text-primary">{ending && personLabel(ending.teamLead)}</span> will no longer
             see <span className="font-bold text-text-primary">{ending && personLabel(ending.reportee)}</span>&apos;s
-            students. The record is kept.
+            students{ending?.endsOn ? ` from now, instead of from ${formatCalendarDate(ending.endsOn)}` : ""}. The
+            record is kept.
           </p>
         )}
       </ConfirmDialog>
