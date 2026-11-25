@@ -355,6 +355,10 @@ describe("/api/holistic-mentorship/phase-plans", () => {
         .filter(([sql]) => String(sql).includes("phase_mutation_audits"))
         .map(([, params]) => params);
       expect(audits).toEqual([[7, 21, "deleted", 9, hmAdmin.email]]);
+      // The Phase row itself is deleted, by id and the revision the Admin saw.
+      const deletes = client.query.mock.calls
+        .filter(([sql]) => /DELETE FROM holistic_mentorship_phases\s+WHERE id = \$1 AND revision = \$2/.test(String(sql)));
+      expect(deletes.map(([, params]) => params)).toEqual([[21, 1]]);
     });
   });
 
