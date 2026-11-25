@@ -9,7 +9,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
 import { query, withTransaction } from "@/lib/db";
 import { HOLISTIC_CLOSING_PHASE_CHANGED_ERROR } from "@/lib/holistic-phase-messages";
-import { GET, PATCH, POST } from "./route";
+import { DELETE, GET, PATCH, POST } from "./route";
 
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
@@ -269,6 +269,92 @@ describe("/api/holistic-mentorship/phase-plans", () => {
       expect(client.query).toHaveBeenCalledOnce();
       expect(client.query.mock.calls[0][1]).toEqual([1, "2026-2027"]);
       expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
+    });
+  });
+
+  describe("deleting a Phase", () => {
+    const hmAdmin = {
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    };
+    const remove = (body: Record<string, unknown>) => DELETE(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans", {
+      method: "DELETE",
+      body: JSON.stringify(body),
+    }));
+
+    it.each([{}, { program_id: "1", phase_id: 21, expected_revision: 1 }])(
+      "rejects a request without a numeric Program (%j) before the session is read", async (body) => {
+      const response = await remove(body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid Program" });
+      expect(mockGetServerSession).not.toHaveBeenCalled();
+    });
+
+    it("denies a read-only Holistic Mentorship Admin before any write", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([{ ...hmAdmin, read_only: true }]).mockResolvedValue([]);
+
+      const response = await remove({ program_id: 1, phase_id: 21, expected_revision: 1 });
+
+      expect(response.status).toBe(403);
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no Phase id", { expected_revision: 1 }],
+      ["a Phase id sent as text", { phase_id: "21", expected_revision: 1 }],
+      ["no revision", { phase_id: 21 }],
+    ])("rejects %s before any write", async (_name, body) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+
+      const response = await remove({ program_id: 1, ...body });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid Phase" });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 when the Plan lock finds no such Phase in the Program, and reads nothing else", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+      const client = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+      mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+      const response = await remove({ program_id: 1, phase_id: 21, expected_revision: 1 });
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "Phase not found" });
+      expect(client.query).toHaveBeenCalledOnce();
+      expect(client.query.mock.calls[0][1]).toEqual([21, 1]);
+    });
+
+    it("deletes a never-opened Locked Phase, locking the Plan row before the Phase row", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+      const client = {
+        query: vi.fn()
+          .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+          .mockResolvedValueOnce({ rows: [{
+            id: "21", phase_plan_id: "7", position: 3, revision: 1, state: "locked",
+            guidance_markdown: "", academic_year: "2026-2027", frozen_at: null,
+            grade: "11", ever_opened: false, used: false,
+          }] })
+          .mockResolvedValue({ rows: [] }),
+      };
+      mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+      const response = await remove({ program_id: 1, phase_id: 21, expected_revision: 1 });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, id: 21 });
+      expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE OF plan");
+      expect(String(client.query.mock.calls[1][0])).toContain("FOR UPDATE OF p");
+      const audits = client.query.mock.calls
+        .filter(([sql]) => String(sql).includes("phase_mutation_audits"))
+        .map(([, params]) => params);
+      expect(audits).toEqual([[7, 21, "deleted", 9, hmAdmin.email]]);
     });
   });
 

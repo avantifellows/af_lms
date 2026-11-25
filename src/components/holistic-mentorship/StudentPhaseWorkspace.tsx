@@ -228,6 +228,11 @@ function finalWriteQuestion(action: string, recorder: DictationRecorder) {
     : `${action}?`;
 }
 
+// The recorder the answer boxes offer, or none when Dictation is off.
+function enabledDictation(availability: DictationAvailability, recorder: DictationRecorder) {
+  return availability.enabled ? recorder : null;
+}
+
 function dictationApiUrl(props: DictationRouteScope) {
   return `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}/dictation?${
     new URLSearchParams({
@@ -816,7 +821,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
         validationError={validationError} validationErrorId={validationErrorId}
         missingCategories={missingCategories} categoryErrorId={categoryErrorId}
         disabled={finalWriting} onAnswerChange={updateAnswer} onCategoryToggle={toggleCategory}
-        dictation={props.dictation.enabled ? dictation : null}
+        dictation={enabledDictation(props.dictation, dictation)}
         onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
         onCategoryFieldset={(group, element) => { categoryFieldsetsRef.current[group] = element; }}
         actions={<NotesEditorActions status={status} error={error} validationError={validationError}
