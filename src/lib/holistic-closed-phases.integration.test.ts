@@ -455,13 +455,14 @@ describe.skipIf(!database)("Closed Holistic Phases against disposable Postgres (
     // the held first row while the Mentor's Active Phase row is still free.
     const first = await seedPhase(program, 1, { state: "locked", gradeId: grade12Id });
     const active = await seedPhase(program, 2);
-    const last = await seedPhase(program, 3, { state: "locked" });
+    // Grade 12 like the first: a reorder may only swap Phases within a Grade (#516).
+    const last = await seedPhase(program, 3, { state: "locked", gradeId: grade12Id });
     const mentee = await seedMentee(program);
 
     const [reordered, write] = await holdingPhaseRow(first, async (release) => {
       const reordering = reorder({
         programId: program.programId, academicYear: CURRENT_ACADEMIC_YEAR, actorEmail: "issue536-admin@example.test",
-        // A real change of order: the two Locked Phases swap around the Open one.
+        // A real change of order: the two Locked Grade 12 Phases swap around the Open one.
         phases: [last, active, first].map((phase) => ({ id: phase.phaseId, expectedRevision: 1 })),
       });
       await waitForLockWaiters(1);
