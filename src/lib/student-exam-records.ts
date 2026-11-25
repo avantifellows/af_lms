@@ -6,6 +6,11 @@ import {
   type StudentExamRecord,
   type StudentExamSummary,
 } from "@/lib/competitive-exams";
+import {
+  EXAM_ACK_DOCUMENT_TYPE,
+  type ExamAcknowledgement,
+  type ExamAcknowledgementPage,
+} from "@/lib/exam-acknowledgements";
 
 // Reads for the Exams tab and the roster card, plus the reveal log. Writes to
 // `student_exam_record` never happen here: those rows belong to the DB Service,
@@ -55,7 +60,7 @@ export async function listExamOptions(): Promise<ExamOption[]> {
     .sort((a, b) => compareExamNames(a.name, b.name));
 }
 
-function toRecord(row: StudentExamRecordRow): StudentExamRecord {
+function toRecord(row: StudentExamRecordRow): StudentExamSummary {
   return {
     id: toNumber(row.id),
     exam_id: toNumber(row.exam_id),
@@ -69,7 +74,7 @@ function toRecord(row: StudentExamRecordRow): StudentExamRecord {
 /** Every exam registration stored for one Student, for the gated Exams tab. */
 export async function listStudentExamRecords(
   studentId: number,
-): Promise<StudentExamRecord[]> {
+): Promise<StudentExamSummary[]> {
   const rows = await query<StudentExamRecordRow>(
     `SELECT ser.id,
             ser.student_id,
@@ -85,6 +90,125 @@ export async function listStudentExamRecords(
     [studentId],
   );
   return rows.map(toRecord);
+}
+
+/** A Student's registrations with their acknowledgements, for the Exams tab. */
+export interface StudentExamRecordsWithAcknowledgements {
+  records: StudentExamRecord[];
+  /**
+   * False when the acknowledgements could not be read — most likely a
+   * database that has not run the DB Service migration adding
+   * `lms_student_documents.student_exam_record_id` yet. The registrations
+   * still load; the tab just offers no uploads.
+   */
+  acknowledgementsAvailable: boolean;
+}
+
+/** Attach each registration's current exam acknowledgements. */
+export async function attachAcknowledgements(
+  studentId: number,
+  records: StudentExamSummary[],
+): Promise<StudentExamRecordsWithAcknowledgements> {
+  let byRecord = new Map<number, ExamAcknowledgement[]>();
+  let acknowledgementsAvailable = true;
+  try {
+    byRecord = await listExamAcknowledgements(studentId);
+  } catch (error) {
+    console.error(
+      "Failed to load exam acknowledgements:",
+      error instanceof Error ? error.message : error,
+    );
+    acknowledgementsAvailable = false;
+  }
+  return {
+    records: records.map((record) => ({
+      ...record,
+      acknowledgements: byRecord.get(record.id) ?? [],
+    })),
+    acknowledgementsAvailable,
+  };
+}
+
+interface ExamAcknowledgementRow {
+  id: string | number;
+  student_exam_record_id: string | number;
+  exam_session: number | null;
+  pages: unknown;
+  uploaded_by: string;
+  inserted_at: Date | string;
+}
+
+function toPages(raw: unknown): ExamAcknowledgementPage[] {
+  const list = typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((page) => ({
+      page_number: Number((page as Record<string, unknown>)?.page_number),
+      mime_type: String((page as Record<string, unknown>)?.mime_type ?? ""),
+    }))
+    .filter((page) => Number.isInteger(page.page_number) && page.page_number > 0)
+    .sort((a, b) => a.page_number - b.page_number);
+}
+
+function toAcknowledgement(row: ExamAcknowledgementRow): ExamAcknowledgement {
+  return {
+    id: toNumber(row.id),
+    exam_session: row.exam_session,
+    pages: toPages(row.pages),
+    uploaded_by: row.uploaded_by,
+    uploaded_at:
+      row.inserted_at instanceof Date ? row.inserted_at.toISOString() : String(row.inserted_at),
+  };
+}
+
+/**
+ * A Student's current exam acknowledgements, by registration.
+ * Soft-deleted rows are left out; the S3 keys are not selected — a page is
+ * fetched through the documents page route, which presigns it.
+ */
+export async function listExamAcknowledgements(
+  studentId: number,
+): Promise<Map<number, ExamAcknowledgement[]>> {
+  const rows = await query<ExamAcknowledgementRow>(
+    `SELECT id, student_exam_record_id, exam_session, pages, uploaded_by, inserted_at
+     FROM lms_student_documents
+     WHERE student_id = $1
+       AND document_type = $2
+       AND student_exam_record_id IS NOT NULL
+       AND deleted_at IS NULL
+     ORDER BY exam_session NULLS FIRST, id`,
+    [studentId, EXAM_ACK_DOCUMENT_TYPE],
+  );
+  const byRecord = new Map<number, ExamAcknowledgement[]>();
+  for (const row of rows) {
+    const recordId = toNumber(row.student_exam_record_id);
+    const list = byRecord.get(recordId) ?? [];
+    list.push(toAcknowledgement(row));
+    byRecord.set(recordId, list);
+  }
+  return byRecord;
+}
+
+/**
+ * One current acknowledgement, only if it belongs to this Student's
+ * registration — both ids come from the URL, so neither is trusted alone.
+ */
+export async function getExamAcknowledgement(
+  studentId: number,
+  recordId: number,
+  documentId: number,
+): Promise<ExamAcknowledgement | null> {
+  const rows = await query<ExamAcknowledgementRow>(
+    `SELECT id, student_exam_record_id, exam_session, pages, uploaded_by, inserted_at
+     FROM lms_student_documents
+     WHERE id = $1
+       AND student_id = $2
+       AND student_exam_record_id = $3
+       AND document_type = $4
+       AND deleted_at IS NULL`,
+    [documentId, studentId, recordId, EXAM_ACK_DOCUMENT_TYPE],
+  );
+  return rows[0] ? toAcknowledgement(rows[0]) : null;
 }
 
 /** What one roster-wide read of the exam registrations came back with. */

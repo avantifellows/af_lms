@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-11-16
+last_updated: 2026-11-25
 ---
 
 # Student Addition
@@ -236,6 +236,38 @@ the DB Service migration loses the exam tags rather than the roster.
 Deferred, per the issue: exam results (date, score, percentile, ranks), bulk upload of exam
 details, and the ops sheet's email / contact number / roll number — db-service PR #776 adds
 those columns but the tab does not collect them yet.
+
+### Exam acknowledgements
+
+The confirmation page an exam portal issues once the form is submitted is uploaded on the
+Exams tab, under each saved registration: one slot per stored sitting (JEE Mains Session 1,
+Session 2), otherwise one slot. An unsaved exam, or JEE Mains with no sitting saved, shows
+a hint instead. Physical centres only, like the tab.
+
+- One file per slot (a single photo or PDF; the route 400s on more). Stored as an `lms_student_documents` row of type `exam_acknowledgement`
+  (`EXAM_ACK_DOCUMENT_TYPE` in `src/lib/exam-acknowledgements.ts`) linked by
+  `student_exam_record_id` + `exam_session` (db-service migration `20261125120000`).
+  Deliberately **not** in `DOCUMENT_TYPES`: the Documents tab neither offers, lists
+  (`GET documents` filters it) nor deletes it (400). An acknowledgement without its exam
+  and sitting would mean nothing.
+- Upload/remove: `POST/DELETE /api/students/[id]/exam-records/[recordId]/acknowledgement`
+  behind `gateExamRecords`; the record must be the Student's, the DELETE's `document_id`
+  this record's current acknowledgement. Page bytes go through the existing documents page
+  route (`canAccessStudent`, view only). The list sits in Edit Student, so view-only users
+  have no listing yet.
+- Slots follow the **stored** `sessions_applied` (`acknowledgementSlots`), the same rule the
+  DB Service applies, not the exam name — so the two can't disagree.
+- The DB Service owns the cross-row rules, each in one transaction with the record row
+  locked: one current acknowledgement per record and sitting (partial unique index;
+  an upload replaces the old one), and unticking a sitting, moving the record to another
+  exam, or deleting it soft-deletes the acknowledgements that no longer fit. The tab only
+  warns ("Saving will also remove: …").
+- Reads (`attachAcknowledgements`) fail soft: before the migration the tab loads its
+  registrations with `acknowledgements_available: false` and offers no uploads. A POST
+  whose stored row comes back without the link (an older DB Service) is undone (row
+  soft-deleted, S3 objects removed) and answers 502.
+- The upload page reading/validation is shared with the Documents upload in
+  `src/lib/document-upload.ts`.
 
 ## Data completeness table (Enrollment tab, #468)
 

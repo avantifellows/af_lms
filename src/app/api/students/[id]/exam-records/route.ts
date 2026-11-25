@@ -3,6 +3,7 @@ import { getServerSession, type Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { examPasswordViewer, gateExamRecords } from "@/lib/exam-records-gate";
 import {
+  attachAcknowledgements,
   listExamOptions,
   listStudentExamRecords,
 } from "@/lib/student-exam-records";
@@ -17,10 +18,13 @@ import {
   type CanonicalExamRecordInput,
 } from "@/lib/exam-records-payload";
 import { encryptExamPassword } from "@/lib/exam-password-crypto";
-import type { StudentExamRecord } from "@/lib/competitive-exams";
+import type { StudentExamSummary } from "@/lib/competitive-exams";
 
 // The Exams tab of Edit Student. Both verbs are gated by `gateExamRecords`
 // (edit rights on the Student, not a JNV NVS Student).
+//
+// Both answer each registration's current exam acknowledgements, which
+// are uploaded and removed through `[recordId]/acknowledgement/route.ts`.
 //
 // Neither verb returns a password, only whether one is stored. A password the
 // tab sends is encrypted with KMS here, before it leaves for the DB Service;
@@ -37,15 +41,20 @@ export async function GET(
   if (!gated.ok) return gated.response;
 
   try {
-    const [exams, records, viewer] = await Promise.all([
+    const [exams, stored, viewer] = await Promise.all([
       listExamOptions(),
       listStudentExamRecords(gated.studentId),
       examPasswordViewer(session as Session),
     ]);
+    const { records, acknowledgementsAvailable } = await attachAcknowledgements(
+      gated.studentId,
+      stored,
+    );
     return NextResponse.json({
       exams,
       records,
       can_reveal_password: viewer?.canReveal ?? false,
+      acknowledgements_available: acknowledgementsAvailable,
     });
   } catch (error) {
     console.error("Error loading student exam records:", error);
@@ -53,7 +62,7 @@ export async function GET(
   }
 }
 
-function unchanged(existing: StudentExamRecord, exam: CanonicalExamRecordInput): boolean {
+function unchanged(existing: StudentExamSummary, exam: CanonicalExamRecordInput): boolean {
   const sameSessions =
     (existing.sessions_applied ?? []).join(",") ===
     (exam.sessions_applied ?? []).join(",");
@@ -124,8 +133,8 @@ interface WriteOutcome {
  */
 async function applyRemovals(
   recordIds: number[],
-  existingById: Map<number, StudentExamRecord>,
-  existingByExam: Map<number, StudentExamRecord>,
+  existingById: Map<number, StudentExamSummary>,
+  existingByExam: Map<number, StudentExamSummary>,
   outcome: WriteOutcome,
 ): Promise<void> {
   for (const recordId of recordIds) {
@@ -149,7 +158,7 @@ async function applyRemovals(
  */
 function clashingApplicationNumber(
   exams: CanonicalExamRecordInput[],
-  kept: Iterable<StudentExamRecord>,
+  kept: Iterable<StudentExamSummary>,
 ): string | null {
   const keptNumbers = new Map<string, string>();
   for (const record of kept) {
@@ -168,7 +177,7 @@ function clashingApplicationNumber(
 async function applyUpserts(
   studentId: number,
   exams: CanonicalExamRecordInput[],
-  existingByExam: Map<number, StudentExamRecord>,
+  existingByExam: Map<number, StudentExamSummary>,
   outcome: WriteOutcome,
 ): Promise<void> {
   for (const exam of exams) {
@@ -233,9 +242,15 @@ export async function PUT(
       return NextResponse.json({ error: outcome.warnings.join("; ") }, { status: 502 });
     }
 
-    const records = await listStudentExamRecords(studentId);
+    // Unticking a session or removing an exam retires its acknowledgements in
+    // the DB Service, so they are read back after the writes.
+    const { records, acknowledgementsAvailable } = await attachAcknowledgements(
+      studentId,
+      await listStudentExamRecords(studentId),
+    );
+    const saved = { records, acknowledgements_available: acknowledgementsAvailable };
     return NextResponse.json(
-      outcome.warnings.length ? { records, warnings: outcome.warnings } : { records },
+      outcome.warnings.length ? { ...saved, warnings: outcome.warnings } : saved,
     );
   } catch (error) {
     console.error("Error saving student exam records:", error);

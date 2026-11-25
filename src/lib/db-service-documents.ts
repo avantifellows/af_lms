@@ -8,6 +8,14 @@ export interface LmsStudentDocumentRow {
   document_type: string;
   pages: UploadedPage[];
   metadata: Record<string, unknown>;
+  /**
+   * The exam registration an exam acknowledgement belongs to, and
+   * its sitting (JEE Mains Session 1 or 2; null for an exam without sessions).
+   * Null on every other document type. Optional: a DB Service that predates
+   * the columns leaves them out.
+   */
+  student_exam_record_id?: number | null;
+  exam_session?: number | null;
   uploaded_by: string;
   deleted_at: string | null;
   inserted_at: string;

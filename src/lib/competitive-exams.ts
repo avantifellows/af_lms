@@ -1,3 +1,5 @@
+import type { ExamAcknowledgement } from "@/lib/exam-acknowledgements";
+
 // The competitive exams the Exams tab offers, and the rules around them. No
 // server-only imports here — the picker, the card and the server validation
 // all read this list, so what a teacher can pick can never drift from what the
@@ -124,8 +126,14 @@ export interface StudentExamSummary {
   sessions_applied: number[] | null;
 }
 
-/** The Exams tab's registration — the same shape as the card's since passwords moved to KMS. */
-export type StudentExamRecord = StudentExamSummary;
+/**
+ * The Exams tab's registration: the card's shape plus its current application
+ * acknowledgements (one per session for JEE Mains, one otherwise). The roster
+ * card doesn't read acknowledgements.
+ */
+export interface StudentExamRecord extends StudentExamSummary {
+  acknowledgements: ExamAcknowledgement[];
+}
 
 export const APPLICATION_NUMBER_MAX_LENGTH = 255;
 export const APPLICATION_PASSWORD_MAX_LENGTH = 255;

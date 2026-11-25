@@ -7,6 +7,7 @@ import {
   softDeleteDocument,
   DbServiceError,
 } from "@/lib/db-service-documents";
+import { EXAM_ACK_DOCUMENT_TYPE } from "@/lib/exam-acknowledgements";
 
 export async function DELETE(
   _request: Request,
@@ -52,6 +53,14 @@ export async function DELETE(
   const target = docs.find((d) => d.id === documentId);
   if (!target || target.deleted_at) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+  // An exam acknowledgement is removed from the Exams tab, behind
+  // its gate (which also refuses JNV NVS Students), never from here.
+  if (target.document_type === EXAM_ACK_DOCUMENT_TYPE) {
+    return NextResponse.json(
+      { error: "Remove an exam acknowledgement from the Exams tab" },
+      { status: 400 },
+    );
   }
 
   try {

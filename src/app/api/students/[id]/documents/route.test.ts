@@ -474,6 +474,22 @@ describe("GET /api/students/[id]/documents", () => {
     expect(calls[0].url).toBe("https://db.test/api/lms-student-document?student_id=1");
   });
 
+  it("leaves out exam acknowledgements, which the Exams tab lists", async () => {
+    authorizedAdmin();
+    const base = { student_id: 1, pages: [], metadata: {}, uploaded_by: "x", deleted_at: null, inserted_at: "t", updated_at: "t" };
+    const consent = { ...base, id: 1, document_type: "wise_research_consent" };
+    const ack = { ...base, id: 2, document_type: "exam_acknowledgement", student_exam_record_id: 10, exam_session: 1 };
+    mockDbServiceFetch([{ ok: true, status: 200, body: [consent, ack] }]);
+
+    const { GET } = await import("./route");
+    const res = await GET(
+      new Request("http://localhost/api/students/1/documents"),
+      routeParams({ id: "1" }),
+    );
+
+    expect(await res.json()).toEqual([consent]);
+  });
+
   it("returns 502 when db-service errors", async () => {
     authorizedAdmin();
     mockDbServiceFetch([{ ok: false, status: 500, text: "down" }]);
