@@ -160,6 +160,12 @@ function needsDraftNavigationGuard({ finalWriting, canAutosave, valueChanged, st
   return hasLocalNotesWork(valueChanged, status);
 }
 
+// A frozen form keeps nothing that can still be saved, so leaving is never held,
+// even while a Submit's draft save it froze under is still in flight.
+function notesGuardNeeded(closedWhileWriting: boolean, submittedEditDirty: boolean, draftNeedsGuard: boolean) {
+  return !closedWhileWriting && (submittedEditDirty || draftNeedsGuard);
+}
+
 function shouldShowNotesInputs(canAutosave: boolean, editingSubmitted: boolean) {
   return canAutosave || editingSubmitted;
 }
@@ -228,9 +234,10 @@ function finalWriteQuestion(action: string, recorder: DictationRecorder) {
     : `${action}?`;
 }
 
-// The recorder the answer boxes offer, or none when Dictation is off.
-function enabledDictation(availability: DictationAvailability, recorder: DictationRecorder) {
-  return availability.enabled ? recorder : null;
+// The recorder the answer boxes offer, or none when Dictation is off or stopped
+// because the Phase closed.
+function enabledDictation(availability: DictationAvailability, recorder: DictationRecorder, stopped: boolean) {
+  return availability.enabled && !stopped ? recorder : null;
 }
 
 function dictationApiUrl(props: DictationRouteScope) {
@@ -419,19 +426,25 @@ function useNotesEditorState(props: NotesEditorProps) {
   // form was loaded. It is set where the save fails, not read back from the
   // error text, which the next keystroke clears.
   const [closedWhileWriting, setClosedWhileWriting] = useState(false);
+  // The same latch, readable at once by callbacks still in flight (a draft save,
+  // Submit's flush, a clip's words) before React renders the frozen form.
+  const frozenRef = useRef(false);
+  const freeze = useCallback(() => {
+    frozenRef.current = true;
+    setClosedWhileWriting(true);
+  }, []);
   const failSave = useCallback((caught: unknown, fallback: string) => {
     const refusal = caught instanceof NotesRequestError ? caught : null;
     setStatus("failed");
     setError(refusal?.message ?? fallback);
     setConflict(refusal?.status === 409);
-    if (refusal?.message === HOLISTIC_PHASE_CLOSED_ERROR) setClosedWhileWriting(true);
-  }, []);
-  // Dictation was refused because the Phase closed: nothing failed to save, but
-  // the form freezes exactly as after a refused save.
-  const markClosedWhileWriting = useCallback(() => setClosedWhileWriting(true), []);
+    if (refusal?.message === HOLISTIC_PHASE_CLOSED_ERROR) freeze();
+  }, [freeze]);
 
   return {
-    initialValue, closedWhileWriting, failSave, markClosedWhileWriting,
+    // markClosedWhileWriting: Dictation was refused because the Phase closed.
+    // Nothing failed to save, but the form freezes exactly as after a refused save.
+    initialValue, closedWhileWriting, frozenRef, failSave, markClosedWhileWriting: freeze,
     initialRevision: initialEditor.revision,
     value, setValue, savedValue, setSavedValue, notesState, setNotesState,
     editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
@@ -546,12 +559,17 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
   canAutosave: boolean;
   autosaveEnabled: boolean;
 }) {
-  const { value: notesValue, status, setStatus, setError, setConflict, setSavedValue, failSave } = state;
+  const { value: notesValue, status, setStatus, setError, setConflict, setSavedValue, failSave, frozenRef } = state;
   const { queuedRef, inFlightRef, autosaveTimerRef, savedRef } = refs;
   const pump = useCallback(() => {
     if (inFlightRef.current) return inFlightRef.current;
     const work = (async () => {
       while (queuedRef.current) {
+        // Frozen while a save was in flight: what was queued behind it is never sent.
+        if (frozenRef.current) {
+          queuedRef.current = null;
+          return false;
+        }
         const value = queuedRef.current;
         queuedRef.current = null;
         setStatus("saving");
@@ -572,7 +590,7 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
     })().finally(() => { inFlightRef.current = null; });
     inFlightRef.current = work;
     return work;
-  }, [failSave, inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedValue, setStatus]);
+  }, [failSave, frozenRef, inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedValue, setStatus]);
 
   const cancelAutosaveTimer = useCallback(() => {
     if (autosaveTimerRef.current === null) return;
@@ -610,9 +628,12 @@ function useNotesDictation(
   props: NotesEditorProps,
   answers: NotesValue["answers"],
   updateAnswer: (questionId: number, answer: string) => void,
-  phase: { closedWhileWriting: boolean; onPhaseClosed: () => void }
+  phase: { stopped: boolean; frozenRef: React.RefObject<boolean>; onPhaseClosed: () => void }
 ) {
   const applyDictation = (target: string, text: string) => {
+    // Words that arrive once the form is frozen (even before it re-renders) or the
+    // page shows the Phase closed are dropped, like every late word after discard().
+    if (phase.stopped || phase.frozenRef.current) return null;
     const questionId = Number(target);
     const appended = appendDictation(answers[questionId] ?? "", text);
     if (!appended.ok) return DICTATION_TOO_LONG;
@@ -629,7 +650,7 @@ function useNotesDictation(
     onText: applyDictation,
     onPhaseClosed: phase.onPhaseClosed,
   });
-  useDictationDroppedWhenClosed(phase.closedWhileWriting, recorder);
+  useDictationDroppedWhenClosed(phase.stopped, recorder);
   return recorder;
 }
 
@@ -666,7 +687,8 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   // Once the Phase has closed under this form nothing can be saved again: the
   // form stops being editable, which stops autosave, Retry and the navigation
   // guard, and what was typed stays on screen, read-only, for the Mentor to copy.
-  const { closedWhileWriting, editable, editing } = useClosedWhileWriting(state.closedWhileWriting, props, editingSubmitted, router);
+  const { closedWhileWriting, editable, editing, dictationStopped } =
+    useClosedWhileWriting(state.closedWhileWriting, props, editingSubmitted, router);
   const canAutosave = canAutosaveNotes(editable, notesState);
   const autosaveEnabled = enabledUnlessDisabled(canAutosave, finalWriting);
   useNotesHydration({ props, apiUrl, state, refs, localDirty });
@@ -693,12 +715,13 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   }, [savedValue, setValue, setConflict, setEditingSubmitted, setError, setMissingCategories, setStatus,
     setSuccess, setValidationError]);
   const beforeNavigation = useCallback((): boolean | Promise<boolean> => {
+    if (closedWhileWriting) return true;
     if (finalWriting) return false;
     if (submittedEditDirty) return discardSubmittedChanges();
     return draftNeedsGuard ? flushDraft() : true;
-  }, [discardSubmittedChanges, draftNeedsGuard, finalWriting, flushDraft, submittedEditDirty]);
+  }, [closedWhileWriting, discardSubmittedChanges, draftNeedsGuard, finalWriting, flushDraft, submittedEditDirty]);
 
-  const guardNeeded = [submittedEditDirty, draftNeedsGuard].some(Boolean);
+  const guardNeeded = notesGuardNeeded(closedWhileWriting, submittedEditDirty, draftNeedsGuard);
   useNotesNavigationGuard({ beforeNavigation, guardNeeded, draftEditor: canAutosave, router });
 
   const retry = () => {
@@ -730,12 +753,14 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
   };
   const dictation = useNotesDictation(props, value.answers, updateAnswer, {
-    closedWhileWriting, onPhaseClosed: state.markClosedWhileWriting,
+    stopped: dictationStopped, frozenRef: state.frozenRef, onPhaseClosed: state.markClosedWhileWriting,
   });
   const submit = async () => {
     if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
-    if (!(await flushDraft()) || !window.confirm(finalWriteQuestion("Submit these Post-Session Notes", dictation))) {
+    // Re-checked after the flush: the form may have frozen while it waited.
+    if (!(await flushDraft()) || state.frozenRef.current
+      || !window.confirm(finalWriteQuestion("Submit these Post-Session Notes", dictation))) {
       setFinalWriting(false);
       return;
     }
@@ -821,7 +846,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
         validationError={validationError} validationErrorId={validationErrorId}
         missingCategories={missingCategories} categoryErrorId={categoryErrorId}
         disabled={finalWriting} onAnswerChange={updateAnswer} onCategoryToggle={toggleCategory}
-        dictation={enabledDictation(props.dictation, dictation)}
+        dictation={enabledDictation(props.dictation, dictation, dictationStopped)}
         onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
         onCategoryFieldset={(group, element) => { categoryFieldsetsRef.current[group] = element; }}
         actions={<NotesEditorActions status={status} error={error} validationError={validationError}
@@ -852,7 +877,12 @@ function useClosedWhileWriting(
   useEffect(() => {
     if (closed) refreshPage();
   }, [closed]);
-  return { closedWhileWriting: closed, editable: props.editable && !closed, editing: editingSubmitted && !closed };
+  return {
+    closedWhileWriting: closed, editable: props.editable && !closed, editing: editingSubmitted && !closed,
+    // The page may show the Phase closed before this form has written anything
+    // (a refresh): #536 leaves the form as it is, but Dictation stops there too.
+    dictationStopped: closed || props.phaseClosed,
+  };
 }
 
 function ClosedWhileWritingAlert() {
@@ -1902,8 +1932,12 @@ function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
 }) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
+  // Latched when the pop-up learns the Phase closed, until the refreshed page
+  // says so too: a closed and reopened pop-up must not take a new note or clip.
+  const [closedHere, setClosedHere] = useState(false);
+  const closed = phase.closed || closedHere;
   // A Closed Phase takes no new Follow-up Notes, even with submitted Notes.
-  const blocked = phase.closed ? "This Phase is closed"
+  const blocked = closed ? "This Phase is closed"
     : phase.progress === "completed" ? null : "Submit Post-Session Notes first";
   const canAdd = blocked === null;
   return <>
@@ -1913,7 +1947,7 @@ function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
         aria-describedby={canAdd ? undefined : hintId} onClick={() => setOpen(true)}>Add notes</Button>
     </div>} />
     <AddFollowUpNoteModal open={open} apiUrl={apiUrl} dictation={dictation} dictationUrl={dictationUrl}
-      onClose={() => setOpen(false)} />
+      closed={closed} onPhaseClosed={() => setClosedHere(true)} onClose={() => setOpen(false)} />
   </>;
 }
 
@@ -1924,11 +1958,14 @@ const FOLLOW_UP_PHASE_CLOSED =
 // agrees, when it holds a clip) or leaving the page drops any recording and
 // ignores a transcription still in flight. Save waits until the recording's
 // words have arrived, and asks before dropping a failed clip.
-function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }: {
+function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, closed, onPhaseClosed, onClose }: {
   open: boolean;
   apiUrl: string;
   dictation: SharedDictationAvailability;
   dictationUrl: string;
+  /** The page knows the Phase is closed (refreshed data, or this pop-up's own refusal). */
+  closed: boolean;
+  onPhaseClosed: () => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -1964,7 +2001,10 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
   });
   // The Phase closed under this note (its Save or a clip was refused): the text
   // stays read-only for copying, and the recorder is dropped as when the modal closes.
-  useDictationDroppedWhenClosed(phaseClosed, recorder);
+  // Once the page shows the Phase closed (a refresh) the text stays editable, as
+  // before, and Save is answered by the server, but no recording goes on.
+  const dictationStopped = phaseClosed || closed;
+  useDictationDroppedWhenClosed(dictationStopped, recorder);
   // A saved Follow-up Note can't be edited, so a clip's words would be lost for good.
   const dictating = dictationBusy(recorder.state);
   const saveHintId = dictationSaveHintId(recorder, `${fieldId}-dictating`);
@@ -1972,6 +2012,7 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
   function closeForPhase() {
     setError(FOLLOW_UP_PHASE_CLOSED);
     setPhaseClosed(true);
+    onPhaseClosed();
     router.refresh();
   }
 
@@ -2043,7 +2084,7 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
             {FOLLOW_UP_ANSWER_TOO_LONG}
           </p>}
           {dictation.enabled && <div className="mt-1 space-y-1">
-            <DictationMicButton question={text} target={key} recorder={recorder} disabled={saving || phaseClosed} />
+            <DictationMicButton question={text} target={key} recorder={recorder} disabled={saving || dictationStopped} />
             <DictationStatus target={key} recorder={recorder} />
           </div>}
         </div>;

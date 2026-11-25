@@ -271,8 +271,15 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   transcribed is ignored when its words arrive, a failed clip's Retry goes, every mic and the
   "Finish dictating first" hint go with the inputs (the pop-up's mics stay, disabled), and the
   recorder no longer holds the page's one recording slot. The frozen text is exactly what was on
-  screen when it froze; the server refuses a Closed Phase's clips anyway. The leave-page guard is
-  unchanged (it never waited for a clip). Pinned in `StudentPhaseWorkspace.dictation.test.tsx`.
+  screen when it froze; the server refuses a Closed Phase's clips anyway. The freeze is also latched
+  in a ref (`frozenRef`) that work already in flight reads before the frozen form renders: a clip's
+  words, a draft queued behind a save in flight, and Submit after its draft flush are all dropped,
+  and a frozen form releases the leave-page guard even while that flush is pending. When a refresh
+  brings the Phase back Closed before this form wrote anything, the forms stay as #536 left them
+  (Notes read-only unless a correction is open; the pop-up's text and Save as they were, the server
+  answering Save), but Dictation stops: the recorder is dropped and no mic is offered. A pop-up
+  refused for a Closed Phase keeps Add notes off ("This Phase is closed") until the refresh lands.
+  Pinned in `StudentPhaseWorkspace.dictation.test.tsx`.
 - **Progress:** `phaseState` / the CSV **Availability** column is `active` | `closed` | `locked`
   (`closed` replaced `open`). Derived Pending / Skipped / Completed progress is unchanged.
 - **Phase Setup:** `setHolisticPhaseState` refuses to open a Phase ordered before an Open Phase
