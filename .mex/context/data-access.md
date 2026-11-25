@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-20
+last_updated: 2026-11-25
 ---
 
 # Data Access
@@ -38,8 +38,22 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 - Pool is a singleton (10 conns, 15s `statement_timeout`, 5s connect timeout). **Always `$1` placeholders.** This module is server-only — never import it (transitively) into a client component.
 - DB naming: Ecto — `inserted_at`/`updated_at`, snake_case, server TZ UTC. Derive IST dates in SQL: `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`.
 
+**Documents are read from Postgres, written through the DB Service.** `lms_student_documents` is
+read directly by `listDocumentTypesForStudents` (`src/lib/student-documents.ts`) for the Enrollment
+tab's Data completeness table (#468): one `SELECT DISTINCT student_id, document_type ... WHERE
+student_id = ANY($1::bigint[]) AND deleted_at IS NULL` for the whole School, behind
+`GET /api/schools/[code]/document-status`. The older consent summary still asks the DB Service once
+per Student in capped batches, which is why it could never answer "who is missing which of the seven
+types". Uploads and deletes stay on the DB Service.
+
+**One visible-School predicate.** `findVisibleSchool` (`src/lib/school-lookup.ts`) resolves a School
+by UDISE or code as the School page does — the historical JNV set plus any School linked to an active
+centre. A route that filters on `af_school_category = 'JNV'` alone 404s for the centre Schools whose
+page opens fine, which is what left `% Docs` on "—" for them (#338). Both School-scoped document
+routes share it.
+
 ## 2. DB Service (Elixir/Phoenix) — proxied writes
-External HTTP API. **Student, batch, quiz-session, and document writes go here**, never direct to Postgres.
+External HTTP API. **Student, batch, quiz-session, document and alumni writes go here**, never direct to Postgres. Alumni history (`alumni_journey`) is written only through `POST /alumni/:id/journey` and read from Postgres.
 ```ts
 const res = await fetch(`${process.env.DB_SERVICE_URL}/student/${id}`, {
   method: "PATCH",
@@ -155,7 +169,7 @@ Issue #516 (Audience: the six Holistic Mentorship Programs; nothing for NVS Scho
 - One rule, in client-safe `src/lib/holistic-phase-number.ts`: `holisticPhaseNumber(grade, placeInGrade)`, `withHolisticPhaseNumbers(phases)` for rows that carry `grade` and `position`, and `holisticPhaseNumberSql(phaseAlias, gradeNumberExpr)` for the one query that sorts and pages by the number. Used by `getHolisticPhasePlan` (Phase Setup), `numberPhases` in `holistic-student-phase.ts` (student page tabs, heading, "From Phase N" context label; each Academic Year's Plan numbered on its own), `listAssignedMentees` and `getHolisticProgressOptions` in `holistic-progress.ts` (rows, Phase filter, sort by Phase, CSV, and the MCP view registered for the path `/api/holistic-mentorship/progress` in `src/lib/mcp/views.ts`, which wraps the same route), and `heatmapPhases`. Issue #536's two server messages that name a Phase, the Open Phase confirmation's closing Phase (`getHolisticPhaseOpenImpact`) and the refused out-of-order open (`validateOpenOrder`), use `holisticPhaseNumberSql` too.
 - Nothing stores the number. `holistic_mentorship_phases.position` is unchanged and still drives Active (highest-position Open Phase per Grade) and Skipped: the progress query now selects `phase_position` beside `phase_number` and compares `phase_position` with `initial_active_position`.
 - A Grade holds at most `HOLISTIC_PHASES_PER_GRADE` (3) Phases per Plan. `addHolisticPhase`, and `updateHolisticPhase` when the Grade changes, return 422 "Grade N already has 3 Phases" (`gradeIsFull`). Both run under the Plan row lock: add takes it in `lockPhasePlanForYear`, and a definition save takes it in `lockPhasePlanForPhase` before it reads the Phase row (issue #536's Plan-then-Phase lock order). A save that keeps the Phase's Grade is never counted, so a Plan that somehow holds more than 3 in a Grade stays editable. Copy previous year (`createHolisticPhasePlan`) refuses with 422 "The prior Plan has more than 3 Phases in Grade N" when a Grade of the source Plan is over the limit (`overfullGrade`), so a copy cannot show two Phases with one number; no production Plan had more than 3 per Grade on 20 Nov 2026.
-- No change to another Phase renumbers an opened or used Phase. Add appends, Move swaps two never-opened Phases of one Grade, and Delete is refused when a later Phase was opened, so none of them renumbers one. A Grade change would (every later Phase of both Grades shifts), so `validateGradeChange` returns 422 "Changing the Grade would renumber an opened or used Phase" when a later-position Phase of the old or the new Grade is open, frozen, ever opened or has Notes. This rule never refuses the last Phase of a Plan (the 3-per-Grade limit and the frozen rule still can). A Phase whose own Grade changes, which stays possible until Notes exist, takes a number in its new Grade. An allowed Grade change adds 1 to the `revision` of the later Phases of both Grades (`bumpPhasesRenumberedByGradeChange`), as delete and reorder do for the Phases they renumber, so an Admin acting on a page that still shows the old number gets 409 "Phase changed". The refusal query is unit-tested against a mocked client and was checked on a local database by hand; no automated test executes it. The reorder action itself has no Grade rule: Phase Setup only sends same-Grade swaps.
+- No change to another Phase renumbers an opened or used Phase. Add appends, Move swaps two never-opened Phases of one Grade, and Delete is refused when a later Phase was opened, so none of them renumbers one. A Grade change would (every later Phase of both Grades shifts), so `validateGradeChange` returns 422 "Changing the Grade would renumber an opened or used Phase" when a later-position Phase of the old or the new Grade is open, frozen, ever opened or has Notes. This rule never refuses the last Phase of a Plan (the 3-per-Grade limit and the frozen rule still can). A Phase whose own Grade changes, which stays possible until Notes exist and only while the Phase is Locked (an Open Phase keeps its Grade, #536), takes a number in its new Grade. An allowed Grade change adds 1 to the `revision` of the later Phases of both Grades (`bumpPhasesRenumberedByGradeChange`), as delete and reorder do for the Phases they renumber, so an Admin acting on a page that still shows the old number gets 409 "Phase changed". Each of those Phases also gets a `reordered` audit row with the same actor, in Plan order, after the changed Phase's own `definition_updated` row (the order a delete writes them in). The refusal query is unit-tested against a mocked client and was checked on a local database by hand; no automated test executes it. The reorder action keeps the Grade of every position (`validateReorder`, `loadReorderPhases` reads each Phase's Grade): a Phase that moves must land on a position that held a Phase of its own Grade, else 422 "Phases can be reordered only within their Grade". So each Grade's Phases only trade places among that Grade's positions, every Phase that does not move keeps its number (also with gaps in `position` and with more than 3 Phases in a Grade), and an opened or used Phase, which cannot move, is never renumbered by a reorder. Revisions of the whole request are checked first (409), then the Grade rule and the opened-or-used rule (422). Phase Setup only sends same-Grade swaps, so it never meets the 422; a direct API call or a stale page can.
 - Phase Setup (`PhasePlanSetup.tsx`) lists the Plan in two groups, Grade 11 then Grade 12. Move up / Move down swap a Phase with its neighbour in the same Grade (`gradeNeighbour`) and send the whole Plan order to the unchanged reorder action; Add Phase starts in the first Grade with room and is off when both are full; a full Grade's button is disabled for a Phase of the other Grade (never the Grade the Phase is saved in), with the reason tied to the control by `aria-describedby`. The editor opens on the first Phase in list order (`firstListedPhase`), not the Plan's first position.
 - Students & Progress lists its Phase filter options by displayed number (`getHolisticProgressOptions` sorts after numbering).
 - `src/lib/holistic-phase-number.integration.test.ts` runs the SQL form on a disposable local Postgres and compares it with the JS form (opt in with `HOLISTIC_PHASE_NUMBER_TEST_DATABASE=dbservice_test_...`; its rows are rolled back). The e2e Holistic fixture orders its Plan Grade 11, 11, 11, 12, 12, 12, where old and new numbers are the same, so e2e does not cover a mixed Plan.
@@ -278,6 +292,67 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   paused on a Phase row held by a third connection, and wait on `pg_stat_activity` instead of a
   timer; the two-Admins case runs the impact read and both opens for real. Unit tests sit beside each module.
 
+## Holistic answer length (#508)
+
+Post-Session answers and Follow-up answers share one limit, `HOLISTIC_ANSWER_MAX_LENGTH`
+(10,000) in the client-safe `src/lib/holistic-answer-limit.ts`. The Student Phase `PATCH`
+route and `normalizeHolisticFollowUpAnswers` both reject longer answers with it, and the
+Student Phase workspace shows an "N / 10,000" counter at 9,000 characters or more in every
+editable answer box (draft, author's Edit, Add Follow-up Note). Read-only views show no
+counter. Use this constant for any new answer-length check (e.g. Dictation, #500).
+
+## Holistic Dictation usage records (#500, slice #509)
+
+- **Table ownership:** `holistic_mentorship_dictation_usage_records` comes from db-service #858
+  (migration `20261110151931_create_holistic_mentorship_dictation_usage_records`, plus
+  `20261116113700_add_translation_to_holistic_dictation_usage_records`, a second migration because
+  the first is already applied on staging); LMS inserts and updates it directly through `query()`
+  (ADR 0005). Content-free: no Student, Phase, Question, text, translation or audio column, so it is
+  outside Holistic privacy erasure. The second migration adds `detected_language` (Scribe's code,
+  lower-cased, NULL when missing or not 1–16 characters) and `translation`
+  (`not_run | skipped | ok | failed`, checked by the table). **Deploy order:** the LMS writes both
+  columns on every clip, so apply `20261116113700` before deploying this LMS code (ADR 0013).
+- **Write path** (`transcribeHolisticDictation` in `src/lib/holistic-dictation.ts`): limit check →
+  insert `outcome='failed'`, `characters_returned=0`, `translation='not_run'`, `completed_at` NULL →
+  ElevenLabs call → translation into English through OpenRouter unless already English (ADR 0013) →
+  update to `ok` / `nothing_heard` / `failed` with `characters_returned` (length of the English text
+  returned), `detected_language`, `translation` (`not_run` when Scribe failed or heard nothing,
+  `skipped` when already English, `ok` translated, `failed` translation failed, which also makes
+  the outcome `failed`), `completed_at`, and
+  `audio_seconds = min(305, ceil(max(duration_ms/1000, last word end)))`. The route refuses a clip over
+  305,000 ms (422) or 10 MB (413); 305 s is `HOLISTIC_DICTATION_MAX_CLIP_SECONDS` in
+  `src/lib/holistic-dictation-limits.ts` (five minutes plus 5 s of timer slop, owner decision
+  2026-11-13), and db-service #858 checks `audio_seconds BETWEEN 1 AND 305`. A request killed
+  mid-call leaves the `failed`, uncompleted row, which still counts. The browser's cancel
+  (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
+  is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
+  still counts), so do not wire `request.signal` into `transcribeSpeech` or `translateToEnglish`
+  without a new decision. Scribe and translation share one deadline, with a shorter cap for Scribe
+  and for each translation attempt and one retry only when enough time is left (the numbers are in
+  ADR 0013 and the constants in `src/lib/holistic-dictation.ts`).
+  The route refuses an empty (0-byte) clip with 422 "Attach one audio clip" before this path, so
+  it writes no row and makes no provider call.
+- **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be
+  Asia/Kolkata (the local test DBs are), so the insert writes `$now::timestamptz AT TIME ZONE 'UTC'`
+  and `completed_at = now() AT TIME ZONE 'UTC'` explicitly; never rely on the `now()` default here.
+- **Daily limit:** remaining = 1,800 − SUM(`audio_seconds`) of this Mentor's rows whose
+  `inserted_at` is in the current Asia/Kolkata day (converted to a UTC window), floored at 0
+  (`getHolisticDictationRemainingSeconds`). A clip is refused (429 `daily_limit`) when used +
+  `ceil(duration_ms/1000)` > 1,805; the 429 body carries `remainingSeconds` (the real time left from
+  that same used-seconds read, floored at 0) and no usage row is written. The check and insert are not atomic; racing tabs can overshoot
+  by one clip each (accepted).
+- **Write scope before the call:** `checkHolisticDictationScope` runs `loadHolisticMentorWriteScope`
+  (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the
+  provider calls, so no row lock is held while ElevenLabs or OpenRouter works. The loader takes
+  #536's Plan share lock first (lock order Plan, then Mapping and Phase, as every Phase change), and
+  its Active Phase rule refuses a clip for a Closed Phase with 422 `HOLISTIC_PHASE_CLOSED_ERROR`, uncounted.
+- **Opt-in integration test:** `src/lib/holistic-dictation.integration.test.ts` with
+  `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt,
+  a five-minute clip and the 305 s cap against the table's check constraint, the
+  `detected_language` / `translation` values for skipped, translated, failed and nothing-heard
+  clips, and the `translation` check constraint). The disposable DB needs both db-service #858
+  migrations, including `20261116113700`; ElevenLabs and OpenRouter are faked at `fetch`.
+
 ## Holistic Follow-up Notes (#377)
 
 - **Table ownership:** `holistic_mentorship_follow_up_notes` is created by the db-service
@@ -373,8 +448,14 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   `20260921120000` + its ensure migration; the other eight: PR #804,
   `20261022120000`–`20261022120700`). af_lms reads and writes them directly over SQL (ADR 0005)
   through `query()`/`withTransaction`, never through DB Service HTTP.
-- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`
-  whose Student is not marked a dropout (`student.status = 'dropout'`; NULL or any other
+- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR`, i.e. whose period contains now:
+  `started_at <= (now() AT TIME ZONE 'UTC') AND (ended_at IS NULL OR ended_at > (now() AT TIME ZONE 'UTC'))`
+  (columns are UTC `timestamp`; half-open, so a zero-length row contains nothing). A Mapping the
+  db-service import sheet dates in the future grants nothing until it starts, though it already
+  holds the partial unique index's one running slot; on a reassignment db-service ends the old
+  Mapping at the new one's `started_at`, so the old Mentor keeps the Student until then. A
+  db-service exclusion constraint (added alongside this change) keeps one Student's periods in a year from overlapping, so at
+  most one row is active at any instant. Only Students not marked a dropout count (`student.status = 'dropout'`; NULL or any other
   status stays in), written once as `activeBlendedMappingSql(alias, yearParam)` in
   `src/lib/blended-learning-access.ts` (`notBlendedDropoutSql(studentIdSql)` is the dropout
   half). Every Blended Learning scope uses it: `canAccessBlendedStudent` (so a dropout's page,
@@ -384,7 +465,10 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   Item targets (count, preview, Mentor "(N students)", push and push again never reach a
   dropout; a pasted dropout ID is listed as "found but with no active mentor"). Mapping rows
   are never changed, so a Student whose status changes back reappears. Only the links import
-  reads the raw rows (`currentBlendedMappingRowSql`), so a dropout's links stay loaded.
+  reads the raw rows (`currentBlendedMappingRowSql`: not yet ended, i.e. running or ending in the
+  future, started or not), so a dropout's, a future-dated Mapping's and a future-ended Mapping's
+  links stay loaded. It reads Students through `EXISTS`, so one mid-handover (old row ending as its
+  successor starts) is matched once.
   Already-materialised Common Action Items on a dropout keep counting in the item's Open/Done.
 - **Read model:** `listMentees({ access, mentorUserId?, studentId?, today })` in
   `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
@@ -642,8 +726,8 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.
 - **Links load script (#455):** `blended_learning_student_links` is filled outside the app by the
   operator script `npm run blended:import-links` (`runBlendedLinksImport` in
-  `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the active Mapping
-  source (`activeBlendedMappingSql`), the existing links (`student_id = ANY($1::bigint[])`), and
+  `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the raw
+  not-yet-ended Mapping rows (`currentBlendedMappingRowSql`, one row per Student), the existing links (`student_id = ANY($1::bigint[])`), and
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
@@ -678,6 +762,48 @@ Closed is derived, never stored (`holistic_mentorship_phases.state` is still onl
   Doc"), admins read-only; the log page's Last Conversation panel shows it while it is the
   latest. Owner pills are a fixed `w-16` column (`ACTION_ITEM_ROW_CLASSES` in
   `ActionItemMeta.tsx`) so item text lines up whoever owns it.
+
+## Blended Learning Supervisions (2026-11-12)
+
+- `blended_learning_mentor_supervisions` (db-service `20261112120442`, LMS-owned, mirrored in
+  `e2e/fixtures/migrations/20261112120442_add_blended_learning_supervisions.sql`, pg_dump-identical):
+  `supervisor_user_id`, `mentor_user_id` (both `user` FKs, `<>` each other), `academic_year`,
+  `started_at`, then the Mapping table's audit and lifecycle columns and CHECKs. One running row per
+  (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
+  `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings
+  (period contains now). The Manage list and End take every link not yet ended (`ended_at IS NULL
+  OR ended_at > now`): a future-dated link is listed and can be ended (at its `started_at`), and
+  one given a future `ended_at` outside the app is listed with "ending on <date>" and End cuts it
+  short. The team-lead INSERT's `ON CONFLICT` still matches the partial unique index (`ended_at IS
+  NULL`).
+- Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
+  `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the Flags tab's Mentor
+  filter, and `listMentorCards` builds a team lead's Team cards from them (`menteeRows` takes an
+  array of Mentor ids). Only Supervisions whose reportee still holds a live (not revoked)
+  `blended_mentor` permission count (`liveBlendedMentorSql`, resolved by `permissionUserIdSql`), so a
+  departed Mentor's Students drop out of the team lead's view. Written only by the Manage page's
+  **Team leads** section (since 2026-11-18; the operator loader script was removed 2026-11-19):
+  `src/lib/blended-learning-team-leads.ts`, `POST /api/blended-learning/team-leads` and
+  `POST /api/blended-learning/team-leads/[id]/end`, both `manage`, with `assignment_source`/`end_source`
+  `af_lms_manage_ui` and the admin's email in `assigned_by_email`/`ended_by_email` (`end_reason`
+  `supervision_ended`). Add: both people must hold a live `blended_mentor` permission (Mappings alone
+  do not count), checked inside the insert's transaction with their permission rows locked
+  `FOR SHARE`, then `INSERT … ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; self-supervision is a
+  422, a running pair a 409 (also when the insert hits db-service's
+  `blm_supervisions_no_overlapping_periods` exclusion constraint, `23P01` with that constraint name:
+  a racing add won, or the pair has a link given a future end, and then the message says "until
+  <date>" from a lookup after the rollback; other errors, other constraints included, still throw).
+  End: one `UPDATE … WHERE id = $1 AND academic_year = $2 AND (ended_at IS NULL OR ended_at > now)`
+  setting `ended_at = GREATEST(started_at, now)` and the admin as ender (`ended_by_user_id` cleared,
+  `ended_by_email`, `end_source`, `end_reason` overwritten for a link cut short), a 404 when nothing
+  matched (an end already past is never touched; a pair ended and re-added meanwhile keeps its new
+  row).
+- Flags tab Mentor filter: for a team lead ("My students" or a reportee) it matches the Student's
+  current active Mapping's Mentor (dropouts left out), not who logged the flagged Conversation; an
+  admin's filter still matches the Conversation's Mentor.
+- e2e: `BLENDED_SUPERVISOR` (one own Mentee, `SUPERVISOR_MENTEE`) supervises Mentor B and has an
+  ended Supervision of Mentor A; `e2e/tests/blended-learning-supervisor.spec.ts` asserts on them.
+  The Manage spec makes Mentor D lead Mentor C inside one test and ends it before finishing.
 
 ## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
 

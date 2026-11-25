@@ -106,6 +106,8 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = [], items: It
       expect(params).toEqual(["2026-2027"]);
       // Dropouts' links still load, for when their status changes back.
       expect(sql).not.toContain("dropout");
+      // So do Students whose Mapping ends in the future (still mapped until then).
+      expect(sql).toContain("(mapping.ended_at IS NULL OR mapping.ended_at > (now() AT TIME ZONE 'UTC'))");
       return mapped.map((m) => ({
         id: m.id, student_id: m.studentId, first_name: m.firstName, last_name: m.lastName,
       })) as never[];
@@ -242,6 +244,19 @@ describe("runBlendedLinksImport", () => {
     ]);
     expect([...linksTable.keys()]).toEqual([501]);
     expect(linksTable.get(501)?.profile_doc_url).toBe(ASHA_DOC);
+  });
+
+  it("matches a Student mid-handover once, though both their Mappings are not yet ended", async () => {
+    // An old Mapping ending in the future and its successor starting then.
+    givenDatabase([ASHA, ASHA, RAVI]);
+    const workbook = new ExcelJS.Workbook();
+    addSheet(workbook, "Student Profile Docs", ["Name", "Profile Doc"], [["Asha Verma", link("Profile", ASHA_DOC)]]);
+
+    const report = await runBlendedLinksImport({ workbook, mode: "apply" });
+
+    expect(report.counts).toEqual({ matched: 1, unmatched: 0, skipped: 0 });
+    expect(report.issues).toEqual([]);
+    expect(linksTable.get(ASHA.id)?.profile_doc_url).toBe(ASHA_DOC);
   });
 
   it("does not pick between two rows that give one Student different links", async () => {

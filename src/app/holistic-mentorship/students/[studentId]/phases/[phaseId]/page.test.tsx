@@ -1,8 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockAccess, mockDetail, mockNotFound, mockRedirect, mockSession } = vi.hoisted(() => ({
+const {
+  mockAccess, mockDetail, mockDictationSettings, mockNotFound, mockRedirect, mockRemainingSeconds, mockSession,
+} = vi.hoisted(() => ({
   mockAccess: vi.fn(),
+  mockDictationSettings: vi.fn(() => ({ enabled: false, apiKey: null as string | null, zeroRetention: false })),
+  mockRemainingSeconds: vi.fn(),
   mockDetail: vi.fn(),
   mockNotFound: vi.fn(() => { throw new Error("NOT_FOUND"); }),
   mockRedirect: vi.fn((url: string) => { throw new Error(`REDIRECT:${url}`); }),
@@ -14,15 +18,21 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ notFound: mockNotFound, redirect: mockRedirect }));
 vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: mockAccess }));
 vi.mock("@/lib/holistic-student-phase", () => ({ getHolisticStudentPhase: mockDetail }));
+vi.mock("@/lib/holistic-dictation", () => ({
+  holisticDictationSettings: mockDictationSettings,
+  getHolisticDictationRemainingSeconds: mockRemainingSeconds,
+}));
 vi.mock("@/components/holistic-mentorship/StudentPhaseWorkspace", () => ({
-  default: ({ detail, source, backHref, canRegenerateProfile }: {
+  default: ({ detail, source, backHref, canRegenerateProfile, dictation }: {
     detail: { student: { name: string } };
     source?: "school" | "school-progress" | "progress";
     backHref?: string;
     canRegenerateProfile?: boolean;
+    dictation?: { enabled: boolean; remainingSeconds: number };
   }) => (
     <div data-testid="student-phase-workspace"
-      data-can-regenerate-profile={String(canRegenerateProfile)}>
+      data-can-regenerate-profile={String(canRegenerateProfile)}
+      data-dictation={JSON.stringify(dictation)}>
       {backHref && <a href={backHref}>{(source === "school" || source === "school-progress")
         ? "Back to Assignment Coverage"
         : "Back to Students and Progress"}</a>}
@@ -475,5 +485,74 @@ describe("StudentPhasePage", () => {
 
     await expect(StudentPhasePage(coverageProps({ source: "school", centre_id: "30", hm_progress: "no_active_phase" })))
       .rejects.toThrow("REDIRECT:/centre/30?tab=holistic_mentorship&hm_progress=no_active_phase");
+  });
+
+  describe("Dictation", () => {
+    const teacherAccess = {
+      ok: true,
+      permission: { role: "teacher" },
+      school: { id: 4, name: "School One" },
+      actorUserId: 9,
+      canEdit: true,
+    };
+    const phase = { student: { name: "Asha Rao" }, phases: [], selectedPhase: { phaseId: 73, locked: false } };
+    const dictationProp = () =>
+      JSON.parse(screen.getByTestId("student-phase-workspace").getAttribute("data-dictation")!);
+
+    it("turns Dictation on for the editing Mentor with their remaining time for today", async () => {
+      mockSession.mockResolvedValue({ user: { email: "teacher@example.com" } });
+      mockAccess.mockResolvedValue(teacherAccess);
+      mockDetail.mockResolvedValue({ ...phase, readOnly: false });
+      mockDictationSettings.mockReturnValue({ enabled: true, apiKey: "key", zeroRetention: false });
+      mockRemainingSeconds.mockResolvedValue(1_234);
+
+      render(await StudentPhasePage(props));
+
+      expect(dictationProp()).toEqual({ enabled: true, remainingSeconds: 1_234 });
+      expect(mockRemainingSeconds).toHaveBeenCalledWith(9, expect.any(Date));
+    });
+
+    it("keeps Dictation off for the Mentor when the setting is off", async () => {
+      mockSession.mockResolvedValue({ user: { email: "teacher@example.com" } });
+      mockAccess.mockResolvedValue(teacherAccess);
+      mockDetail.mockResolvedValue({ ...phase, readOnly: false });
+      mockDictationSettings.mockReturnValue({ enabled: false, apiKey: null, zeroRetention: false });
+
+      render(await StudentPhasePage(props));
+
+      expect(dictationProp()).toEqual({ enabled: false, remainingSeconds: 0 });
+      expect(mockRemainingSeconds).not.toHaveBeenCalled();
+    });
+
+    it("keeps Dictation off for a read-only viewer even when the setting is on", async () => {
+      mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
+      mockAccess.mockResolvedValue({ ok: true, permission: { role: "admin" }, school: { id: 4 }, actorUserId: 2, canEdit: true });
+      mockDetail.mockResolvedValue({ ...phase, readOnly: true });
+      mockDictationSettings.mockReturnValue({ enabled: true, apiKey: "key", zeroRetention: false });
+
+      render(await StudentPhasePage(props));
+
+      expect(dictationProp()).toEqual({ enabled: false, remainingSeconds: 0 });
+      expect(mockRemainingSeconds).not.toHaveBeenCalled();
+    });
+
+    it("still shows the Notes form, without Dictation, when today's usage can't be read", async () => {
+      mockSession.mockResolvedValue({ user: { email: "teacher@example.com" } });
+      mockAccess.mockResolvedValue(teacherAccess);
+      mockDetail.mockResolvedValue({ ...phase, readOnly: false });
+      mockDictationSettings.mockReturnValue({ enabled: true, apiKey: "key", zeroRetention: false });
+      const missingTable = Object.assign(
+        new Error('relation "holistic_mentorship_dictation_usage_records" does not exist'),
+        { code: "42P01" }
+      );
+      mockRemainingSeconds.mockRejectedValue(missingTable);
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      render(await StudentPhasePage(props));
+
+      expect(dictationProp()).toEqual({ enabled: false, remainingSeconds: 0 });
+      expect(logged).toHaveBeenCalledWith("Holistic Dictation usage read failed", { failureClass: "42P01" });
+      logged.mockRestore();
+    });
   });
 });

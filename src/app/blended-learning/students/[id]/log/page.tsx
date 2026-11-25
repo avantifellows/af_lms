@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Card } from "@/components/ui";
-import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning, isTeamLead, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
 import { getDraftForReview, getDraftStatus, type DraftForReview } from "@/lib/blended-learning-drafts";
@@ -16,6 +16,7 @@ import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../../BlendedPageShell";
 import { ExternalLink } from "../../../ExternalLink";
+import { myStudentsHref } from "../../../SectionTabs";
 import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 // Log a Conversation or an Attempt for one Mentee. Only a Mentor logs, for
@@ -119,6 +120,8 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
 
   const mentee = await getMenteeDetail(access, Number(id));
   if (!mentee) notFound();
+  // A supervisor reads a supervised Mentor's Mentee but never logs for them.
+  if (mentee.viewOnly) redirect(`/blended-learning/students/${id}`);
 
   const firstName = mentee.name.split(" ")[0] || mentee.name;
   const program = mentee.programName && shortProgramName(mentee.programName);
@@ -156,6 +159,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         screener={{ hasLink: mentee.screenerUrl !== null, feedbackDue: mentee.screenerFeedbackDue }}
         draft={draft}
         pendingDraft={pendingDraft}
+        studentsHref={myStudentsHref(isTeamLead(access))}
         canManageDraft={canBlendedLearning(access, "manage_draft")}
       />
     </BlendedPageShell>

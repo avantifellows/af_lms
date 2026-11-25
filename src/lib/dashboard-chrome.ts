@@ -46,6 +46,7 @@ export function dashboardFeatures(
     hasPMAccess: getFeatureAccess(permission, "pm_dashboard").canView,
     canViewVisitSummary: canOpenVisitSummary(email, permission),
     showCurriculumSummary: canViewCurriculumSummary(permission, context),
+    showAlumni: getFeatureAccess(permission, "alumni").canView,
     canViewHolisticAdmin,
   };
 }
