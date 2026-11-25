@@ -30,6 +30,8 @@ interface Props {
   onBusyChange?: (busy: boolean) => void;
   /** A save finished: reload the table (the result screen stays open). */
   onSaved?: () => void;
+  /** Told when there are answers filled in and not saved yet. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /** Students per request (the server takes at most 25). */
@@ -72,12 +74,18 @@ const appliesToAny = (column: string, views: Values[]) => {
  * The answers to send: typed ones that apply to someone and aren't already
  * every student's answer. `replace`: those changed from a shared answer.
  */
-function answersToSend(typed: Values, common: Values, views: Values[]): { answers: Values; replace: string[] } {
+function answersToSend(
+  typed: Values,
+  common: Values,
+  views: Values[],
+  reopened: Set<string>,
+): { answers: Values; replace: string[] } {
   const answers: Values = {};
   for (const [column, v] of Object.entries(typed)) {
     if (v.trim() && v.trim() !== (common[column] ?? "") && appliesToAny(column, views)) answers[column] = v.trim();
   }
-  return { answers, replace: Object.keys(answers).filter((c) => common[c]) };
+  // Replace what's on record where the person changed a shared answer or reopened one (pencil).
+  return { answers, replace: Object.keys(answers).filter((c) => common[c] || reopened.has(c)) };
 }
 
 /** What the students already have on record (shared and differing answers). */
@@ -186,7 +194,7 @@ function useBulkAnswers(start: BulkCommon, onEdit: () => void) {
   const values = useMemo(() => ({ ...common, ...typed }), [common, typed]);
   const views = useMemo(() => studentViews(start.gates, typed, overwrite, reopened), [start.gates, typed, overwrite, reopened]);
   const errors = useMemo(() => reviewValues(typed, common, checkContext({})).errors, [typed, common]);
-  const { answers, replace } = useMemo(() => answersToSend(typed, common, views), [typed, common, views]);
+  const { answers, replace } = useMemo(() => answersToSend(typed, common, views, reopened), [typed, common, views, reopened]);
   const sections = ALUMNI_SECTIONS.map((s) => ({ section: s, ...splitSection(s, views, start, typed, reopened) }));
 
   return {
@@ -249,9 +257,13 @@ function useBulkRun(students: BulkStudent[], { onBusyChange, onSaved }: Pick<Pro
   };
 }
 
-function BulkEditor({ students, start, startError, onDone, onBusyChange, onSaved }: Props & { start: BulkCommon; startError: string }) {
+function BulkEditor({ students, start, startError, onDone, onBusyChange, onSaved, onDirtyChange }: Props & { start: BulkCommon; startError: string }) {
   const run = useBulkRun(students, { onBusyChange, onSaved });
   const form = useBulkAnswers(start, run.edited);
+  const dirty = Object.keys(form.answers).length > 0 && run.stage !== "done";
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   if (run.stage === "done") return <DoneView results={run.saved} onClose={onDone} />;
 

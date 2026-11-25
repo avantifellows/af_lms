@@ -24,16 +24,16 @@ export interface RestorePlanItem {
 }
 
 export interface RestorePlan {
-  /** Alumni changed after the moment who would go back. */
+  /** Alumni the change touched who would go back to how they were before it. */
   items: RestorePlanItem[];
-  /** Alumni added after the moment: never removed, so left as they are. */
-  addedAfter: { alumniId: string; name: string; school: string }[];
+  /** Alumni the change touched who were changed again after it: left as they are. */
+  changedLater: { alumniId: string; name: string; school: string }[];
 }
 
 export interface RestoreResult {
   alumniId: string;
   name: string;
-  /** skipped: changed since the preview, so not restored unseen. */
+  /** skipped: changed again after the change, or since the preview — not undone unseen. */
   result: "restored" | "unchanged" | "skipped" | "error";
   message?: string;
   changed: string[];
@@ -49,6 +49,8 @@ export const RESTORE_CHUNK = 25;
 export interface HistoryGroup {
   /** The first save's row id (a stable key). */
   id: string;
+  /** The last save's row id. */
+  lastId: string;
   /** When the step started and ended (ISO, UTC). */
   start: string;
   end: string;

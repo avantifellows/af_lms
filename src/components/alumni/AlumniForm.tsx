@@ -64,6 +64,8 @@ interface Props {
   onSaved?: () => void;
   /** False for view-only access (read_only): the form shows, but there's no Save. */
   canEdit?: boolean;
+  /** Told when the form gets (or loses) answers not saved yet. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -257,7 +259,7 @@ function useSaveFlow() {
   };
 }
 
-export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
+export default function AlumniForm({ entry, onSaved, canEdit = true, onDirtyChange }: Props) {
   /** Becomes the new alumnus once a pass-out is saved. */
   const [ref, setRef] = useState(entry);
   /** Bumped after a save to reload the record from the database. */
@@ -270,6 +272,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
   /** This call's remark; starts empty for every call. */
   const [remark, setRemark] = useState<Remark>(NO_REMARK);
   const history = useHistoryView(context, version);
+  useReportDirty(dirty, onDirtyChange);
 
   const visibleSections = useMemo(
     () => ALUMNI_SECTIONS.filter((s) => s.fields.some((f) => isFieldShown(s, f, values))),
@@ -304,8 +307,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
 
   const save = () => {
     // Same review the server runs — catch problems without a round trip.
-    const note = remarkNote(remark);
-    const fieldErrors = "error" in note ? { ...review.errors, remark: note.error } : review.errors;
+    const fieldErrors = withRemarkError(review.errors, remark);
     flow.reviewed(fieldErrors);
     runStep(nextStep({ ...review, errors: fieldErrors }), { fix: scrollToField, confirm: flow.setConfirming, send: () => submit([]) });
   };
@@ -320,28 +322,14 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
   };
 
   if (history.preview) {
-    return (
-      <div className="space-y-5">
-        <FormHeader context={context} actions={<HistoryButton count={history.count} onClick={history.show} />} />
-        <VersionPreview
-          entry={history.preview}
-          alumniId={context.ids.alumniId}
-          version={context.version}
-          canEdit={canEdit}
-          unsaved={dirty}
-          onRestored={reload}
-          onBack={() => history.select(null)}
-        />
-        {history.panel}
-      </div>
-    );
+    return <VersionView context={context} history={history} preview={history.preview} canEdit={canEdit} unsaved={dirty} onRestored={reload} />;
   }
 
   return (
     <div className="space-y-5">
       <FormHeader
         context={context}
-        actions={history.journey && <HistoryButton count={history.count} onClick={history.show} />}
+        actions={<HistoryButton count={history.journey ? history.count : null} onClick={history.show} />}
       />
 
       <EditNote kind={context.kind} />
@@ -363,17 +351,16 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
         />
       ))}
 
-      {canEdit && (
-        <RemarkBlock
-          remark={remark}
-          isNew={context.kind === "new"}
-          error={errors.remark}
-          onChange={(next) => {
-            setRemark(next);
-            flow.edited("remark");
-          }}
-        />
-      )}
+      <RemarkBlock
+        remark={remark}
+        isNew={context.kind === "new"}
+        canEdit={canEdit}
+        error={errors.remark}
+        onChange={(next) => {
+          setRemark(next);
+          flow.edited("remark");
+        }}
+      />
 
       <SaveBar canEdit={canEdit}>
         <Button type="button" onClick={save} disabled={saving} className="min-w-[140px]">
@@ -406,8 +393,9 @@ const NO_REMARK: Remark = { option: "", details: "" };
 
 /** What happened on this call (saved with the call's history row, not on the alumni record). */
 function RemarkBlock({
-  remark, isNew, error, onChange,
-}: { remark: Remark; isNew: boolean; error?: string; onChange: (r: Remark) => void }) {
+  remark, isNew, canEdit, error, onChange,
+}: { remark: Remark; isNew: boolean; canEdit: boolean; error?: string; onChange: (r: Remark) => void }) {
+  if (!canEdit) return null; // a remark is part of a save
   const option = REMARK_OPTIONS.find((o) => o.label === remark.option);
   return (
     <section className="rounded-xl border border-border bg-bg-card px-4 py-3">
@@ -518,6 +506,47 @@ function FormHeader({ context, actions }: { context: EntryContext; actions?: Rea
   );
 }
 
+/** The review's field errors, plus the remark's when it has one (Other needs its text). */
+function withRemarkError(errors: Record<string, string>, remark: Remark): Record<string, string> {
+  const note = remarkNote(remark);
+  return "error" in note ? { ...errors, remark: note.error } : errors;
+}
+
+/** Tells the parent (a popup) when the form gets or loses answers not saved yet. */
+function useReportDirty(dirty: boolean, onDirtyChange: ((dirty: boolean) => void) | undefined) {
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+}
+
+/** The form showing a version picked in the history (read-only), with the panel still open. */
+function VersionView({ context, history, preview, canEdit, unsaved, onRestored }: {
+  context: EntryContext;
+  history: ReturnType<typeof useHistoryView>;
+  /** The version picked. */
+  preview: JourneyEntry;
+  canEdit: boolean;
+  unsaved: boolean;
+  onRestored: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <FormHeader context={context} actions={<HistoryButton count={history.count} onClick={history.show} />} />
+      <VersionPreview
+        key={preview.id}
+        entry={preview}
+        alumniId={context.ids.alumniId}
+        version={context.version}
+        canEdit={canEdit}
+        unsaved={unsaved}
+        onRestored={onRestored}
+        onBack={() => history.select(null)}
+      />
+      {history.panel}
+    </div>
+  );
+}
+
 /**
  * Version history: the panel on the right, and the version picked there,
  * which the form shows in place of the current record. Closing the panel
@@ -590,6 +619,17 @@ function VersionPreview({
           {changed.length > 0 && "; highlighted fields changed in this version"}.
         </span>
       </p>
+      {entry.changes.length > 0 && (
+        // As text too: a cleared field, or one in a section not shown, has no box to highlight.
+        <ul aria-label="Changed in this version" className="space-y-0.5 rounded-lg border border-border px-3 py-2 text-xs">
+          {entry.changes.map((c) => (
+            <li key={c.column}>
+              <span className="font-medium text-text-secondary">{c.label}:</span>{" "}
+              <span className="text-text-muted line-through">{c.before || "blank"}</span> → <span className="font-semibold">{c.after || "blank"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <fieldset disabled className="min-w-0 space-y-5">
         {sections.map((section, i) => (
           <FormSectionBlock

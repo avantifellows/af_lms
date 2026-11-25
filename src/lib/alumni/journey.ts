@@ -231,7 +231,8 @@ export async function revertToJourney(
   if (!current || current.version !== version) {
     return { ok: false, status: 409, error: "This record changed after you opened it. Reload, then try again." };
   }
-  const columns = changedColumns(current.data, row.data);
+  // An older version can predate fields added since: leave those as they are.
+  const columns = changedColumns(current.data, row.data).filter((c) => c in row.data);
   if (!columns.length) return { ok: false, status: 400, error: "The record already matches this version." };
 
   const data = Object.fromEntries(columns.map((c) => [c, row.data[c] ?? null]));

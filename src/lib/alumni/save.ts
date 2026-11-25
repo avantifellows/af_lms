@@ -127,7 +127,12 @@ async function sendAsCall(
   return { ...written, error: `${written.error} The alumnus was added without these answers — reload and save them again.` };
 }
 
-/** A new alumni row with no answers yet (the DB Service writes no history for it). */
+/**
+ * A new alumni row with no answers yet (the DB Service writes no history for
+ * it). The DB Service's POST updates the row when one exists, answering 200 —
+ * so only 201 means it's new; otherwise someone added them meanwhile, and
+ * writing now would overwrite their answers unseen.
+ */
 async function createEmptyAlumni(studentId: string): Promise<{ ok: true; alumniId: string } | Failure> {
   const dbService = getDbServiceConfig()!;
   const response = await fetch(`${dbService.baseUrl}/alumni`, {
@@ -139,6 +144,7 @@ async function createEmptyAlumni(studentId: string): Promise<{ ok: true; alumniI
     console.error("[alumni] DB service error:", response.status, (await response.text()).slice(0, 500));
     return { ok: false, status: 502, error: `Couldn't save — the DB Service answered ${response.status}.` };
   }
+  if (response.status !== 201) return CONFLICT;
   return { ok: true, alumniId: String(((await response.json()) as { id: number | string }).id) };
 }
 

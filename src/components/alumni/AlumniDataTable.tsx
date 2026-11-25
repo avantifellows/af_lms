@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Download, Loader2, Pencil, Search, Users, X } from "lucide-react";
 import { Button, Card, Modal, Select } from "@/components/ui";
 import AlumniForm, { type AlumniEntryRef } from "./AlumniForm";
+import { useOnAlumniChanged } from "./alumni-changed";
 import BulkEditPanel, { type BulkStudent } from "./BulkEditPanel";
 import ReferencePicker from "./ReferencePicker";
 import type { BulkResult } from "@/lib/alumni/bulk-types";
@@ -78,6 +79,7 @@ function useTableData(query: string) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [version, setVersion] = useState(0);
+  useOnAlumniChanged(() => setVersion((v) => v + 1));
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -117,7 +119,6 @@ function useSelection() {
     selected,
     toggle: (s: BulkStudent) => update((m) => (m.has(rowKey(s)) ? m.delete(rowKey(s)) : m.set(rowKey(s), s))),
     setMany: (list: BulkStudent[], on: boolean) => update((m) => list.forEach((s) => (on ? m.set(rowKey(s), s) : m.delete(rowKey(s))))),
-    replace: (list: BulkStudent[]) => setSelected(new Map(list.map((s) => [rowKey(s), s]))),
     clear: () => setSelected(new Map()),
   };
 }
@@ -140,37 +141,77 @@ function useFilters(schoolCode: string | undefined) {
   };
 }
 
-/** Ticks every student matching the filters (all pages). */
-async function selectAllMatching(allPages: string, replace: (list: BulkStudent[]) => void) {
+/** Adds every student matching the filters (all pages) to the ticks. */
+async function selectAllMatching(allPages: string, add: (list: BulkStudent[]) => void) {
   try {
     const res = await fetch(`/api/alumni/table?${allPages}&refs=1`);
     const body = await res.json();
     if (!res.ok) throw new Error(body?.error);
-    replace(body.refs);
+    add(body.refs);
   } catch {
     toast.error("Couldn't select everyone. Try again.");
   }
 }
 
+/** The record popup: which record, and whether it has answers not saved yet. */
+function useRecordPopup() {
+  const [entry, setEntry] = useState<AlumniEntryRef | null>(null);
+  const [dirty, setDirty] = useState(false);
+  return {
+    entry,
+    dirty,
+    setDirty,
+    show: setEntry,
+    close: () => {
+      setEntry(null);
+      setDirty(false);
+    },
+  };
+}
+
+/**
+ * The bulk edit popup: it can't close while a check or save runs, asks first
+ * when answers aren't saved, and clears the selection once a save happened.
+ */
+function useBulkPopup(clearSelection: () => void, reload: () => void) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const close = () => {
+    if (busy) return;
+    setOpen(false);
+    setDirty(false);
+    if (saved) clearSelection();
+    setSaved(false);
+  };
+  return {
+    open,
+    busy,
+    dirty,
+    show: () => setOpen(true),
+    close,
+    /** BulkEditPanel's callbacks. */
+    panel: {
+      onBusyChange: setBusy,
+      onDirtyChange: setDirty,
+      onSaved: () => {
+        setSaved(true);
+        reload();
+      },
+      onDone: close,
+    },
+  };
+}
+
 export default function AlumniDataTable({ schoolCode, canEdit = true }: Props) {
   const view = useFilters(schoolCode);
-  const [open, setOpen] = useState<AlumniEntryRef | null>(null);
-  const [bulkOpen, setBulkOpen] = useState(false);
-  /** A bulk check or save is running: its popup stays open. */
-  const [bulkBusy, setBulkBusy] = useState(false);
-  /** A bulk save happened: the selection clears when its popup closes (however it's closed). */
-  const [bulkSaved, setBulkSaved] = useState(false);
   const selection = useSelection();
   const selectedStudents = useMemo(() => [...selection.selected.values()], [selection.selected]);
   const table = useTableData(view.query);
   const { data, reload } = table;
-
-  const closeBulk = () => {
-    if (bulkBusy) return;
-    setBulkOpen(false);
-    if (bulkSaved) selection.clear();
-    setBulkSaved(false);
-  };
+  const record = useRecordPopup();
+  const bulk = useBulkPopup(selection.clear, reload);
 
   return (
     <div className="space-y-4">
@@ -187,26 +228,16 @@ export default function AlumniDataTable({ schoolCode, canEdit = true }: Props) {
         table={table}
         showSchool={!schoolCode}
         selection={canEdit ? selection : undefined}
-        onSelectAll={() => selectAllMatching(view.allPages, selection.replace)}
-        onEditSelected={() => setBulkOpen(true)}
-        onOpen={setOpen}
+        onSelectAll={() => selectAllMatching(view.allPages, (list) => selection.setMany(list, true))}
+        onEditSelected={bulk.show}
+        onOpen={record.show}
         onPage={view.setPage}
       />
-      <ClosableModal open={open !== null} onClose={() => setOpen(null)}>
-        {open && <AlumniForm entry={open} canEdit={canEdit} onSaved={reload} />}
+      <ClosableModal open={record.entry !== null} label="Alumni record" dirty={record.dirty} onClose={record.close}>
+        {record.entry && <AlumniForm entry={record.entry} canEdit={canEdit} onSaved={reload} onDirtyChange={record.setDirty} />}
       </ClosableModal>
-      <ClosableModal open={bulkOpen} onClose={closeBulk} locked={bulkBusy}>
-        {bulkOpen && (
-          <BulkEditPanel
-            students={selectedStudents}
-            onBusyChange={setBulkBusy}
-            onSaved={() => {
-              setBulkSaved(true);
-              reload();
-            }}
-            onDone={closeBulk}
-          />
-        )}
+      <ClosableModal open={bulk.open} label="Bulk edit" onClose={bulk.close} locked={bulk.busy} dirty={bulk.dirty}>
+        {bulk.open && <BulkEditPanel students={selectedStudents} {...bulk.panel} />}
       </ClosableModal>
     </div>
   );
@@ -230,6 +261,7 @@ function TableCard({ table, showSchool, selection, onSelectAll, onEditSelected, 
       {selection && (
         <SelectionBar
           count={selection.selected.size}
+          hidden={hiddenTicked(selection.selected, data?.rows ?? [])}
           total={data?.total ?? 0}
           onSelectAll={onSelectAll}
           onClear={selection.clear}
@@ -243,20 +275,37 @@ function TableCard({ table, showSchool, selection, onSelectAll, onEditSelected, 
 }
 
 /** A wide modal with a close button in its corner; `locked` (work running) keeps it open. */
-function ClosableModal({ open, onClose, locked = false, children }: {
+function ClosableModal({ open, onClose, label, locked = false, dirty = false, children }: {
   open: boolean;
   onClose: () => void;
+  /** The popup's name for screen readers. */
+  label: string;
   locked?: boolean;
+  /** Answers not saved yet: closing (Esc, backdrop, X) asks first. */
+  dirty?: boolean;
   children: React.ReactNode;
 }) {
+  const [asking, setAsking] = useState(false);
+  const tryClose = () => (dirty ? setAsking(true) : onClose());
+  const discard = () => {
+    setAsking(false);
+    onClose();
+  };
   return (
-    <Modal open={open} onClose={locked ? undefined : onClose} className="max-w-4xl p-6">
+    <Modal open={open} onClose={locked ? undefined : tryClose} className="max-w-4xl p-6" aria-label={label}>
       {open && (
         <>
           {!locked && (
-            <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded p-1 text-text-muted hover:bg-hover-bg">
+            <button type="button" onClick={tryClose} aria-label="Close" className="absolute right-3 top-3 rounded p-1 text-text-muted hover:bg-hover-bg">
               <X className="h-4 w-4" aria-hidden />
             </button>
+          )}
+          {asking && (
+            <div role="alertdialog" aria-label="Discard changes?" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-warning-bg px-3 py-2 text-sm text-warning-text">
+              <span className="mr-auto">You have answers that aren&apos;t saved. Close and lose them?</span>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setAsking(false)}>Keep editing</Button>
+              <Button type="button" size="sm" onClick={discard}>Discard</Button>
+            </div>
           )}
           {children}
         </>
@@ -376,9 +425,17 @@ interface RowSelect {
   setMany: (list: BulkStudent[], on: boolean) => void;
 }
 
-/** "12 selected · Select all 340 matching · Clear · Edit selected". */
-function SelectionBar({ count, total, onSelectAll, onClear, onEdit }: {
+/** Ticked students not shown now (another page or filter): bulk edit includes them too. */
+function hiddenTicked(selected: Map<string, BulkStudent>, rows: AlumniTableRow[]): BulkStudent[] {
+  const shown = new Set(rows.map(rowKey));
+  return [...selected.values()].filter((s) => !shown.has(rowKey(s)));
+}
+
+/** "12 selected (5 not in this view) · Add all 340 matching · Clear · Edit selected". */
+function SelectionBar({ count, hidden, total, onSelectAll, onClear, onEdit }: {
   count: number;
+  /** Ticked but not in the rows shown: listed on request, so no one is edited unseen. */
+  hidden: BulkStudent[];
   total: number;
   onSelectAll: () => void;
   onClear: () => void;
@@ -394,9 +451,10 @@ function SelectionBar({ count, total, onSelectAll, onClear, onEdit }: {
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-border bg-brand-coral-bg/40 px-4 py-2 text-sm">
       <span className="font-semibold text-text-primary">{count.toLocaleString()} selected</span>
-      {count < total && (
+      <HiddenTicked hidden={hidden} />
+      {total > 0 && (
         <button type="button" onClick={onSelectAll} className="text-accent hover:underline">
-          Select all {total.toLocaleString()} matching
+          Add all {total.toLocaleString()} matching
         </button>
       )}
       <button type="button" onClick={onClear} className="text-text-muted hover:underline">Clear</button>
@@ -404,6 +462,25 @@ function SelectionBar({ count, total, onSelectAll, onClear, onEdit }: {
         <Users className="h-4 w-4" aria-hidden /> Edit {count.toLocaleString()} selected
       </Button>
     </div>
+  );
+}
+
+/** "(5 not in this view)", opening the list of who they are. */
+function HiddenTicked({ hidden }: { hidden: BulkStudent[] }) {
+  const [open, setOpen] = useState(false);
+  if (!hidden.length) return null;
+  return (
+    <span className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="text-warning-text hover:underline">
+        ({hidden.length.toLocaleString()} not in this view)
+      </button>
+      {open && (
+        <ul className="absolute left-0 top-full z-20 mt-1 max-h-48 w-64 overflow-y-auto rounded-lg border border-border bg-bg-card p-2 text-xs shadow-lg">
+          {hidden.slice(0, 50).map((s) => <li key={rowKey(s)} className="truncate py-0.5">{s.name}</li>)}
+          {hidden.length > 50 && <li className="py-0.5 text-text-muted">and {hidden.length - 50} more</li>}
+        </ul>
+      )}
+    </span>
   );
 }
 

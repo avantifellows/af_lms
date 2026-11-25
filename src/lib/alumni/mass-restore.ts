@@ -3,32 +3,44 @@ import { CODE_COLUMNS } from "./entry";
 import { ROLE_NAMES, changedColumns, codeNames, fieldLabel, postJourney, rowSnapshot, type JourneyNote, type Snapshot } from "./journey";
 import type { HistoryGroup, RestorePlan, RestorePlanItem, RestoreResult, RestoreScope } from "./mass-restore-types";
 
-/// Mass restore: put every alumnus in a scope (all alumni, or one school's)
-// back to how they were just before a step in their history — the history row
-// `beforeId` (rows are ordered by id, so this is exact, unlike a time). For
-// each alumnus with a row from there on, the version to go back to is their
-// latest row before it; when their first recorded change came later, it is
-// the `initial` copy kept before that change (or no answers at all, when they
-// had none). Each one is written like a single restore — a `correction` call
-// through the DB Service — so a mass restore can itself be undone. Alumni
-// added since are listed, never removed.
+//// Undoing one change for many alumni (all of them, or one school's): a "step"
+// in the history — one person's saves of one kind, close together (a bulk
+// edit, a run of calls, a restore). Only the alumni that step touched go back,
+// each to their own version from just before it (their latest history row
+// before their first row in the step: the DB Service's `initial` copy when the
+// step was their first change, or no answers at all when the step created
+// them). Anyone changed again after the step — by anyone — is left as they
+// are and listed, so later work is never undone. Each undo is written like a
+// single restore — a `correction` call through the DB Service — so it can
+// itself be undone.
 //
 // A school's alumni are those whose latest school it is (canAccessAlumni's rule).
 
-/** The history row to restore to just before, and when it was recorded. */
-export interface RestoreMarker {
-  id: string;
-  /** ISO, UTC (whole seconds, as the rows keep it). */
+/** A step, as its first and last history row ids plus who made it (read from the rows, not trusted). */
+export interface RestoreStep {
+  fromId: string;
+  toId: string;
+  source: string;
+  actorEmail: string | null;
+  actorRole: string | null;
+  /** When it started (ISO, UTC). */
   at: string;
 }
 
-/** The marker row, or null when there's no such history row. */
-export async function findMarker(beforeId: string): Promise<RestoreMarker | null> {
-  const [row] = await query<RestoreMarker>(
-    `SELECT id::text AS id, to_char(inserted_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at FROM alumni_journey WHERE id = $1`,
-    [beforeId],
+/** The step between these history rows (made by the first row's person and kind), or null. */
+export async function findStep(fromId: string, toId: string): Promise<RestoreStep | null> {
+  const [row] = await query<{ source: string; actor_email: string | null; actor_role: string | null; at: string; last_ok: boolean }>(
+    `SELECT f.source, f.actor_email, f.actor_role, to_char(f.inserted_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
+            EXISTS (
+              SELECT 1 FROM alumni_journey t
+              WHERE t.id = $2::bigint AND t.id >= f.id AND t.source = f.source
+                AND t.actor_email IS NOT DISTINCT FROM f.actor_email AND t.actor_role IS NOT DISTINCT FROM f.actor_role
+            ) AS last_ok
+     FROM alumni_journey f WHERE f.id = $1::bigint`,
+    [fromId, toId],
   );
-  return row ?? null;
+  if (!row?.last_ok) return null;
+  return { fromId, toId, source: row.source, actorEmail: row.actor_email, actorRole: row.actor_role, at: row.at };
 }
 
 interface CandidateRow extends Record<string, unknown> {
@@ -36,21 +48,15 @@ interface CandidateRow extends Record<string, unknown> {
   person: string | null;
   school_name: string | null;
   row_version: string;
-  added_after: boolean;
+  changed_later: boolean;
   target_on: string | null;
   target_data: Snapshot | null;
-  first_source: string | null;
-  first_on: string | null;
-  first_data: Snapshot | null;
 }
 
-/** The alumni in scope with history from the marker on (or added since), with the version to go back to. */
-async function loadCandidates(scope: RestoreScope, marker: RestoreMarker, alumniIds?: string[]): Promise<CandidateRow[]> {
-  const params: unknown[] = [marker.id, marker.at];
-  const where: string[] = [
-    `EXISTS (SELECT 1 FROM alumni_journey j WHERE j.alumni_id = a.id AND j.id >= $1::bigint)
-     OR a.inserted_at >= $2::timestamptz AT TIME ZONE 'UTC'`,
-  ];
+/** The alumni the step touched (in scope), each with the version from just before their part of it. */
+async function loadCandidates(scope: RestoreScope, step: RestoreStep, alumniIds?: string[]): Promise<CandidateRow[]> {
+  const params: unknown[] = [step.fromId, step.toId, step.source, step.actorEmail, step.actorRole];
+  const where: string[] = [];
   if (scope.kind === "school") {
     params.push(scope.code);
     where.push(`sch.code = $${params.length}`);
@@ -60,13 +66,20 @@ async function loadCandidates(scope: RestoreScope, marker: RestoreMarker, alumni
     where.push(`a.id = ANY($${params.length}::bigint[])`);
   }
   return query<CandidateRow>(
-    `SELECT a.*, a.id::text AS id, a.updated_at::text AS row_version,
+    `WITH step AS (
+       SELECT j.alumni_id, min(j.id) AS first_id, max(j.id) AS last_id
+       FROM alumni_journey j
+       WHERE j.id BETWEEN $1::bigint AND $2::bigint AND j.source = $3
+         AND j.actor_email IS NOT DISTINCT FROM $4::text AND j.actor_role IS NOT DISTINCT FROM $5::text
+       GROUP BY j.alumni_id
+     )
+     SELECT a.*, a.id::text AS id, a.updated_at::text AS row_version,
             NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), '') AS person,
             sch.name AS school_name,
-            a.inserted_at >= $2::timestamptz AT TIME ZONE 'UTC' AS added_after,
-            t.reported_on::text AS target_on, t.data AS target_data,
-            f.source AS first_source, f.reported_on::text AS first_on, f.data AS first_data
-     FROM alumni a
+            EXISTS (SELECT 1 FROM alumni_journey l WHERE l.alumni_id = a.id AND l.id > st.last_id) AS changed_later,
+            t.reported_on::text AS target_on, t.data AS target_data
+     FROM step st
+     JOIN alumni a ON a.id = st.alumni_id
      JOIN student s ON s.id = a.student_id
      JOIN "user" u ON u.id = s.user_id
      LEFT JOIN LATERAL (
@@ -78,32 +91,33 @@ async function loadCandidates(scope: RestoreScope, marker: RestoreMarker, alumni
      ) sch ON true
      LEFT JOIN LATERAL (
        SELECT j.reported_on, j.data FROM alumni_journey j
-       WHERE j.alumni_id = a.id AND j.id < $1::bigint
+       WHERE j.alumni_id = a.id AND j.id < st.first_id
        ORDER BY j.id DESC LIMIT 1
      ) t ON true
-     LEFT JOIN LATERAL (
-       SELECT j.source, j.reported_on, j.data FROM alumni_journey j
-       WHERE j.alumni_id = a.id ORDER BY j.id LIMIT 1
-     ) f ON true
-     WHERE (${where[0]}) ${where.slice(1).map((w) => `AND ${w}`).join(" ")}
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
      ORDER BY sch.name NULLS LAST, person, a.id`,
     params,
   );
 }
 
-/** The version to go back to: the row before the marker, else the copy kept before the first change. */
-function target(row: CandidateRow): { data: Snapshot; on: string } {
-  if (row.target_data) return { data: row.target_data, on: row.target_on ?? "" };
-  if (row.first_source === "initial" && row.first_data) return { data: row.first_data, on: row.first_on ?? "" };
-  return { data: {}, on: "" }; // they had no answers before their first recorded change
+/** What to write to undo the step for one alumnus: the fields that differ from their version before it. */
+function undoFor(row: CandidateRow): { columns: string[]; data: Snapshot; on: string } {
+  const back = row.target_data ?? {}; // no earlier row: the step created them, or they had no answers
+  const now = rowSnapshot(row);
+  // An older version can predate fields added since: leave those as they are.
+  const known = Object.keys(back).length ? (c: string) => c in back : () => true;
+  const columns = changedColumns(now, back).filter(known);
+  return { columns, data: back, on: row.target_on ?? "" };
 }
 
-/** Who would change, and how (with each record's version now); who was added since. */
-export async function planRestore(scope: RestoreScope, marker: RestoreMarker, alumniIds?: string[]): Promise<RestorePlan> {
-  const rows = await loadCandidates(scope, marker, alumniIds);
-  const kept = rows.filter((r) => !r.added_after);
-  const targets = new Map(kept.map((r) => [r.id, target(r)]));
-  const names = await codeNames([...kept.map(rowSnapshot), ...[...targets.values()].map((t) => t.data)]);
+const person = (row: CandidateRow) => ({ alumniId: row.id, name: row.person ?? "(no name)", school: row.school_name ?? "" });
+
+/** Who would go back, and how; who was changed again after the step (left as they are). */
+export async function planRestore(scope: RestoreScope, step: RestoreStep, alumniIds?: string[]): Promise<RestorePlan> {
+  const rows = await loadCandidates(scope, step, alumniIds);
+  const open = rows.filter((r) => !r.changed_later);
+  const undos = new Map(open.map((r) => [r.id, undoFor(r)]));
+  const names = await codeNames([...open.map(rowSnapshot), ...[...undos.values()].map((u) => u.data)]);
   const show = (column: string, value: unknown) => {
     if (value == null || value === "") return "";
     const kind = CODE_COLUMNS[column as keyof typeof CODE_COLUMNS];
@@ -111,31 +125,25 @@ export async function planRestore(scope: RestoreScope, marker: RestoreMarker, al
   };
 
   const items: RestorePlanItem[] = [];
-  for (const row of kept) {
+  for (const row of open) {
     const now = rowSnapshot(row);
-    const back = targets.get(row.id)!;
-    const columns = changedColumns(now, back.data);
-    if (!columns.length) continue;
+    const undo = undos.get(row.id)!;
+    if (!undo.columns.length) continue;
     items.push({
-      alumniId: row.id,
-      name: row.person ?? "(no name)",
-      school: row.school_name ?? "",
-      versionOn: back.on,
+      ...person(row),
+      versionOn: undo.on,
       version: row.row_version,
-      changes: columns.map((c) => ({ label: fieldLabel(c), before: show(c, now[c]), after: show(c, back.data[c]) })),
+      changes: undo.columns.map((c) => ({ label: fieldLabel(c), before: show(c, now[c]), after: show(c, undo.data[c]) })),
     });
   }
-  const addedAfter = rows
-    .filter((r) => r.added_after)
-    .map((r) => ({ alumniId: r.id, name: r.person ?? "(no name)", school: r.school_name ?? "" }));
-  return { items, addedAfter };
+  return { items, changedLater: rows.filter((r) => r.changed_later).map(person) };
 }
 
 /** "23 Nov 2026, 2:00 pm" in India. */
 export const istMoment = (at: Date) =>
   at.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 
-/** One alumnus's restore, given their candidate row (re-read now). `version`: what the preview showed. */
+/** One alumnus's undo, given their candidate row (re-read now). `version`: what the preview showed. */
 async function restoreOne(
   alumniId: string,
   row: CandidateRow | undefined,
@@ -143,40 +151,44 @@ async function restoreOne(
   note: JourneyNote,
 ): Promise<RestoreResult> {
   const name = row?.person ?? "";
-  if (!row || row.added_after) return { alumniId, name, result: "unchanged", message: "Nothing to restore.", changed: [] };
-  // Someone saved this alumnus after the preview: restoring now would undo that unseen save.
+  if (!row) return { alumniId, name, result: "unchanged", message: "Not part of this change.", changed: [] };
+  if (row.changed_later) {
+    return { alumniId, name, result: "skipped", message: "Changed again after this change — left as it is.", changed: [] };
+  }
+  // Someone saved this alumnus after the preview: undoing now would also undo that unseen save.
   if (version && version !== row.row_version) {
     return { alumniId, name, result: "skipped", message: "Changed since the preview — check again to include it.", changed: [] };
   }
-  const back = target(row);
-  const columns = changedColumns(rowSnapshot(row), back.data);
-  if (!columns.length) return { alumniId, name, result: "unchanged", message: "Already as it was.", changed: [] };
-  const data = Object.fromEntries(columns.map((c) => [c, back.data[c] ?? null]));
+  const undo = undoFor(row);
+  if (!undo.columns.length) return { alumniId, name, result: "unchanged", message: "Already as it was.", changed: [] };
+  const data = Object.fromEntries(undo.columns.map((c) => [c, undo.data[c] ?? null]));
   const written = await postJourney(alumniId, data, note);
   return written.ok
-    ? { alumniId, name, result: "restored", changed: columns.map(fieldLabel) }
+    ? { alumniId, name, result: "restored", changed: undo.columns.map(fieldLabel) }
     : { alumniId, name, result: "error", message: written.error, changed: [] };
 }
 
+const SOURCE_NAMES: Record<string, string> = { call: "calls", form: "saves", bulk_upload: "bulk edit", correction: "restore" };
+
 /**
- * Restores these alumni, re-read now: one already put back is left alone, and
- * one whose record changed since the preview (`versions`, from the plan) is
- * skipped rather than reverted unseen.
+ * Undoes the step for these alumni, re-read now: one changed again since the
+ * step, or since the preview (`versions`, from the plan), is skipped rather
+ * than reverted unseen; one already back is left alone.
  */
 export async function runRestore(
   scope: RestoreScope,
-  marker: RestoreMarker,
+  step: RestoreStep,
   alumniIds: string[],
   actor: Omit<JourneyNote, "source" | "notes">,
   versions: Record<string, string> = {},
 ): Promise<RestoreResult[]> {
-  const rows = await loadCandidates(scope, marker, alumniIds);
+  const rows = await loadCandidates(scope, step, alumniIds);
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const where = scope.kind === "school" ? `school ${scope.code}` : "all alumni";
+  const by = step.actorEmail || ROLE_NAMES[step.actorRole ?? ""] || step.actorRole || "someone";
   const note: JourneyNote = {
     ...actor,
     source: "correction",
-    notes: `Mass restore to just before history #${marker.id} (${istMoment(new Date(marker.at))}, ${where})`,
+    notes: `Undid the ${SOURCE_NAMES[step.source] ?? step.source} by ${by} on ${istMoment(new Date(step.at))} (history #${step.fromId}–#${step.toId})`,
   };
   const results: RestoreResult[] = [];
   for (const alumniId of alumniIds) results.push(await restoreOne(alumniId, byId.get(alumniId), versions[alumniId], note));
@@ -234,21 +246,32 @@ export async function listHistory(scope: RestoreScope): Promise<HistoryGroup[]> 
 
 const actorOf = (r: HistoryRow) => r.actor_email || ROLE_NAMES[r.actor_role ?? ""] || r.actor_role || "";
 
-/** Rows newest first → steps: same kind, same person, each save within GROUP_GAP_MS of the next. */
+/**
+ * Rows newest first → steps: same kind, same person, each save within
+ * GROUP_GAP_MS of the next. Someone else's saves in between don't split a
+ * step (a bulk edit stays one step); undoing a step picks only its own rows.
+ */
 export function groupHistory(rows: HistoryRow[]): HistoryGroup[] {
-  const groups: (HistoryGroup & { ids: Set<string>; notes: Set<string> })[] = [];
+  type Open = HistoryGroup & { ids: Set<string>; notes: Set<string> };
+  const groups: Open[] = [];
+  /** The step still open for each kind + person. */
+  const open = new Map<string, Open>();
   for (const row of rows) {
-    const last = groups.at(-1);
     const by = actorOf(row);
-    const sameStep =
-      last && last.source === row.source && last.by === by && Date.parse(last.start) - Date.parse(row.at) <= GROUP_GAP_MS;
-    if (sameStep) {
-      last.start = row.at;
-      last.id = row.id;
-      last.ids.add(row.alumni_id);
-      last.notes.add(row.notes ?? "");
+    const key = `${row.source}|${by}`;
+    const step = open.get(key);
+    if (step && Date.parse(step.start) - Date.parse(row.at) <= GROUP_GAP_MS) {
+      step.start = row.at;
+      step.id = row.id;
+      step.ids.add(row.alumni_id);
+      step.notes.add(row.notes ?? "");
     } else {
-      groups.push({ id: row.id, start: row.at, end: row.at, source: row.source, by, alumni: 0, note: "", ids: new Set([row.alumni_id]), notes: new Set([row.notes ?? ""]) });
+      const created: Open = {
+        id: row.id, lastId: row.id, start: row.at, end: row.at, source: row.source, by, alumni: 0, note: "",
+        ids: new Set([row.alumni_id]), notes: new Set([row.notes ?? ""]),
+      };
+      groups.push(created);
+      open.set(key, created);
     }
   }
   return groups.map(({ ids, notes, ...g }) => ({ ...g, alumni: ids.size, note: notes.size === 1 ? [...notes][0] : "" }));

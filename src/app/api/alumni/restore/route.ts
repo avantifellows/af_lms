@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { authorizeAlumni } from "@/lib/alumni/access";
-import { findMarker, listHistory, planRestore, runRestore } from "@/lib/alumni/mass-restore";
+import { findStep, listHistory, planRestore, runRestore } from "@/lib/alumni/mass-restore";
 import { RESTORE_CHUNK, type RestoreScope } from "@/lib/alumni/mass-restore-types";
 import { reachesAllSchools } from "@/lib/alumni/scope";
 
 // Version history and mass restore (mass-restore.ts): { scope, history } lists
-// the scope's steps; { scope, beforeId, dryRun, alumniIds?, versions? } restores
-// to just before history row `beforeId` (a step's first row).
+// the scope's steps; { scope, step: { fromId, toId }, dryRun, alumniIds?, versions? }
+// undoes one step (its first and last history rows) for the alumni it touched.
 //   scope { kind: "all" }            — edit access to every school (admins,
 //                                       Alumni Managers with full access)
 //   scope { kind: "school", code }   — edit access to that school
@@ -14,7 +14,7 @@ import { reachesAllSchools } from "@/lib/alumni/scope";
 
 interface Body {
   scope?: { kind?: unknown; code?: unknown };
-  beforeId?: unknown;
+  step?: { fromId?: unknown; toId?: unknown };
   dryRun?: unknown;
   versions?: unknown;
   alumniIds?: unknown;
@@ -84,16 +84,16 @@ export async function POST(request: Request) {
   if (body.history === true) {
     return guarded("[alumni/history]", "Couldn't load the history.", async () => NextResponse.json({ groups: await listHistory(scope) }));
   }
-  const beforeId = typeof body.beforeId === "string" && /^\d+$/.test(body.beforeId) ? body.beforeId : null;
-  const marker = beforeId ? await findMarker(beforeId) : null;
-  if (!marker) return bad("Pick a step from the history.");
+  const isId = (v: unknown): v is string => typeof v === "string" && /^\d+$/.test(v);
+  const step = isId(body.step?.fromId) && isId(body.step?.toId) ? await findStep(body.step.fromId, body.step.toId) : null;
+  if (!step) return bad("Pick a change from the history.");
   if (body.dryRun === true) {
-    return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () => NextResponse.json(await planRestore(scope, marker)));
+    return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () => NextResponse.json(await planRestore(scope, step)));
   }
   const ids = readIds(body.alumniIds);
   if (!ids) return bad(`Send 1 to ${RESTORE_CHUNK} alumni at a time.`);
   const actor = { actorEmail: auth.email, actorRole: auth.permission.role };
   return guarded("[alumni/restore]", "Couldn't restore. Try again.", async () =>
-    NextResponse.json({ results: await runRestore(scope, marker, ids, actor, readVersions(body.versions)) }),
+    NextResponse.json({ results: await runRestore(scope, step, ids, actor, readVersions(body.versions)) }),
   );
 }

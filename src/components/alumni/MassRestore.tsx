@@ -12,11 +12,13 @@ import {
   type RestoreScope,
 } from "@/lib/alumni/mass-restore-types";
 import { SOURCES, formatMoment, useMakeRoom } from "./AlumniHistory";
+import { announceAlumniChanged } from "./alumni-changed";
 
 // Version history for many alumni (all of them on the Alumni page, one
 // school's on its page), like a sheet's: a panel on the right lists the steps
 // — a bulk edit, a run of calls, a restore — newest first. Picking one shows
-// exactly who would go back to how they were just before it, and how; that
+// exactly who it touched would go back to how they were before it (only them —
+// later changes by others stay), and how; that
 // can then be restored. Each restore is a "Correction" in the alumnus's own
 // history, so it can be undone the same way.
 
@@ -84,7 +86,7 @@ export default function MassRestore({ scope, scopeLabel }: { scope: RestoreScope
     setBusyId(group.id);
     setError("");
     // Just before the step's first history row: undoes the step and everything after.
-    const r = await send({ scope, beforeId: group.id, dryRun: true });
+    const r = await send({ scope, step: { fromId: group.id, toId: group.lastId }, dryRun: true });
     setBusyId(null);
     if (!r.ok) return setError(r.error);
     setStep({ kind: "plan", group, plan: r.data as unknown as RestorePlan });
@@ -98,14 +100,16 @@ export default function MassRestore({ scope, scopeLabel }: { scope: RestoreScope
     setStep({ kind: "running", group, plan, done: 0 });
     for (let i = 0; i < ids.length; i += RESTORE_CHUNK) {
       const chunk = ids.slice(i, i + RESTORE_CHUNK);
-      const r = await send({ scope, beforeId: group.id, alumniIds: chunk, versions });
+      const r = await send({ scope, step: { fromId: group.id, toId: group.lastId }, alumniIds: chunk, versions });
       if (r.ok) results.push(...(r.data.results as RestoreResult[]));
       else results.push(...chunk.map((alumniId) => failed(alumniId, plan, r.error)));
       setStep({ kind: "running", group, plan, done: Math.min(i + RESTORE_CHUNK, ids.length) });
     }
     setStep({ kind: "done", group, results });
     setReloadKey((k) => k + 1);
+    // The server parts (cards) and the lists/table on the page show the undone values.
     router.refresh();
+    announceAlumniChanged();
   };
 
   return (
@@ -188,7 +192,7 @@ function GroupList({ load, busyId, error, onPick }: {
   return (
     <>
       <p className="text-xs text-text-muted">
-        Pick a change to see who would go back to how they were just before it. Nothing changes until you restore.
+        Pick a change to undo it: only the alumni it touched go back to how they were before it. Nothing changes until you confirm.
       </p>
       {error && (
         <p className="flex items-start gap-1.5 text-sm text-danger">
@@ -247,21 +251,22 @@ function PlanView({ group, plan, onBack, onRestore }: {
         <ArrowLeft className="h-4 w-4" aria-hidden /> Back to history
       </button>
       <div className="rounded-lg bg-bg-card-alt px-3 py-2.5">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-muted">Undo this and everything after it</p>
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-muted">Undo only this change</p>
         <GroupSummary group={group} />
       </div>
       <p className="text-sm text-text-primary">
         {n ? (
-          <><strong>{plural(n, "alumnus", "alumni")}</strong> would go back to how they were just before this.</>
+          <><strong>{plural(n, "alumnus", "alumni")}</strong> would go back to how they were before this change.</>
         ) : (
-          <>Everyone is already as they were just before this: there is nothing to restore.</>
+          <>Everyone it touched is already as they were before it: there is nothing to undo.</>
         )}
       </p>
-      {plan.addedAfter.length > 0 && (
+      {plan.changedLater.length > 0 && (
         <p className="rounded-md bg-info-bg px-3 py-2 text-xs text-text-secondary">
-          {plural(plan.addedAfter.length, "alumnus was", "alumni were")} added since and stay as they are (records are never removed):{" "}
-          {plan.addedAfter.slice(0, 5).map((a) => a.name).join(", ")}
-          {plan.addedAfter.length > 5 && ` and ${plan.addedAfter.length - 5} more`}.
+          {plural(plan.changedLater.length, "alumnus was", "alumni were")} changed again after this, so they stay as they are
+          (later work is never undone):{" "}
+          {plan.changedLater.slice(0, 5).map((a) => a.name).join(", ")}
+          {plan.changedLater.length > 5 && ` and ${plan.changedLater.length - 5} more`}.
         </p>
       )}
       {n > 0 && <PlanItems plan={plan} />}
@@ -269,12 +274,12 @@ function PlanView({ group, plan, onBack, onRestore }: {
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
           {confirming ? (
             <>
-              <span className="mr-auto text-sm text-warning-text">Restore {plural(n, "alumnus", "alumni")}? Newer versions stay in history.</span>
+              <span className="mr-auto text-sm text-warning-text">Undo this change for {plural(n, "alumnus", "alumni")}? It&apos;s saved in their history, so it can be undone too.</span>
               <Button type="button" variant="secondary" onClick={() => setConfirming(false)}>Cancel</Button>
-              <Button type="button" onClick={onRestore}>Yes, restore</Button>
+              <Button type="button" onClick={onRestore}>Yes, undo</Button>
             </>
           ) : (
-            <Button type="button" onClick={() => setConfirming(true)}>Restore {plural(n, "alumnus", "alumni")}</Button>
+            <Button type="button" onClick={() => setConfirming(true)}>Undo for {plural(n, "alumnus", "alumni")}</Button>
           )}
         </div>
       )}
@@ -282,10 +287,14 @@ function PlanView({ group, plan, onBack, onRestore }: {
   );
 }
 
+/** Alumni listed in a preview; the rest are counted (a big change can touch thousands). */
+const SHOWN_ITEMS = 200;
+
 function PlanItems({ plan }: { plan: RestorePlan }) {
+  const more = plan.items.length - SHOWN_ITEMS;
   return (
     <ul className="space-y-2">
-      {plan.items.map((item) => (
+      {plan.items.slice(0, SHOWN_ITEMS).map((item) => (
         <li key={item.alumniId} className="rounded-md bg-bg-card-alt px-3 py-2">
           <p className="text-sm font-semibold text-text-primary">
             {item.name}
@@ -303,6 +312,7 @@ function PlanItems({ plan }: { plan: RestorePlan }) {
           </ul>
         </li>
       ))}
+      {more > 0 && <li className="px-3 py-2 text-xs text-text-muted">and {more.toLocaleString()} more</li>}
     </ul>
   );
 }
@@ -311,7 +321,7 @@ function Progress({ done, total }: { done: number; total: number }) {
   return (
     <div aria-live="polite">
       <p className="flex items-center gap-2 text-sm text-text-primary">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Restoring… {done} of {total}
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Undoing… {done} of {total}
       </p>
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-bg-card-alt">
         <div className="h-full bg-accent transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
@@ -332,18 +342,18 @@ function DoneView({ group, results, onBack }: { group: HistoryGroup; results: Re
         <p className="flex items-start gap-2 text-sm text-text-primary">
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
           <span>
-            Restored <strong>{plural(restored, "alumnus", "alumni")}</strong> to just before {formatMoment(group.start)}.
+            Undid the change of {formatMoment(group.start)} for <strong>{plural(restored, "alumnus", "alumni")}</strong>.
             {unchanged > 0 && ` ${unchanged} already matched and were left as they are.`}
           </span>
         </p>
       ) : (
         <p className="flex items-start gap-2 text-sm font-semibold text-danger">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Nothing was restored.
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Nothing was undone.
         </p>
       )}
       {skipped.length > 0 && (
         <p className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning-text">
-          {plural(skipped.length, "alumnus was", "alumni were")} saved by someone after your preview and left as they are:{" "}
+          {plural(skipped.length, "alumnus was", "alumni were")} changed by someone after your preview and left as they are:{" "}
           {skipped.map((s) => s.name || `alumni ${s.alumniId}`).join(", ")}. Open this step again to see the latest.
         </p>
       )}

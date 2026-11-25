@@ -43,6 +43,12 @@ describe("HistoryPanel", () => {
     expect(items[2]).toHaveTextContent("The record as it was first saved");
   });
 
+  it("marks the newest version Current only when the record matches it", () => {
+    const stale = [{ ...ENTRIES[0], matchesCurrent: false }, ...ENTRIES.slice(1)];
+    render(<HistoryPanel journey={{ entries: stale, error: "" }} selectedId={null} onSelect={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.queryByText("Current")).not.toBeInTheDocument();
+  });
+
   it("marks the version shown; the current one when none is picked", () => {
     const { rerender } = renderPanel(null);
     expect(screen.getByText("Bulk edit").closest("button")).toHaveAttribute("aria-current", "true");

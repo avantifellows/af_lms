@@ -90,8 +90,9 @@ export async function restoreVersion(
   }
 }
 
-/** The button that opens the panel. */
-export function HistoryButton({ count, onClick }: { count: number; onClick: () => void }) {
+/** The button that opens the panel; none while there's no history to show (`count` null). */
+export function HistoryButton({ count, onClick }: { count: number | null; onClick: () => void }) {
+  if (count === null) return null;
   return (
     <button
       type="button"
@@ -133,7 +134,8 @@ function applyRoom() {
  */
 export function useMakeRoom(rem = 24) {
   useEffect(() => {
-    if (!window.matchMedia?.("(min-width: 640px)").matches) return;
+    // Only where the page can spare the width (on tablets the panel just lies over it).
+    if (!window.matchMedia?.("(min-width: 1024px)").matches) return;
     const key = Symbol("panel");
     if (!roomTakers.size) paddingBefore = document.body.style.paddingRight;
     roomTakers.set(key, rem);
@@ -176,7 +178,7 @@ export default function HistoryPanel({ journey, selectedId, onSelect, onClose }:
             <VersionItem
               key={entry.id}
               entry={entry}
-              latest={i === 0}
+              latest={i === 0 && entry.matchesCurrent}
               selected={i === 0 ? selectedId === null : selectedId === entry.id}
               onClick={() => onSelect(i === 0 ? null : entry)}
             />

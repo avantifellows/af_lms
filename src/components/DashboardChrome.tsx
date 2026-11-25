@@ -17,7 +17,7 @@ export type DashboardFeatures = {
   hasPMAccess: boolean;
   canViewVisitSummary: boolean;
   showCurriculumSummary: boolean;
-  /** The alumni feature (admins); opens /alumni (ADR 0008). */
+  /** Anyone with alumni view access (admins today); opens /alumni (ADR 0008). */
   showAlumni: boolean;
   canViewHolisticAdmin: boolean;
 };
@@ -37,12 +37,14 @@ export function DashboardHeader({ email, permission, totalCount, features }: {
 }) {
   return <header className="bg-bg-card border-b border-border shadow-sm">
     {/* One row on a wide screen (a long email is cut short); wraps on smaller ones. */}
-    <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap lg:flex-nowrap justify-between items-center gap-x-4 gap-y-2">
+    <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap xl:flex-nowrap justify-between items-center gap-x-4 gap-y-2">
       <div className="flex items-center gap-3 sm:gap-5 min-w-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10 shrink-0" />
         <div className="hidden sm:block border-l border-border pl-4">
-          <p className="text-xs text-text-muted uppercase tracking-wide whitespace-nowrap">{permissionLabel(permission, totalCount)}</p>
+          <p className="max-w-[12rem] truncate text-xs text-text-muted uppercase tracking-wide" title={permissionLabel(permission, totalCount)}>
+            {permissionLabel(permission, totalCount)}
+          </p>
         </div>
         <DashboardNavigation features={features} />
       </div>

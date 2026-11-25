@@ -3,6 +3,7 @@
 // The Alumni tab on the school page: pass-outs still to add (any year) and the
 // school's existing alumni. Talks only to /api/alumni/*.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useOnAlumniChanged } from "./alumni-changed";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import AlumniDataTable from "./AlumniDataTable";
 import { CheckCircle2, MousePointerClick, Pencil, Search, UserPlus } from "lucide-react";
@@ -139,6 +140,7 @@ export default function AlumniTab(props: Props) {
 function AlumniLists({ schoolCode, initialStudentId, canEdit = true }: Props) {
   /** Bumped after a save to reload the lists (a new alumnus moves to "Existing alumni"). */
   const [refresh, setRefresh] = useState(0);
+  useOnAlumniChanged(() => setRefresh((r) => r + 1));
   const [view, setView] = useState<View>("pending");
   const [query, setQuery] = useState("");
   const [year, setYear] = useState("");

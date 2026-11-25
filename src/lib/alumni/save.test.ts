@@ -67,7 +67,7 @@ beforeEach(() => {
   });
   knownCodes();
   mockQuery.mockResolvedValue([]); // no alumni row yet
-  dbServiceAnswers(200);
+  dbServiceAnswers(201); // created (the journey call's status isn't read beyond ok)
 });
 
 afterEach(() => {
@@ -110,6 +110,13 @@ describe("saveAlumni", () => {
       body: { source: "call", data: { current_status: "Seeking Work", skilling_programs: "NPTEL" }, actor_role: "alumni_manager" },
     });
     expect(sent().body.data).not.toHaveProperty("degree_ug");
+  });
+
+  it("POST /alumni answering 200 (it updated a row someone added meanwhile) is a conflict, not a new record", async () => {
+    dbServiceAnswers(200, { id: 9001 });
+    const result = await save(NEW, { current_status: "Studying", ug_status: "Studying" });
+    expect(result).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/Someone else saved/) });
+    expect(mockFetch).toHaveBeenCalledTimes(1); // no answers written over theirs
   });
 
   it("says so when a new alumnus was added but its answers weren't saved", async () => {
