@@ -103,13 +103,13 @@ type PhaseDefinition = {
 type MutablePhaseRow = {
   id: number | string;
   phase_plan_id: number | string;
-  grade: number | string;
   position: number;
   revision: number;
   state: "locked" | "open";
   guidance_markdown: string;
   academic_year: string;
   frozen_at: string | null;
+  grade: number | string;
   ever_opened: boolean;
   used: boolean;
 };
@@ -283,12 +283,12 @@ async function getMutablePhase(
   programId: number,
 ): Promise<MutablePhaseRow | null> {
   const result = await client.query<MutablePhaseRow>(
-    // FOR UPDATE has no OF list, so it locks the Plan row as well as the Phase row:
-    // every definition save in one Plan runs one at a time. Grade is a subquery so
-    // the shared grade row is not locked.
-    `SELECT p.id, p.phase_plan_id, (SELECT number FROM grade WHERE id = p.grade_id) AS grade,
-            p.position, p.revision, p.state, p.guidance_markdown,
+    // The caller already holds the Plan row lock (lockPhasePlanForPhase), so every
+    // definition save in one Plan runs one at a time. Grade is a subquery so the
+    // shared grade row is not locked.
+    `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.guidance_markdown,
             plan.academic_year, p.frozen_at,
+            (SELECT number FROM grade WHERE grade.id = p.grade_id) AS grade,
             EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
                     WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
             EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
@@ -296,7 +296,7 @@ async function getMutablePhase(
      FROM holistic_mentorship_phases p
      JOIN holistic_mentorship_phase_plans plan ON plan.id = p.phase_plan_id
      WHERE p.id = $1 AND plan.program_id = $2
-     FOR UPDATE`,
+     FOR UPDATE OF p`,
     [phaseId, programId]
   );
   return result.rows[0] ?? null;
@@ -313,13 +313,21 @@ function checkRevision(row: MutablePhaseRow | null, expectedRevision: number): P
   return null;
 }
 
+type CheckedPhase = { phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult };
+
+// Plan first, then Phase: the order delete and reorder already used. A save and
+// a state change take the same order here, so none of them can deadlock with a
+// Grade change, which updates the later Phases of the Plan while it holds the
+// Plan row.
 async function checkedPhase(
   client: PoolClient,
   phaseId: number,
   expectedRevision: number,
   programId: number,
-): Promise<{ phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult }> {
-  const phase = await getMutablePhase(client, phaseId, programId);
+): Promise<CheckedPhase> {
+  const planId = await lockPhasePlanForPhase(client, phaseId, programId);
+  // No Plan row: the Phase does not exist in this Program, so there is nothing to lock.
+  const phase = planId === null ? null : await getMutablePhase(client, phaseId, programId);
   const error = checkRevision(phase, expectedRevision);
   return error ? { phase: null, error } : { phase: phase!, error: null };
 }
@@ -764,12 +772,6 @@ async function deletePhaseTransaction(
   client: PoolClient,
   input: DeletePhaseInput
 ): Promise<PhasePlanResult> {
-  const planId = await lockPhasePlanForPhase(
-    client,
-    input.phaseId,
-    input.programId,
-  );
-  if (!planId) return { ok: false, status: 404, error: "Phase not found" };
   const checked = await checkedPhase(
     client,
     input.phaseId,
