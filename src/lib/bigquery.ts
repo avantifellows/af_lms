@@ -73,6 +73,13 @@ export const MAJOR_TEST_FORMATS = [
   "previous_year_test",
 ];
 
+// previous_year_test is a major test only for JEE / NEET papers. CUET, NDA and CLAT
+// practice papers use the same format, and the warehouse gives them "Not Eligible for
+// Academic Level", which REAL_AL_VALUES keeps; this drops them. Same rule as etl-next's
+// academic level and reporting's cumulative report.
+const PYQ_JEE_NEET_ONLY = (alias: string) =>
+  `AND (${alias}.test_format != 'previous_year_test' OR LOWER(${alias}.test_stream) IN ('engineering', 'medical'))`;
+
 // Advanced papers are excluded from Academic Level by the warehouse — see
 // isAdvancedTest in src/lib/academic-level.ts for the why. Spelled exactly as
 // etl-next's int_student_academic_level spells it so the matrix columns are the
@@ -442,6 +449,7 @@ export async function getCumulativeALData(
       AND f.academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND LOWER(f.section) = 'overall'
       AND f.test_format IN (${formatList})
+      ${PYQ_JEE_NEET_ONLY("f")}
       AND f.academic_level IN (${alList})
       ${NOT_ADVANCED("f")}
       AND f.enrollment_user_id IS NOT NULL

@@ -56,12 +56,13 @@ papers `nta_test`, which no downstream enum knows; nex-gen-cms #232 renamed the 
 Adding a CMS type is a picker-only change only when its subtype is already a `TestFormat`
 value; otherwise rename it at the CMS or add it to the enum first. `homework_assignment` (none in
 the CMS yet; downstream says `homework`) and `evaluation_test` (for teachers) stay out.
-`previous_year_test` counts as a big test (Nov 2026): it is in `MAJOR_TEST_FORMATS`, etl-next's
-academic-level / cutoff formats and reporting's `BIG_TEST_FORMATS`, but only for engineering /
-medical streams. Legacy CUET, NDA and CLAT practice PYQs also use `previous_year_test`, so
-anything new that treats it as a full test must keep that stream guard (etl-next and
-student-support filter by stream already; reporting's cumulative report checks it
-explicitly).
+`previous_year_test` counts as a big test (Nov 2026), but only for engineering / medical
+(JEE / NEET) streams: legacy CUET, NDA and CLAT practice PYQs use the same format. In af_lms it
+is in `MAJOR_TEST_FORMATS`; the Score journey's cumulative-AL query drops non-JEE/NEET ones
+(`PYQ_JEE_NEET_ONLY` in `bigquery.ts`, since the warehouse marks them "Not Eligible", a value
+that query keeps), and student-support filters by the test's stream already. The same guard is
+in etl-next's academic level / cutoffs (etl-next#243) and reporting's cumulative report
+(reporting#109). Anything new that treats `previous_year_test` as a full test must keep it.
 
 ## The one thing that breaks silently: two homes per setting
 
