@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { HOLISTIC_DICTATION_MAX_RECORDING_SECONDS } from "@/lib/holistic-dictation-limits";
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "@/lib/holistic-phase-messages";
 
 // What the server-rendered Student Phase page tells the client about
 // Dictation (#500). The client never reads the HOLISTIC_DICTATION_* settings.
@@ -102,7 +103,7 @@ type Stop = {
 
 type DictationReply = {
   status: number;
-  body: { outcome?: string; text?: string; remainingSeconds?: number; code?: string } | null;
+  body: { outcome?: string; text?: string; remainingSeconds?: number; code?: string; error?: string } | null;
 };
 
 async function postClip(
@@ -137,6 +138,12 @@ function remainingAfter(reply: DictationReply): number | null {
 function replyText({ status, body }: DictationReply): string | null {
   const ok = status === 200 && body?.outcome === "ok";
   return ok && typeof body.text === "string" ? body.text : null;
+}
+
+// The Mentor write check refused the clip because the Phase closed after the
+// form loaded (#536): the form, not the recorder, decides what happens next.
+function phaseClosedReply({ status, body }: DictationReply) {
+  return status === 422 && body?.error === HOLISTIC_PHASE_CLOSED_ERROR;
 }
 
 function heardNothing({ status, body }: DictationReply) {
@@ -304,6 +311,8 @@ export function useDictationRecorder(options: {
   busyKind: DictationKind | null;
   onBusy: SharedDictationAvailability["onBusy"];
   onText: ApplyDictationText;
+  /** The server refused a clip because the Phase closed (#536). The form freezes and drops this recorder. */
+  onPhaseClosed?: () => void;
 }): DictationRecorder {
   const [state, setState] = useState<DictationState>({ kind: "idle" });
   // The latest props, for callbacks that outlive a render. `remainingSeconds`
@@ -336,6 +345,7 @@ export function useDictationRecorder(options: {
     setState(stateAfterReply(reply, {
       target, clip, stop, limitReached: remaining <= 0, onText: optionsRef.current.onText,
     }));
+    if (phaseClosedReply(reply)) optionsRef.current.onPhaseClosed?.();
   }, []);
 
   const retry = useCallback(() => {

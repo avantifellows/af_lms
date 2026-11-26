@@ -1,8 +1,9 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import PhasePlanSetup from "./PhasePlanSetup";
+import { HOLISTIC_CLOSING_PHASE_CHANGED_ERROR } from "@/lib/holistic-phase-messages";
 
 describe("PhasePlanSetup", () => {
   beforeEach(() => {
@@ -99,7 +100,10 @@ describe("PhasePlanSetup", () => {
     render(<PhasePlanSetup />);
 
     await user.click(await screen.findByRole("button", { name: /Opened title/ }));
-    expect(screen.getByRole("button", { name: "Grade 11" })).toBeEnabled();
+    // An Open Phase keeps its Grade (#536); the rest of its definition stays editable.
+    expect(screen.getByRole("button", { name: "Grade 11" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Grade 12" })).toBeDisabled();
+    expect(screen.getByText("Return this Phase to Locked to change its Grade.")).toBeInTheDocument();
     expect(screen.getByLabelText("Title")).toBeEnabled();
     expect(screen.getByLabelText("Question 1")).toBeEnabled();
 
@@ -273,6 +277,8 @@ describe("PhasePlanSetup", () => {
       const user = userEvent.setup();
       const fetchMock = vi.fn()
         .mockResolvedValueOnce({ ok: true, json: async () => planWith("locked") })
+        // Every open asks the server which Phase, if any, it closes.
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ impact: { closing: null } }) })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
         .mockResolvedValueOnce({ ok: true, json: async () => planWith("open") });
       vi.stubGlobal("fetch", fetchMock);
@@ -282,12 +288,15 @@ describe("PhasePlanSetup", () => {
       await user.click(await screen.findByRole("button", { name: /Lifecycle title/ }));
       await user.click(screen.getByRole("button", { name: "Open Phase" }));
 
-      expect(confirm).toHaveBeenCalledWith("Open Phase 1?");
-      expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "PATCH" });
-      expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      await waitFor(() => expect(confirm).toHaveBeenCalledWith("Open Phase 1?"));
+      expect(fetchMock.mock.calls[1][0]).toContain("open_impact_phase_id=21");
+      expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "PATCH" });
+      expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
         action: "state", phase_id: 21, expected_revision: 4, state: "open", confirmed: true, program_id: 1,
+        // The server said no Phase closes; it refuses the open if that has changed.
+        expected_closing_phase_id: null,
       });
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
       expect(await screen.findByRole("button", { name: "Return to Locked" })).toBeInTheDocument();
       expect(screen.getByLabelText("Title")).toHaveValue("Lifecycle title");
     });
@@ -322,6 +331,255 @@ describe("PhasePlanSetup", () => {
       expect(await screen.findByText("Phase has Notes")).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(screen.getByLabelText("Title")).toHaveValue("Lifecycle title");
+    });
+  });
+
+  describe("closing the Grade's earlier Phase (#536)", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    type PhaseOverrides = { state?: "open" | "locked"; active?: boolean; used?: boolean; everOpened?: boolean };
+    const phase = (id: number, number: number, grade: 11 | 12, overrides: PhaseOverrides = {}) => ({
+      id, number, grade, title: `Title ${number}`, state: "locked", guidanceMarkdown: "Guidance",
+      revision: 4, frozen: false, everOpened: false, used: false, active: false,
+      questions: [{ id: 40 + id, text: "Question" }], ...overrides,
+    });
+    const planOf = (...phases: ReturnType<typeof phase>[]) =>
+      ({ plan: { id: 7, academicYear: "2026-2027", editable: true, phases } });
+    const ok = (body: unknown) => ({ ok: true, json: async () => body });
+    // Phase 1 is Grade 11's Active Phase and Phase 3 is its next, still Locked.
+    const beforeOpening = planOf(
+      phase(21, 1, 11, { state: "open", active: true, used: true, everOpened: true }),
+      phase(22, 2, 12, { state: "open", active: true, used: true, everOpened: true }),
+      phase(23, 3, 11),
+    );
+    const afterOpening = planOf(
+      phase(21, 1, 11, { state: "open", used: true, everOpened: true }),
+      phase(22, 2, 12, { state: "open", active: true, used: true, everOpened: true }),
+      phase(23, 3, 11, { state: "open", active: true, everOpened: true }),
+    );
+
+    async function clickOpenPhase3(impactResponse: unknown) {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(ok(beforeOpening))
+        .mockResolvedValueOnce(impactResponse)
+        .mockResolvedValueOnce(ok({ ok: true }))
+        .mockResolvedValueOnce(ok(afterOpening));
+      vi.stubGlobal("fetch", fetchMock);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+      return { fetchMock, confirm };
+    }
+
+    it("tells the Admin which Phase closes and how many Mentees are left without Notes", async () => {
+      const { fetchMock, confirm } = await clickOpenPhase3(
+        ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } } })
+      );
+
+      expect(fetchMock.mock.calls[1][0]).toBe(
+        "/api/holistic-mentorship/phase-plans?program_id=1&open_impact_phase_id=23"
+      );
+      expect(confirm).toHaveBeenCalledWith([
+        "Open Phase 3?",
+        "Phase 1 will close for Grade 11. Mentors will still be able to read its Notes, but not add or change them.",
+        "45 assigned Mentees have no submitted Notes in Phase 1 (1 with an unsubmitted draft). Their Notes cannot be added after this.",
+      ].join("\n\n"));
+      // What the Admin was told goes back with the open.
+      expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toMatchObject({
+        action: "state", phase_id: 23, state: "open", confirmed: true, expected_closing_phase_id: 21,
+      });
+    });
+
+    it("says so when every assigned Mentee already has submitted Notes", async () => {
+      const { confirm } = await clickOpenPhase3(
+        ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 0, unsubmittedDrafts: 0 } } })
+      );
+
+      expect(confirm).toHaveBeenLastCalledWith(
+        expect.stringContaining("No assigned Mentee is missing Notes in Phase 1.")
+      );
+    });
+
+    it("counts one Mentee in the singular and leaves out drafts when there are none", async () => {
+      const { confirm } = await clickOpenPhase3(
+        ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 1, unsubmittedDrafts: 0 } } })
+      );
+
+      expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining(
+        "1 assigned Mentee has no submitted Notes in Phase 1. Their Notes cannot be added after this."
+      ));
+    });
+
+    it("still warns that the Phase closes when the count cannot be loaded", async () => {
+      const { fetchMock, confirm } = await clickOpenPhase3({ ok: false, status: 500, json: async () => ({ error: "boom" }) });
+
+      expect(confirm).toHaveBeenCalledWith([
+        "Open Phase 3?",
+        "Phase 1 will close for Grade 11. Mentors will still be able to read its Notes, but not add or change them.",
+        "Check Students & Progress for Mentees still pending in Phase 1.",
+      ].join("\n\n"));
+      // The prompt named this screen's copy, so that is what the server is asked to check.
+      expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toMatchObject({ expected_closing_phase_id: 21 });
+    });
+
+    it("keeps the Admin's unsaved edits to the Phase when the open is refused and the Plan reloads", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(ok(beforeOpening))
+        .mockResolvedValueOnce(ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } } }))
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: HOLISTIC_CLOSING_PHASE_CHANGED_ERROR }) })
+        .mockResolvedValueOnce(ok(beforeOpening));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.clear(screen.getByLabelText("Title"));
+      await user.type(screen.getByLabelText("Title"), "Unsaved new title");
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(await screen.findByText(HOLISTIC_CLOSING_PHASE_CHANGED_ERROR)).toBeInTheDocument();
+      expect(screen.getByLabelText("Title")).toHaveValue("Unsaved new title");
+    });
+
+    it("does not say the Plan is up to date when the reload after a refused open fails", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(ok(beforeOpening))
+        .mockResolvedValueOnce(ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } } }))
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: HOLISTIC_CLOSING_PHASE_CHANGED_ERROR }) })
+        .mockRejectedValueOnce(new Error("offline"));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(await screen.findByText(
+        "The Open Phases for this Grade changed while you were confirming, so nothing was opened. The Plan could not be reloaded. Reload the page before trying again."
+      )).toBeInTheDocument();
+      expect(screen.queryByText(HOLISTIC_CLOSING_PHASE_CHANGED_ERROR)).not.toBeInTheDocument();
+    });
+
+    it("reloads the Plan and says so when another Admin changed the Open Phase before this one confirmed", async () => {
+      const user = userEvent.setup();
+      // Admin B opened Phase 2 for Grade 11 after Admin A was asked to confirm "Phase 1 will close".
+      const afterOtherAdmin = planOf(
+        phase(21, 1, 11, { state: "open", everOpened: true }),
+        phase(22, 2, 11, { state: "open", active: true, everOpened: true }),
+        phase(23, 3, 11),
+      );
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(ok(beforeOpening))
+        .mockResolvedValueOnce(ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } } }))
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: HOLISTIC_CLOSING_PHASE_CHANGED_ERROR }) })
+        .mockResolvedValueOnce(ok(afterOtherAdmin));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(await screen.findByText(HOLISTIC_CLOSING_PHASE_CHANGED_ERROR)).toBeInTheDocument();
+      // Not the "Reload to review revision" text of an edit conflict.
+      expect(screen.queryByText(/Reload to review revision/)).not.toBeInTheDocument();
+      // The Plan was reloaded, Phase 3 is still selected and still Locked, and can be opened again.
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(screen.getByLabelText("Title")).toHaveValue("Title 3");
+      expect(screen.getByRole("button", { name: "Open Phase" })).toBeEnabled();
+    });
+
+    it("names the Phase the server says will close, when this screen's copy of the Plan is stale", async () => {
+      // Another Admin opened Phase 2 for Grade 11 after this screen loaded: the
+      // screen still shows Phase 1 as Active, the server counts Phase 2.
+      const { confirm } = await clickOpenPhase3(
+        ok({ impact: { closing: { id: 22, number: 2, menteesWithoutNotes: 7, unsubmittedDrafts: 0 } } })
+      );
+
+      expect(confirm).toHaveBeenCalledWith([
+        "Open Phase 3?",
+        "Phase 2 will close for Grade 11. Mentors will still be able to read its Notes, but not add or change them.",
+        "7 assigned Mentees have no submitted Notes in Phase 2. Their Notes cannot be added after this.",
+      ].join("\n\n"));
+    });
+
+    it("does not say a Phase will close when the server says none does", async () => {
+      const { confirm } = await clickOpenPhase3(ok({ impact: { closing: null } }));
+
+      expect(confirm).toHaveBeenCalledWith("Open Phase 3?");
+    });
+
+    it("does not open the Phase when the Admin cancels the warning", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(ok(beforeOpening))
+        .mockResolvedValueOnce(ok({ impact: { closing: { id: 21, number: 1, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } } }));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: "Open Phase" })).toBeEnabled();
+    });
+
+    it("labels the earlier Open Phase Closed and explains it", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(afterOpening)));
+      render(<PhasePlanSetup />);
+
+      const closedPhase = await screen.findByRole("button", { name: /Title 1/ });
+      expect(closedPhase).toHaveTextContent("Closed");
+      expect(screen.getByRole("button", { name: /Title 3/ })).toHaveTextContent("Active");
+      await user.click(closedPhase);
+
+      expect(screen.getByText("Grade 11 - Closed - Started")).toBeInTheDocument();
+      expect(screen.getByText("Closed for Mentors.")).toBeInTheDocument();
+      expect(screen.getByText(
+        "A later Phase is Active for Grade 11. Mentors can read this Phase's Notes but cannot add or change them."
+      )).toBeInTheDocument();
+    });
+
+    it("blocks opening a Phase ordered before the Grade's Open Phase", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(planOf(
+        phase(21, 1, 11),
+        phase(22, 2, 12),
+        phase(23, 3, 11, { state: "open", active: true, everOpened: true }),
+      ))));
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Title 1/ }));
+
+      expect(screen.getByRole("button", { name: "Open Phase" })).toBeDisabled();
+      expect(screen.getByText("This Phase cannot be opened.")).toBeInTheDocument();
+      expect(screen.getByText(
+        "This Phase cannot be opened while Phase 3, a later Phase for Grade 11, is Open. To run it now, add a new Phase after Phase 3."
+      )).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open Phase" })).toHaveAccessibleDescription(/This Phase cannot be opened\./);
+
+      // The other Grade's Locked Phase is not blocked by it.
+      await user.click(screen.getByRole("button", { name: /Title 2/ }));
+      expect(screen.getByRole("button", { name: "Open Phase" })).toBeEnabled();
+      expect(screen.queryByText("This Phase cannot be opened.")).not.toBeInTheDocument();
+    });
+
+    it("says which Phase becomes Active again when the unused Active Phase returns to Locked", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(afterOpening)));
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Title 3/ }));
+      await user.click(screen.getByRole("button", { name: "Return to Locked" }));
+
+      expect(confirm).toHaveBeenCalledWith([
+        "Return to Locked Phase 3?",
+        "Phase 1 will become the Active Phase for Grade 11 again, and Mentors will be able to add and change Notes in it.",
+      ].join("\n\n"));
     });
   });
 

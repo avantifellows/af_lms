@@ -20,10 +20,14 @@ type UsageRecord = {
 const { db, mockAccess, mockSession } = vi.hoisted(() => ({
   db: {
     scope: null as null | Record<string, unknown>,
+    // The Grade's Active Phase: the latest ordered Open Phase of the Plan (#536).
+    activePhaseId: 73 as number | null,
     notesState: null as null | string,
     usedTodaySeconds: 0,
     records: [] as UsageRecord[],
     transactionOpen: false,
+    /** The row locks the write check takes, in order. */
+    locks: [] as string[],
   },
   mockAccess: vi.fn(),
   mockSession: vi.fn(),
@@ -82,7 +86,18 @@ vi.mock("@/lib/db", () => {
     try {
       return await fn({
         query: async (text: string) => {
-          if (/FOR UPDATE/.test(text)) return { rows: db.scope ? [db.scope] : [] };
+          // The write check share-locks the Plan row first, then reads the Active Phase (#536).
+          if (/FOR SHARE OF plan/.test(text)) {
+            db.locks.push("share plan");
+            return { rows: [{ id: 7 }] };
+          }
+          if (/state = 'open'\s+ORDER BY position DESC/.test(text)) {
+            return { rows: db.activePhaseId === null ? [] : [{ id: db.activePhaseId }] };
+          }
+          if (/FOR UPDATE/.test(text)) {
+            db.locks.push(`update ${/FOR UPDATE OF ([\w, ]+)/.exec(text)?.[1].trim()}`);
+            return { rows: db.scope ? [db.scope] : [] };
+          }
           if (text.includes("holistic_mentorship_post_session_notes")) {
             return { rows: db.notesState ? [{ state: db.notesState }] : [] };
           }
@@ -95,6 +110,8 @@ vi.mock("@/lib/db", () => {
   }
   return { query, withTransaction };
 });
+
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "@/lib/holistic-phase-messages";
 
 import { POST } from "./route";
 
@@ -173,7 +190,10 @@ const mentorAccess = {
   school: { id: 4 },
 };
 
-const openScope = { mapping_id: 300, mentor_user_id: 9, phase_revision: 2, phase_state: "open" };
+const openScope = {
+  mapping_id: 300, mentor_user_id: 9, phase_revision: 2, phase_state: "open",
+  phase_plan_id: 7, phase_grade_id: 11, current_year_plan: true,
+};
 
 // Everything any console method printed during the test, as one string.
 function spyOnConsole() {
@@ -195,8 +215,8 @@ describe("Holistic Dictation API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.assign(db, {
-      scope: { ...openScope }, notesState: "draft", usedTodaySeconds: 0, records: [],
-      transactionOpen: false,
+      scope: { ...openScope }, activePhaseId: 73, notesState: "draft", usedTodaySeconds: 0, records: [],
+      transactionOpen: false, locks: [],
     });
     vi.stubEnv("HOLISTIC_DICTATION_ENABLED", "true");
     vi.stubEnv("HOLISTIC_DICTATION_ELEVENLABS_API_KEY", apiKey);
@@ -474,6 +494,40 @@ describe("Holistic Dictation API", () => {
     expect(response.status).toBe(status);
     await expect(response.json()).resolves.toEqual({ error });
     expectNoProviderCallOrRecord();
+  });
+
+  // Issue #536: Dictation goes through the Mentor write check, so a Closed Phase takes no clips.
+  const closedPhases: Array<[string, Partial<typeof db>]> = [
+    ["a later Phase of the Grade is the Active Phase", { activePhaseId: 74 }],
+    ["the Phase belongs to a past year's Plan", { scope: { ...openScope, current_year_plan: false } }],
+  ];
+  it.each(closedPhases.flatMap(([label, state]) =>
+    (["post_session", "follow_up"] as const).map((kind) => [kind, label, state] as const)))(
+    "refuses a %s clip for a Closed Phase (%s) before calling ElevenLabs", async (kind, _label, state) => {
+    // Submitted Notes, so a Follow-up clip is refused for the Closed Phase, not for missing Notes.
+    Object.assign(db, { notesState: "submitted" }, state);
+
+    const response = await post({ kind });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: HOLISTIC_PHASE_CLOSED_ERROR });
+    expectNoProviderCallOrRecord();
+  });
+
+  // Lock order Plan, then Mapping and Phase, as every Phase state change and Plan edit,
+  // so a clip's write check cannot deadlock with an Admin opening or reordering Phases.
+  it("share-locks the Plan before the Mapping and Phase, and commits before calling ElevenLabs", async () => {
+    let locksAtCall: string[] | null = null;
+    scribeMock.mockImplementation(async () => {
+      locksAtCall = [...db.locks];
+      expect(db.transactionOpen).toBe(false);
+      return scribeReply(spokenReply);
+    });
+
+    const response = await post({ kind: "post_session" });
+
+    expect(response.status).toBe(200);
+    expect(locksAtCall).toEqual(["share plan", "update mapping, phase"]);
   });
 
   it.each([["draft"], [null]])("refuses a Follow-up clip while Post-Session Notes are %s", async (state) => {

@@ -54,7 +54,7 @@ type ProgressDatabaseRow = {
   phase_id: number | string | null;
   phase_number: number | string | null;
   phase_title: string | null;
-  phase_state: "active" | "open" | "locked" | null;
+  phase_state: "active" | "closed" | "locked" | null;
   progress: HolisticProgress;
   completed_at: string | null;
   notes_author: string | null;
@@ -438,6 +438,8 @@ async function listAssignedMentees(
          SELECT phase.id, phase.position, phase.title,
                 ${holisticPhaseNumberSql("phase", "phase_grade.number")} AS number,
                 CASE WHEN phase.state = 'locked' THEN 'locked'
+                     -- A past year's Plan has no Active Phase (#536).
+                     WHEN $2 <> $11 THEN 'closed'
                      WHEN phase.position = (
                        SELECT MAX(active_phase.position)
                        FROM holistic_mentorship_phases active_phase
@@ -445,7 +447,7 @@ async function listAssignedMentees(
                          AND active_phase.grade_id = phase.grade_id
                          AND active_phase.state = 'open'
                      ) THEN 'active'
-                     ELSE 'open' END AS phase_availability
+                     ELSE 'closed' END AS phase_availability
          FROM holistic_mentorship_phase_plans plan
          JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id
          JOIN grade phase_grade ON phase_grade.id = phase.grade_id

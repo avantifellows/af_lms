@@ -179,10 +179,10 @@ Student detail now returns only real current Grade 12 phases when no continuing 
 
 Issue #516 (Audience: the six Holistic Mentorship Programs; nothing for NVS Schools). The displayed `Phase N` is per Grade: a Phase's place among its own Grade's Phases in Plan order, plus 3 for Grade 12. Grade 11 Phases read 1, 2, 3 and Grade 12 Phases 4, 5, 6, whatever order the Grades' Phases were added in (JNV CoE's Plan runs Grade 11, 12, 11, 12 and used to read 1, 2, 3, 4).
 
-- One rule, in client-safe `src/lib/holistic-phase-number.ts`: `holisticPhaseNumber(grade, placeInGrade)`, `withHolisticPhaseNumbers(phases)` for rows that carry `grade` and `position`, and `holisticPhaseNumberSql(phaseAlias, gradeNumberExpr)` for the one query that sorts and pages by the number. Used by `getHolisticPhasePlan` (Phase Setup), `numberPhases` in `holistic-student-phase.ts` (student page tabs, heading, "From Phase N" context label; each Academic Year's Plan numbered on its own), `listAssignedMentees` and `getHolisticProgressOptions` in `holistic-progress.ts` (rows, Phase filter, sort by Phase, CSV, and the MCP view registered for the path `/api/holistic-mentorship/progress` in `src/lib/mcp/views.ts`, which wraps the same route), and `heatmapPhases`.
+- One rule, in client-safe `src/lib/holistic-phase-number.ts`: `holisticPhaseNumber(grade, placeInGrade)`, `withHolisticPhaseNumbers(phases)` for rows that carry `grade` and `position`, and `holisticPhaseNumberSql(phaseAlias, gradeNumberExpr)` for the one query that sorts and pages by the number. Used by `getHolisticPhasePlan` (Phase Setup), `numberPhases` in `holistic-student-phase.ts` (student page tabs, heading, "From Phase N" context label; each Academic Year's Plan numbered on its own), `listAssignedMentees` and `getHolisticProgressOptions` in `holistic-progress.ts` (rows, Phase filter, sort by Phase, CSV, and the MCP view registered for the path `/api/holistic-mentorship/progress` in `src/lib/mcp/views.ts`, which wraps the same route), and `heatmapPhases`. Issue #536's two server messages that name a Phase, the Open Phase confirmation's closing Phase (`getHolisticPhaseOpenImpact`) and the refused out-of-order open (`validateOpenOrder`), use `holisticPhaseNumberSql` too.
 - Nothing stores the number. `holistic_mentorship_phases.position` is unchanged and still drives Active (highest-position Open Phase per Grade) and Skipped: the progress query now selects `phase_position` beside `phase_number` and compares `phase_position` with `initial_active_position`.
-- A Grade holds at most `HOLISTIC_PHASES_PER_GRADE` (3) Phases per Plan. `addHolisticPhase`, and `updateHolisticPhase` when the Grade changes, return 422 "Grade N already has 3 Phases" (`gradeIsFull`). Both run under the Plan row lock: add takes it in `lockPhasePlanForYear`; a definition save, a state change and a delete take it first in `lockPhasePlanForPhase` (called from `checkedPhase`) and only then lock the Phase row (`getMutablePhase`, `FOR UPDATE OF p`). That is the same Plan-then-Phase order reorder uses (`lockPhasePlanForYear`, then `loadReorderPhases`), so a Grade change, which updates the later Phases of the Plan while it holds the Plan row, cannot deadlock with another save, state change, delete or reorder: the other request waits for the Plan row and then goes on, with 409 "Phase changed" when its Phase was one the Grade change renumbered. Before 25 Nov 2026 `getMutablePhase` locked the Phase row first and the Plan row with it (bare `FOR UPDATE`), and a save or state change of a later Phase racing a Grade change ended in `deadlock detected` (reproduced on local Postgres). A save that keeps the Phase's Grade is never counted, so a Plan that somehow holds more than 3 in a Grade stays editable. Copy previous year (`createHolisticPhasePlan`) refuses with 422 "The prior Plan has more than 3 Phases in Grade N" when a Grade of the source Plan is over the limit (`overfullGrade`), so a copy cannot show two Phases with one number; no production Plan had more than 3 per Grade on 20 Nov 2026.
-- No change to another Phase renumbers an opened or used Phase. Add appends, Move swaps two never-opened Phases of one Grade, and Delete is refused when a later Phase was opened, so none of them renumbers one. A Grade change would (every later Phase of both Grades shifts), so `validateGradeChange` returns 422 "Changing the Grade would renumber an opened or used Phase" when a later-position Phase of the old or the new Grade is open, frozen, ever opened or has Notes. This rule never refuses the last Phase of a Plan (the 3-per-Grade limit and the frozen rule still can). A Phase whose own Grade changes, which stays possible until Notes exist, takes a number in its new Grade. An allowed Grade change adds 1 to the `revision` of the later Phases of both Grades (`bumpPhasesRenumberedByGradeChange`), as delete and reorder do for the Phases they renumber, so an Admin acting on a page that still shows the old number gets 409 "Phase changed". Each of those Phases also gets a `reordered` audit row with the same actor, in Plan order, after the changed Phase's own `definition_updated` row (the order a delete writes them in). The refusal query is unit-tested against a mocked client and was checked on a local database by hand; no automated test executes it. The reorder action keeps the Grade of every position (`validateReorder`, `loadReorderPhases` reads each Phase's Grade): a Phase that moves must land on a position that held a Phase of its own Grade, else 422 "Phases can be reordered only within their Grade". So each Grade's Phases only trade places among that Grade's positions, every Phase that does not move keeps its number (also with gaps in `position` and with more than 3 Phases in a Grade), and an opened or used Phase, which cannot move, is never renumbered by a reorder. Revisions of the whole request are checked first (409), then the Grade rule and the opened-or-used rule (422). Phase Setup only sends same-Grade swaps, so it never meets the 422; a direct API call or a stale page can.
+- A Grade holds at most `HOLISTIC_PHASES_PER_GRADE` (3) Phases per Plan. `addHolisticPhase`, and `updateHolisticPhase` when the Grade changes, return 422 "Grade N already has 3 Phases" (`gradeIsFull`). Both run under the Plan row lock: add takes it in `lockPhasePlanForYear`; a definition save, a state change and a delete take it first in `lockPhasePlanForPhase` (called from `checkedPhase`) and only then lock the Phase row (`getMutablePhase`, `FOR UPDATE OF p`). That is the same Plan-then-Phase order reorder uses (`lockPhasePlanForYear`, then `loadReorderPhases`), so a Grade change, which updates the later Phases of the Plan while it holds the Plan row, cannot deadlock with another save, state change, delete or reorder: the other request waits for the Plan row and then goes on, with 409 "Phase changed" when its Phase was one the Grade change renumbered. A Grade change renumbers only never-opened Locked Phases, so that 409 reaches only Admin actions on those Phases. A Mentor write or Dictation clip cannot deadlock with it either: its write check (`loadHolisticMentorWriteScope`, #536) share-locks the Plan row before the Mapping and Phase rows, and it refuses a Locked Phase with 422. Before 25 Nov 2026 `getMutablePhase` locked the Phase row first and the Plan row with it (bare `FOR UPDATE`), and a save or state change of a later Phase racing a Grade change ended in `deadlock detected` (reproduced on local Postgres). A save that keeps the Phase's Grade is never counted, so a Plan that somehow holds more than 3 in a Grade stays editable. Copy previous year (`createHolisticPhasePlan`) refuses with 422 "The prior Plan has more than 3 Phases in Grade N" when a Grade of the source Plan is over the limit (`overfullGrade`), so a copy cannot show two Phases with one number; no production Plan had more than 3 per Grade on 20 Nov 2026.
+- No change to another Phase renumbers an opened or used Phase. Add appends, Move swaps two never-opened Phases of one Grade, and Delete is refused when a later Phase was opened, so none of them renumbers one. A Grade change would (every later Phase of both Grades shifts), so `validateGradeChange` returns 422 "Changing the Grade would renumber an opened or used Phase" when a later-position Phase of the old or the new Grade is open, frozen, ever opened or has Notes. This rule never refuses the last Phase of a Plan (the 3-per-Grade limit and the frozen rule still can). A Phase whose own Grade changes, which stays possible until Notes exist and only while the Phase is Locked (an Open Phase keeps its Grade, #536), takes a number in its new Grade. An allowed Grade change adds 1 to the `revision` of the later Phases of both Grades (`bumpPhasesRenumberedByGradeChange`), as delete and reorder do for the Phases they renumber, so an Admin acting on a page that still shows the old number gets 409 "Phase changed". Each of those Phases also gets a `reordered` audit row with the same actor, in Plan order, after the changed Phase's own `definition_updated` row (the order a delete writes them in). The refusal query is unit-tested against a mocked client and was checked on a local database by hand; no automated test executes it. The reorder action keeps the Grade of every position (`validateReorder`, `loadReorderPhases` reads each Phase's Grade): a Phase that moves must land on a position that held a Phase of its own Grade, else 422 "Phases can be reordered only within their Grade". So each Grade's Phases only trade places among that Grade's positions, every Phase that does not move keeps its number (also with gaps in `position` and with more than 3 Phases in a Grade), and an opened or used Phase, which cannot move, is never renumbered by a reorder. Revisions of the whole request are checked first (409), then the Grade rule and the opened-or-used rule (422). Phase Setup only sends same-Grade swaps, so it never meets the 422; a direct API call or a stale page can.
 - Phase Setup (`PhasePlanSetup.tsx`) lists the Plan in two groups, Grade 11 then Grade 12. Move up / Move down swap a Phase with its neighbour in the same Grade (`gradeNeighbour`) and send the whole Plan order to the unchanged reorder action; Add Phase starts in the first Grade with room and is off when both are full; a full Grade's button is disabled for a Phase of the other Grade (never the Grade the Phase is saved in), with the reason tied to the control by `aria-describedby`. The editor opens on the first Phase in list order (`firstListedPhase`), not the Plan's first position.
 - Students & Progress lists its Phase filter options by displayed number (`getHolisticProgressOptions` sorts after numbering).
 - `src/lib/holistic-phase-number.integration.test.ts` runs the SQL form on a disposable local Postgres and compares it with the JS form (opt in with `HOLISTIC_PHASE_NUMBER_TEST_DATABASE=dbservice_test_...`; its rows are rolled back). The e2e Holistic fixture orders its Plan Grade 11, 11, 11, 12, 12, 12, where old and new numbers are the same, so e2e does not cover a mixed Plan.
@@ -225,12 +225,103 @@ Evidence: sibling `release-records/holistic-phase-label-20260917/` and
 
 Mentor-owned Holistic writes (Post-Session Notes and Follow-up Notes) share one
 guard in `src/lib/holistic-mentor-write-scope.ts`. `loadHolisticMentorWriteScope(client, { studentId, phaseId, schoolId, programId, academicYear })`
-runs inside the caller's transaction and takes `FOR UPDATE OF mapping, phase`. It requires
+runs inside the caller's transaction in three statements: `FOR SHARE OF plan` on the Phase's Plan row
+(no row, no scope: it returns null there), then the scope query with `FOR UPDATE OF mapping, phase`, then
+the read of the Grade's Active Phase. Plan before Phase is the order every Phase Plan change uses. It requires
 an active Mapping, a non-dropout Student, a single current Grade 11/12 roster Grade, no
 privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 11 Phase
 for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
 itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
-missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+missing scope or a non-Mentor actor, 422 `Phase is not Open` for a Locked Phase, and 422
+`This Phase is closed. …` (`HOLISTIC_PHASE_CLOSED_ERROR`) for a Closed one. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+
+### Closed Phases (#536)
+
+Only the **Active Phase** of the Mentee's current Grade takes Mentor writes: the latest
+ordered `open` Phase of the current Academic Year's Plan for that Grade. Every other
+opened Phase is **Closed**: an earlier Open Phase of the Grade, and every prior-year Phase.
+Closed is derived, never stored (`holistic_mentorship_phases.state` is still only
+`locked` / `open`; no db-service change).
+
+- **Write path:** the loader returns `phase_active`. It share-locks the Plan row in its
+  **own first statement**, then locks the Mapping and Phase rows, then reads the Grade's latest
+  Open Phase in a **third statement**. Every Phase state change locks the Plan row `FOR UPDATE`
+  first (`checkedPhase` calls `lockPhasePlanForPhase` before `getMutablePhase`), so a write
+  that raced an Admin opening the next Phase waits, then sees the new Phase and is refused.
+  Keep the Active read its own statement: a subquery in the scope query would read the
+  snapshot taken before the wait. A Locked Phase, or one outside the current year's Plan,
+  skips that read.
+- **Lock order is Plan, then Phase, everywhere:** the Mentor write scope, state change,
+  definition update, reorder and delete. Locking a Phase row before the Plan row in any of
+  them deadlocks a Mentor save against an Admin reorder or delete (reproduced on the first
+  version of this change; Postgres aborts one side with `40P01`, a 500).
+- **Current year only:** "current" is `CURRENT_ACADEMIC_YEAR`, never the `academic_year` a
+  request or screen names. The write scope, `getHolisticStudentPhase` (`active` / `closed`),
+  the Progress `phase_availability` and `getHolisticPhasePlan` (`active`) all use it, so a
+  past year's Plan has no Active Phase and takes no Mentor writes. `active` and `closed` are
+  never both true.
+- **Read model:** `getHolisticStudentPhase` adds `closed` to every unlocked Phase summary and
+  to the selected Phase, with the same rule; `canEditNotes` is false when closed. Mentor tabs
+  read Closed instead of Open/Skipped (Completed stays Completed); the selected Phase shows a
+  closed notice naming the Phase that takes Notes, read-only Notes (an author still reads
+  their unsubmitted draft, labelled as not submitted before the Phase closed) and a disabled
+  Add notes. Admin/PM drill-down says "Closed Phase" and "Closed without Notes".
+- **A form open when its Phase closes:** the save is refused with `HOLISTIC_PHASE_CLOSED_ERROR`
+  (`src/lib/holistic-phase-messages.ts`, shared with the client). `PostSessionNotesEditor`
+  recognises it on autosave, Submit and Save Changes alike, stops autosave and Retry, drops the
+  navigation guard, and shows what was typed read-only under an alert, so the Mentor can copy
+  it and leave. It shows no Completed badge or "Submitted by" line over that text (the server
+  never took it) and calls `router.refresh()` once, so the Phase tabs and the Follow-up section
+  catch up while the typed text stays (it lives in client state). The editor's React key
+  includes the Phase revision, so `useNotesDefinitionPinnedOnRefusal` pins the revision and
+  Questions the form was loaded with before that refresh: an Admin's definition edit made
+  just before the Phase closed must not rebuild the editor and drop the text. The Follow-up pop-up does the
+  same on that refusal: it stays open with the text read-only, Save off, and the page refreshed.
+  **Dictation (#500) in that form:** a clip refused with the same message (the Phase closed
+  before any save noticed) freezes the form the same way (`useDictationRecorder`'s
+  `onPhaseClosed`). Once a form is frozen its recorder is dropped (`discard()`), as when the
+  Mentor leaves it: a recording stops and releases the mic without uploading, a clip being
+  transcribed is ignored when its words arrive, a failed clip's Retry goes, every mic and the
+  "Finish dictating first" hint go with the inputs (the pop-up's mics stay, disabled), and the
+  recorder no longer holds the page's one recording slot. The frozen text is exactly what was on
+  screen when it froze; the server refuses a Closed Phase's clips anyway. The freeze is also latched
+  in a ref (`frozenRef`) that work already in flight reads before the frozen form renders: a clip's
+  words, a draft queued behind a save in flight, and Submit after its draft flush are all dropped,
+  and a frozen form releases the leave-page guard even while that flush is pending. When a refresh
+  brings the Phase back Closed before this form wrote anything, the forms stay as #536 left them
+  (Notes read-only unless a correction is open; the pop-up's text and Save as they were, the server
+  answering Save), but Dictation stops: the recorder is dropped and no mic is offered. A pop-up
+  refused for a Closed Phase keeps Add notes off ("This Phase is closed") until newer page data
+  arrives (the latch is tied to the `followUpNotes` array of the data in hand at the refusal; a
+  refresh brings a new one), and from then on the server's `closed` decides.
+  Pinned in `StudentPhaseWorkspace.dictation.test.tsx`.
+- **Progress:** `phaseState` / the CSV **Availability** column is `active` | `closed` | `locked`
+  (`closed` replaced `open`). Derived Pending / Skipped / Completed progress is unchanged.
+- **Phase Setup:** `setHolisticPhaseState` refuses to open a Phase ordered before an Open Phase
+  of the same Grade (`validateOpenOrder`, 422). `updateHolisticPhase` refuses a Grade change
+  while the Phase is Open (`HOLISTIC_OPEN_PHASE_GRADE_ERROR`, 422): it would close or reopen
+  other Phases without that check or the confirmation; the screen disables the Grade control.
+  `GET /api/holistic-mentorship/phase-plans?program_id=&open_impact_phase_id=`
+  (gate `phase_configuration_read`) returns `getHolisticPhaseOpenImpact`: the Phase that will
+  close and counts only (assigned Mentees of the Grade without submitted Notes in it, and how
+  many of those hold a draft with content), over the write scope's Mentee set, built from one
+  `MATERIALIZED` roster snapshot (not a roster read per Mapping, which timed out in #321).
+  `PhasePlanSetup` asks on every open and names the closing Phase from the server's answer,
+  because its own copy of the Plan can be stale. If the impact read fails, the prompt falls back
+  to the screen's copy and to "Check Students & Progress" in place of the counts.
+  The open then sends back the Phase the prompt named: `expected_closing_phase_id` (the server's
+  answer, or the screen's copy when the impact read failed; null for none). `setHolisticPhaseState`
+  compares it, under the Plan lock, with the Grade's latest Open Phase (`validateExpectedClosingPhase`)
+  and answers 409 `HOLISTIC_CLOSING_PHASE_CHANGED_ERROR` on a mismatch, so two Admins acting
+  within seconds cannot close a Phase neither was warned about; the screen reloads the Plan,
+  keeps any unsaved edits to that Phase, and shows that message (a different one if the reload
+  fails). The API skips the check only when the field is absent, which this screen never does.
+- **Undo:** returning the unused Active Phase to Locked makes the previous Open Phase Active
+  and writable again. There is no other reopen.
+- **Tests:** `holistic-closed-phases.integration.test.ts` (opt-in `HOLISTIC_NOTES_TEST_DATABASE`,
+  real Postgres): the racing write and the reorder deadlock both drive the real Admin function,
+  paused on a Phase row held by a third connection, and wait on `pg_stat_activity` instead of a
+  timer; the two-Admins case runs the impact read and both opens for real. Unit tests sit beside each module.
 
 ## Holistic answer length (#508)
 
@@ -283,7 +374,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   by one clip each (accepted).
 - **Write scope before the call:** `checkHolisticDictationScope` runs `loadHolisticMentorWriteScope`
   (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the
-  provider calls, so no row lock is held while ElevenLabs or OpenRouter works.
+  provider calls, so no row lock is held while ElevenLabs or OpenRouter works. The loader takes
+  #536's Plan share lock first (lock order Plan, then Mapping and Phase, as every Phase change), and
+  its Active Phase rule refuses a clip for a Closed Phase with 422 `HOLISTIC_PHASE_CLOSED_ERROR`, uncounted.
 - **Opt-in integration test:** `src/lib/holistic-dictation.integration.test.ts` with
   `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt,
   a five-minute clip and the 305 s cap against the table's check constraint, the
@@ -304,7 +397,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   normalises answers with `normalizeHolisticFollowUpAnswers`, then `addHolisticFollowUpNote`
   runs one transaction: the per-Student privacy advisory lock first (same order as privacy
   deletion), then the shared Mentor write-scope loader's `FOR UPDATE` on Mapping/Phase
-  (404/422), then a submitted Post-Session Notes check (422), then `INSERT ... RETURNING id`.
+  (404/422, including 422 for a Closed Phase, #536), then a submitted Post-Session Notes check (422), then `INSERT ... RETURNING id`.
   The trigger re-takes the same advisory lock. Success is 201 `{ id }`; the UI refreshes server
   data.
 - **Read audience:** the same as submitted Post-Session Notes. `getHolisticStudentPhase` loads

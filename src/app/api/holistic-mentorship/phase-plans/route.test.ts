@@ -8,7 +8,8 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
 import { query, withTransaction } from "@/lib/db";
-import { GET, PATCH, POST } from "./route";
+import { HOLISTIC_CLOSING_PHASE_CHANGED_ERROR } from "@/lib/holistic-phase-messages";
+import { DELETE, GET, PATCH, POST } from "./route";
 
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
@@ -103,6 +104,262 @@ describe("/api/holistic-mentorship/phase-plans", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ plan: null });
+  });
+
+  describe("what opening a Locked Phase would close", () => {
+    const impactUrl = (phaseId: string) =>
+      `http://localhost/api/holistic-mentorship/phase-plans?program_id=1&open_impact_phase_id=${phaseId}`;
+    const admin = {
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    };
+
+    it("is denied to a Program Manager before any count is read", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: "pm@example.com" } });
+      mockQuery
+        .mockResolvedValueOnce([{ ...admin, email: "pm@example.com", role: "program_manager" }])
+        .mockResolvedValue([]);
+
+      const response = await GET(new NextRequest(impactUrl("16")));
+
+      expect(response.status).toBe(403);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["abc", "0", "-3", "1.5", ""])("rejects the Phase id %j", async (phaseId) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: admin.email } });
+      mockQuery.mockResolvedValueOnce([admin]);
+
+      const response = await GET(new NextRequest(impactUrl(phaseId)));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid Phase" });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it("is not found for a Phase outside the Program or not Locked", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: admin.email } });
+      mockQuery.mockResolvedValueOnce([admin]).mockResolvedValueOnce([]);
+
+      const response = await GET(new NextRequest(impactUrl("16")));
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "Phase not found" });
+    });
+
+    it("returns counts only for the Phase that will close", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: admin.email } });
+      mockQuery
+        .mockResolvedValueOnce([admin])
+        .mockResolvedValueOnce([{ phase_plan_id: "7", grade_id: "3", grade: "12", position: 4, academic_year: "2026-2027" }])
+        .mockResolvedValueOnce([{ id: "15", number: "2" }])
+        .mockResolvedValueOnce([{ without_notes: "45", drafts: "1" }]);
+
+      const response = await GET(new NextRequest(impactUrl("16")));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        impact: { closing: { id: 15, number: 2, menteesWithoutNotes: 45, unsubmittedDrafts: 1 } },
+      });
+      expect(mockQuery.mock.calls[1][1]).toEqual([16, 1, "2026-2027"]);
+    });
+  });
+
+  describe("opening a Phase with the Phase the Admin was told would close", () => {
+    const hmAdmin = {
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    };
+    const open = (extra: Record<string, unknown>) => PATCH(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans", {
+      method: "PATCH",
+      body: JSON.stringify({ action: "state", program_id: 1, phase_id: 21, expected_revision: 2, state: "open", confirmed: true, ...extra }),
+    }));
+
+    it.each(["15", 0, -3, 1.5, true, {}])("rejects a malformed expected_closing_phase_id (%j) before any write", async (value) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+
+      const response = await open({ expected_closing_phase_id: value });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid state change" });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["a Phase id", 15, [{ id: "18" }]],
+      ["null, meaning no Phase closes", null, [{ id: "15" }]],
+    ] as const)("answers 409 when it was %s and a different Phase would close now", async (_name, expected, closingNow) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+      const client = {
+        query: vi.fn()
+          .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+          .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
+          .mockResolvedValueOnce({ rows: [] })
+          .mockResolvedValueOnce({ rows: [...closingNow] }),
+      };
+      mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+      const response = await open({ expected_closing_phase_id: expected });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: HOLISTIC_CLOSING_PHASE_CHANGED_ERROR });
+      expect(client.query).toHaveBeenCalledTimes(4);
+    });
+
+    it("does not run the check when the screen sent no expected_closing_phase_id", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+      const client = {
+        query: vi.fn()
+          .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+          .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
+          .mockResolvedValueOnce({ rows: [] })
+          .mockResolvedValueOnce({ rows: [{ grade: "11", title: "Belonging", guidance_markdown: "Discuss goals", question_count: "1", valid_question_count: "1" }] })
+          .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
+          .mockResolvedValueOnce({ rows: [] }),
+      };
+      mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+      const response = await open({});
+
+      expect(response.status).toBe(200);
+      expect(client.query).toHaveBeenCalledTimes(6);
+    });
+  });
+
+  describe("reordering Phases", () => {
+    const hmAdmin = {
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    };
+    const reorder = (phases: unknown) => PATCH(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans", {
+      method: "PATCH",
+      body: JSON.stringify({ action: "reorder", program_id: 1, academic_year: "2026-2027", phases }),
+    }));
+
+    it.each([
+      ["not a list", "21,22"],
+      ["an entry that is not an object", [null]],
+      ["an entry without a revision", [{ id: 21 }]],
+      ["an id sent as text", [{ id: "21", expected_revision: 1 }]],
+    ])("rejects a Phase order with %s before any write", async (_name, phases) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+
+      const response = await reorder(phases);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid Phase order" });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("passes a well-formed order to the Plan, which locks the Plan row first", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+      const client = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+      mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+      const response = await reorder([{ id: 22, expected_revision: 1 }, { id: 21, expected_revision: 2 }]);
+
+      // The Plan lock found no Plan for the year, so nothing is read or moved.
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toBe("Phase order changed");
+      expect(client.query).toHaveBeenCalledOnce();
+      expect(client.query.mock.calls[0][1]).toEqual([1, "2026-2027"]);
+      expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
+    });
+  });
+
+  describe("deleting a Phase", () => {
+    const hmAdmin = {
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    };
+    const remove = (body: Record<string, unknown>) => DELETE(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans", {
+      method: "DELETE",
+      body: JSON.stringify(body),
+    }));
+
+    it.each([{}, { program_id: "1", phase_id: 21, expected_revision: 1 }])(
+      "rejects a request without a numeric Program (%j) before the session is read", async (body) => {
+      const response = await remove(body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid Program" });
+      expect(mockGetServerSession).not.toHaveBeenCalled();
+    });
+
+    it("denies a read-only Holistic Mentorship Admin before any write", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([{ ...hmAdmin, read_only: true }]).mockResolvedValue([]);
+
+      const response = await remove({ program_id: 1, phase_id: 21, expected_revision: 1 });
+
+      expect(response.status).toBe(403);
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no Phase id", { expected_revision: 1 }],
+      ["a Phase id sent as text", { phase_id: "21", expected_revision: 1 }],
+      ["no revision", { phase_id: 21 }],
+    ])("rejects %s before any write", async (_name, body) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+
+      const response = await remove({ program_id: 1, ...body });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid Phase" });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 when the Plan lock finds no such Phase in the Program, and reads nothing else", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+      const client = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+      mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+      const response = await remove({ program_id: 1, phase_id: 21, expected_revision: 1 });
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "Phase not found" });
+      expect(client.query).toHaveBeenCalledOnce();
+      expect(client.query.mock.calls[0][1]).toEqual([21, 1]);
+    });
+
+    it("deletes a never-opened Locked Phase, locking the Plan row before the Phase row", async () => {
+      mockGetServerSession.mockResolvedValue({ user: { email: hmAdmin.email } });
+      mockQuery.mockResolvedValueOnce([hmAdmin]);
+      const client = {
+        query: vi.fn()
+          .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+          .mockResolvedValueOnce({ rows: [{
+            id: "21", phase_plan_id: "7", position: 3, revision: 1, state: "locked",
+            guidance_markdown: "", academic_year: "2026-2027", frozen_at: null,
+            grade: "11", ever_opened: false, used: false,
+          }] })
+          .mockResolvedValue({ rows: [] }),
+      };
+      mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+      const response = await remove({ program_id: 1, phase_id: 21, expected_revision: 1 });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, id: 21 });
+      expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE OF plan");
+      expect(String(client.query.mock.calls[1][0])).toContain("FOR UPDATE OF p");
+      const audits = client.query.mock.calls
+        .filter(([sql]) => String(sql).includes("phase_mutation_audits"))
+        .map(([, params]) => params);
+      expect(audits).toEqual([[7, 21, "deleted", 9, hmAdmin.email]]);
+      // The Phase row itself is deleted, by id and the revision the Admin saw.
+      const deletes = client.query.mock.calls
+        .filter(([sql]) => /DELETE FROM holistic_mentorship_phases\s+WHERE id = \$1 AND revision = \$2/.test(String(sql)));
+      expect(deletes.map(([, params]) => params)).toEqual([[21, 1]]);
+    });
   });
 
   it("lets a Holistic Mentorship Admin create the blank current-year Plan", async () => {

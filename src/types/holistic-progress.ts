@@ -19,7 +19,8 @@ export type HolisticAssignedProgressRow = {
   phaseId: number | null;
   phaseNumber: number | null;
   phaseTitle: string | null;
-  phaseState: "active" | "open" | "locked" | null;
+  /** "closed": opened, but a later Phase of the Grade is now the Active one. */
+  phaseState: "active" | "closed" | "locked" | null;
   progress: HolisticProgress;
   completedAt: string | null;
   notesAuthor: string | null;
