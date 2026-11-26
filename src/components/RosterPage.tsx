@@ -52,6 +52,8 @@ import type { RosterTabId } from "@/lib/roster-tabs";
 import { Badge, Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
 import PerformanceTab from "@/components/PerformanceTab";
+import TestAttendanceTab from "@/components/test-attendance/TestAttendanceTab";
+import { isTestAttendanceStudent } from "@/lib/test-attendance-rules";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
@@ -792,6 +794,7 @@ function rosterFeatureAccess(permission: UserPermission) {
     quizSessions: getFeatureAccess(permission, "quiz_sessions"),
     teacherFeedback: getFeatureAccess(permission, "teacher_feedback"),
     alumni: getFeatureAccess(permission, "alumni"),
+    testAttendance: getFeatureAccess(permission, "test_attendance"),
   };
 }
 
@@ -824,6 +827,24 @@ function studentActionAccess(
 async function showAlumniTab(scope: RosterScope, canView: boolean): Promise<boolean> {
   if (scope.kind !== "school" || !canView) return false;
   return schoolHasAlumni(scope.school.id);
+}
+
+// Test Attendance tab audience: NVS Schools only (#517). A School page (never
+// a Centre page) of a JNV School whose roster has at least one Student on the
+// tab's list, for a viewer with `test_attendance` view. Decided from the
+// roster already loaded here — no extra query.
+function testAttendanceContent(
+  scope: RosterScope,
+  canView: boolean,
+  roster: Array<Parameters<typeof isTestAttendanceStudent>[0]>,
+  schoolUdise: string,
+): ReactNode {
+  const show =
+    canView &&
+    scope.kind === "school" &&
+    scope.school.af_school_category === "JNV" &&
+    roster.some(isTestAttendanceStudent);
+  return show ? <TestAttendanceTab schoolUdise={schoolUdise} schoolCode={scope.school.code} /> : null;
 }
 
 async function fetchRosterData(scope: RosterScope) {
@@ -1168,6 +1189,7 @@ function visibleRosterTabs({
     | "enrollment"
     | "curriculum"
     | "performance"
+    | "testAttendance"
     | "quizSessions"
     | "teacherFeedback"
     | "mentorship"
@@ -1193,6 +1215,13 @@ function visibleRosterTabs({
       label: "Performance",
       content: programScoped(content.performance),
       show: access.performance.canView,
+    },
+    // Shown only when RosterPage passes content (see testAttendanceContent).
+    {
+      id: "test_attendance",
+      label: "Test Attendance",
+      content: content.testAttendance,
+      show: Boolean(content.testAttendance),
     },
     {
       id: "quiz_sessions",
@@ -1386,6 +1415,7 @@ export default async function RosterPage({
           lockedProgram={isPmu ? PROGRAM_ID_TO_LABEL[PMU_PROGRAM_ID] : centre.programName}
         />
       ),
+      testAttendance: testAttendanceContent(scope, access.testAttendance.canView, roster.students, schoolUdise),
       quizSessions: (
         <QuizSessionsTab
           schoolId={school.id}
