@@ -84,20 +84,6 @@ describe("POST /api/quiz-sessions/from-cms quiz language", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
-  it("stores a CMS nta_test as previous_year_test, other types as themselves", async () => {
-    const POST = await loadPost();
-
-    for (const [testType, testFormat] of [
-      ["nta_test", "previous_year_test"],
-      ["mock_test", "mock_test"],
-      ["major_test", "major_test"],
-    ] as const) {
-      fetchMock.mockClear();
-      expect((await post(POST, { testType })).status).toBe(200);
-      expect(bodyOf("db-service.local/session").meta_data.test_format).toBe(testFormat);
-    }
-  });
-
   it("derives meta_data.course from the exam track", async () => {
     const POST = await loadPost();
 

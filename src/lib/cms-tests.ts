@@ -54,9 +54,10 @@ export function courseForCmsExamTrack(examTrack: CmsExamTrack): string {
 }
 
 // CMS test subtypes the picker supports. chapter_test is chapter-scoped; the rest list
-// straight off exam track + grade. The test format stored as meta_data.test_format (and by
-// quiz-backend as the quiz's test_format) is testFormatForCmsTestType(subtype): it must be a
-// value quiz-backend's TestFormat enum accepts (an unknown one fails quiz creation).
+// straight off exam track + grade. Each value is stored as meta_data.test_format and as the
+// quiz's test_format, so it must be a format quiz-backend's TestFormat enum accepts (an
+// unknown one fails quiz creation). previous_year_test is the CMS's previous-year (NTA)
+// papers; the CMS called them nta_test until nex-gen-cms #232 (Nov 2026).
 // homework_assignment exists in the CMS but not downstream yet (downstream says homework).
 // evaluation_test is for teachers, not students.
 export const CMS_TEST_TYPES = [
@@ -65,7 +66,7 @@ export const CMS_TEST_TYPES = [
   "full_syllabus_test",
   "part_test",
   "mock_test",
-  "nta_test",
+  "previous_year_test",
 ] as const;
 export type CmsTestType = (typeof CMS_TEST_TYPES)[number];
 
@@ -75,20 +76,8 @@ export const CMS_TEST_TYPE_OPTIONS: { value: CmsTestType; label: string }[] = [
   { value: "full_syllabus_test", label: "Full Syllabus Test" },
   { value: "part_test", label: "Part Test" },
   { value: "mock_test", label: "Mock Test" },
-  { value: "nta_test", label: "NTA Test" },
+  { value: "previous_year_test", label: "Previous Year Test" },
 ];
-
-// CMS subtypes whose downstream test format has a different name. The CMS calls previous-
-// year papers nta_test; quiz-backend's TestFormat and Gurukul know them as
-// previous_year_test. quiz-backend's /quiz/from-cms applies the same map to the quiz's
-// test_format, so the session and its quiz agree. Every other subtype is its own format.
-const CMS_TEST_TYPE_FORMATS: Partial<Record<CmsTestType, string>> = {
-  nta_test: "previous_year_test",
-};
-
-export function testFormatForCmsTestType(testType: CmsTestType): string {
-  return CMS_TEST_TYPE_FORMATS[testType] ?? testType;
-}
 
 // Discriminator stored on sessions created from the new CMS (meta_data.cms_source). Used to
 // tell CMS-sourced sessions apart from legacy ones (e.g. to gate legacy-only row actions).

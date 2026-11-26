@@ -42,19 +42,19 @@ in them, including students who sat only the retest. sessionCreator's `db_id` pa
 
 **Test types the picker offers** (`CMS_TEST_TYPES` in `src/lib/cms-tests.ts`): `chapter_test`
 (Exam track → Grade → Subject → Chapter), and `major_test` / `full_syllabus_test` / `part_test` /
-`mock_test` / `nta_test` (straight off Exam track + Grade). The list route forwards the type to
+`mock_test` / `previous_year_test` (straight off Exam track + Grade). The list route forwards the type to
 the CMS as `testtype-dropdown` and keeps only tests whose `subtype` matches exactly, so a CMS
 type missing from this list is invisible in the LMS, with no error. `full_syllabus_test` was
 added on 10 Nov 2026 when AIAT-05 (`JN-FST-2-26`) was authored as an FST and didn't show under
-Major Test. `part_test` and `mock_test` followed on 20 Nov 2026 (#540).
+Major Test. `part_test`, `mock_test` and `previous_year_test` followed in Nov 2026 (#540).
 
-The CMS subtype and the stored test format are not always the same word. The format (session
-`meta_data.test_format`, and the quiz's `test_format` that quiz-backend's `/quiz/from-cms` sets)
-must be a value in quiz-backend's `TestFormat` enum, or quiz creation fails. `nta_test` (CMS
-previous-year papers) is stored as `previous_year_test` via `testFormatForCmsTestType`, and
-quiz-backend's `cms_ingest.CMS_SUBTYPE_TO_TEST_FORMAT` applies the same map; keep the two in
-step. So adding a CMS type is a picker-only change only when its subtype is already a
-`TestFormat` value; otherwise it needs a map entry on both sides. `homework_assignment` (none in
+The CMS subtype is stored as-is as the test format (session `meta_data.test_format`, and the
+quiz's `test_format` that quiz-backend's `/quiz/from-cms` sets), so it must be a value in
+quiz-backend's `TestFormat` enum, or quiz creation fails. The CMS called previous-year (NTA)
+papers `nta_test`, which no downstream enum knows; nex-gen-cms #232 renamed the subtype to
+`previous_year_test` and the 5 existing tests in prod (25 Nov 2026), so no mapping is needed.
+Adding a CMS type is a picker-only change only when its subtype is already a `TestFormat`
+value; otherwise rename it at the CMS or add it to the enum first. `homework_assignment` (none in
 the CMS yet; downstream says `homework`) and `evaluation_test` (for teachers) stay out.
 `previous_year_test` counts as a big test (Nov 2026): it is in `MAJOR_TEST_FORMATS`, etl-next's
 academic-level / cutoff formats and reporting's `BIG_TEST_FORMATS`, but only for engineering /

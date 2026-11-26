@@ -117,7 +117,7 @@ describe("GET /api/cms/tests", () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toContain("testtype-dropdown=full_syllabus_test");
   });
 
-  it.each(["part_test", "mock_test", "nta_test"])("lists %s straight off exam track and grade", async (subtype) => {
+  it.each(["part_test", "mock_test", "previous_year_test"])("lists %s straight off exam track and grade", async (subtype) => {
     const test = {
       id: 18001,
       code: "JM-MOCK-1",
@@ -137,7 +137,7 @@ describe("GET /api/cms/tests", () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toContain(`testtype-dropdown=${subtype}`);
   });
 
-  it.each(["homework_assignment", "evaluation_test"])(
+  it.each(["nta_test", "homework_assignment", "evaluation_test"])(
     "rejects %s, which quiz-backend cannot ingest or students should not get",
     async (subtype) => {
       const res = await GET(req(`exam_track=jee_main&grade=12&test_type=${subtype}`));
