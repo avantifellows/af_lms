@@ -53,16 +53,30 @@ export function courseForCmsExamTrack(examTrack: CmsExamTrack): string {
   return CMS_EXAM_TRACK_COURSES[examTrack];
 }
 
-// Test subtypes the picker supports. chapter_test is chapter-scoped; major_test and
-// full_syllabus_test list straight off exam track + grade. All flow through the same CMS
-// list route + quiz-backend ingest, so widening this list is a UI-only change.
-export const CMS_TEST_TYPES = ["chapter_test", "major_test", "full_syllabus_test"] as const;
+// CMS test subtypes the picker supports. chapter_test is chapter-scoped; the rest list
+// straight off exam track + grade. Each value is stored as meta_data.test_format and as the
+// quiz's test_format, so it must be a format quiz-backend's TestFormat enum accepts (an
+// unknown one fails quiz creation). previous_year_test is the CMS's previous-year (NTA)
+// papers; the CMS called them nta_test until nex-gen-cms #232 (Nov 2026).
+// homework_assignment exists in the CMS but not downstream yet (downstream says homework).
+// evaluation_test is for teachers, not students.
+export const CMS_TEST_TYPES = [
+  "chapter_test",
+  "major_test",
+  "full_syllabus_test",
+  "part_test",
+  "mock_test",
+  "previous_year_test",
+] as const;
 export type CmsTestType = (typeof CMS_TEST_TYPES)[number];
 
 export const CMS_TEST_TYPE_OPTIONS: { value: CmsTestType; label: string }[] = [
   { value: "chapter_test", label: "Chapter Test" },
   { value: "major_test", label: "Major Test" },
   { value: "full_syllabus_test", label: "Full Syllabus Test" },
+  { value: "part_test", label: "Part Test" },
+  { value: "mock_test", label: "Mock Test" },
+  { value: "previous_year_test", label: "Previous Year Test" },
 ];
 
 // Discriminator stored on sessions created from the new CMS (meta_data.cms_source). Used to

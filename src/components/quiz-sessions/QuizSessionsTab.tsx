@@ -1267,7 +1267,7 @@ function QuizSessionCreateModal({
   }, [cmsChapterId, cmsChapters]);
 
   // CMS cascade: fetch tests once the type's inputs are complete — chapter tests need a
-  // chapter selected; major and full-syllabus tests list straight off exam track + grade.
+  // chapter selected; every other type lists straight off exam track + grade.
   const cmsTestsReady =
     testSource === "cms" &&
     !!cmsExamTrack &&
@@ -1999,7 +1999,10 @@ function QuizSessionCreateModal({
                         <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                           {cmsTestType === "chapter_test"
                             ? "No chapter tests found for this chapter."
-                            : `No ${cmsTestType === "full_syllabus_test" ? "full syllabus" : "major"} tests found for this exam track and grade.`}
+                            : `No ${
+                                CMS_TEST_TYPE_OPTIONS.find((option) => option.value === cmsTestType)?.label ??
+                                "test"
+                              }s found for this exam track and grade.`}
                         </div>
                       ) : (
                         <div className="space-y-2">

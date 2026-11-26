@@ -405,6 +405,19 @@ describe("getCumulativeALData", () => {
     expect(sql).not.toContain("pk_student_id");
   });
 
+  it("counts previous-year papers only for JEE / NEET, not CUET, NDA or CLAT practice", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getCumulativeALData } = await import("./bigquery");
+    await getCumulativeALData("11223344", 11);
+
+    const sql = mocks.mockQueryFn.mock.calls[0][0].query;
+    expect(sql).toContain("'previous_year_test'");
+    expect(sql).toContain(
+      "AND (f.test_format != 'previous_year_test' OR LOWER(f.test_stream) IN ('engineering', 'medical'))"
+    );
+  });
+
   it("excludes unsubmitted attempts from the AL matrix", async () => {
     mocks.mockQueryFn.mockResolvedValueOnce([[]]);
 

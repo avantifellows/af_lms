@@ -117,6 +117,35 @@ describe("GET /api/cms/tests", () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toContain("testtype-dropdown=full_syllabus_test");
   });
 
+  it.each(["part_test", "mock_test", "previous_year_test"])("lists %s straight off exam track and grade", async (subtype) => {
+    const test = {
+      id: 18001,
+      code: "JM-MOCK-1",
+      name: [{ lang_code: "en", resource: "JEE Main Mock 1" }],
+      subtype,
+      type_params: { marks: 300, duration: "180" },
+    };
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify([test, RAW_TESTS[0]]), { status: 200 })
+    );
+
+    const res = await GET(req(`exam_track=jee_main&grade=12&test_type=${subtype}`));
+
+    expect(res.status).toBe(200);
+    const { tests } = await res.json();
+    expect(tests.map((t: { code: string }) => t.code)).toEqual(["JM-MOCK-1"]);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain(`testtype-dropdown=${subtype}`);
+  });
+
+  it.each(["nta_test", "homework_assignment", "evaluation_test"])(
+    "rejects %s, which quiz-backend cannot ingest or students should not get",
+    async (subtype) => {
+      const res = await GET(req(`exam_track=jee_main&grade=12&test_type=${subtype}`));
+      expect(res.status).toBe(400);
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
+
   it("400s on an invalid scope", async () => {
     expect((await GET(req("grade=12"))).status).toBe(400);
   });
