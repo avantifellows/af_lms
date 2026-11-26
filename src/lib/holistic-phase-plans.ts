@@ -2,6 +2,9 @@ import type { PoolClient } from "pg";
 
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query, withTransaction } from "./db";
+import {
+  HOLISTIC_PHASES_PER_GRADE, holisticGradeFullError, withHolisticPhaseNumbers,
+} from "./holistic-phase-number";
 
 export type HolisticPhaseQuestion = {
   id: number;
@@ -106,6 +109,7 @@ type MutablePhaseRow = {
   guidance_markdown: string;
   academic_year: string;
   frozen_at: string | null;
+  grade: number | string;
   ever_opened: boolean;
   used: boolean;
 };
@@ -114,6 +118,7 @@ type ReorderPhaseRow = Pick<
   PhaseRow,
   "id" | "position" | "revision" | "state" | "frozen_at" | "ever_opened" | "used"
 > & { phase_plan_id: number | string };
+type ReorderPlanRow = ReorderPhaseRow & { grade: number | string };
 
 type PhaseMutationAction = "created" | "definition_updated" | "reordered" | "deleted";
 
@@ -135,6 +140,106 @@ async function recordPhaseMutation(
      VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), NOW())`,
     [phasePlanId, phaseId, action, actor.actorUserId ?? null, actor.actorEmail]
   );
+}
+
+// A Grade holds at most HOLISTIC_PHASES_PER_GRADE Phases, so Grade 12's numbers never
+// collide with Grade 11's. Callers hold the Plan row lock.
+async function gradeIsFull(
+  client: PoolClient,
+  phasePlanId: number,
+  grade: 11 | 12,
+  exceptPhaseId: number | null = null,
+): Promise<boolean> {
+  const result = await client.query<{ count: number | string }>(
+    `SELECT COUNT(*) AS count
+     FROM holistic_mentorship_phases phase
+     JOIN grade ON grade.id = phase.grade_id
+     WHERE phase.phase_plan_id = $1 AND grade.number = $2
+       AND ($3::bigint IS NULL OR phase.id <> $3)`,
+    [phasePlanId, grade, exceptPhaseId]
+  );
+  return Number(result.rows[0]?.count ?? 0) >= HOLISTIC_PHASES_PER_GRADE;
+}
+
+// Moving a Phase to the other Grade renumbers every later Phase of both Grades.
+// A Plan made before the limit can hold more than 3 Phases in a Grade. Copying it
+// would give two Phases the same number, so the copy is refused.
+async function overfullGrade(client: PoolClient, phasePlanId: number): Promise<11 | 12 | null> {
+  const result = await client.query<{ grade: number | string }>(
+    `SELECT grade.number AS grade
+     FROM holistic_mentorship_phases phase
+     JOIN grade ON grade.id = phase.grade_id
+     WHERE phase.phase_plan_id = $1
+     GROUP BY grade.number
+     HAVING COUNT(*) > $2
+     ORDER BY grade.number
+     LIMIT 1`,
+    [phasePlanId, HOLISTIC_PHASES_PER_GRADE]
+  );
+  return result.rows[0] ? (Number(result.rows[0].grade) as 11 | 12) : null;
+}
+
+// An opened or used Phase keeps its number, so the move is refused when one is later.
+async function gradeChangeRenumbersOpenedPhase(
+  client: PoolClient,
+  phase: MutablePhaseRow,
+  grade: 11 | 12,
+): Promise<boolean> {
+  const result = await client.query(
+    `SELECT 1
+     FROM holistic_mentorship_phases later
+     JOIN grade ON grade.id = later.grade_id
+     WHERE later.phase_plan_id = $1 AND later.position > $2 AND grade.number = ANY($3::int[])
+       AND (later.state <> 'locked' OR later.frozen_at IS NOT NULL
+            OR EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
+                       WHERE t.phase_id = later.id AND t.to_state = 'open')
+            OR EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
+                       WHERE n.phase_id = later.id))
+     LIMIT 1`,
+    [Number(phase.phase_plan_id), phase.position, [Number(phase.grade), grade]]
+  );
+  return result.rows.length > 0;
+}
+
+// Only a Grade change is checked, so a Phase can always be saved in the Grade it is in.
+// A Grade change renumbers the later Phases of the old and the new Grade. Their
+// revision moves too, as it does after a delete or a reorder, so an Admin acting
+// on a page that still shows the old number gets "Phase changed". Each of them
+// also gets a "reordered" audit row in Plan order, after the changed Phase's own
+// row, as the later Phases do after a delete.
+async function bumpPhasesRenumberedByGradeChange(
+  client: PoolClient,
+  phase: MutablePhaseRow,
+  grade: 11 | 12,
+  actor: AuditActor,
+) {
+  const renumbered = await client.query<{ id: number | string; position: number }>(
+    `UPDATE holistic_mentorship_phases later
+     SET revision = later.revision + 1, updated_at = NOW()
+     FROM grade
+     WHERE grade.id = later.grade_id AND later.phase_plan_id = $1 AND later.position > $2
+       AND grade.number = ANY($3::int[])
+     RETURNING later.id, later.position`,
+    [Number(phase.phase_plan_id), phase.position, [Number(phase.grade), grade]]
+  );
+  const inPlanOrder = [...renumbered.rows].sort((a, b) => a.position - b.position);
+  for (const later of inPlanOrder) {
+    await recordPhaseMutation(client, Number(phase.phase_plan_id), Number(later.id), "reordered", actor);
+  }
+}
+
+async function validateGradeChange(
+  client: PoolClient,
+  phase: MutablePhaseRow,
+  input: PhaseDefinition,
+): Promise<PhasePlanResult | null> {
+  if (Number(phase.grade) === input.grade) return null;
+  if (await gradeIsFull(client, Number(phase.phase_plan_id), input.grade, input.phaseId)) {
+    return { ok: false, status: 422, error: holisticGradeFullError(input.grade) };
+  }
+  return await gradeChangeRenumbersOpenedPhase(client, phase, input.grade)
+    ? { ok: false, status: 422, error: "Changing the Grade would renumber an opened or used Phase" }
+    : null;
 }
 
 export function validateAcademicYear(value: string): boolean {
@@ -178,8 +283,12 @@ async function getMutablePhase(
   programId: number,
 ): Promise<MutablePhaseRow | null> {
   const result = await client.query<MutablePhaseRow>(
+    // The caller already holds the Plan row lock (lockPhasePlanForPhase), so every
+    // definition save in one Plan runs one at a time. Grade is a subquery so the
+    // shared grade row is not locked.
     `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.guidance_markdown,
             plan.academic_year, p.frozen_at,
+            (SELECT number FROM grade WHERE grade.id = p.grade_id) AS grade,
             EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
                     WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
             EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
@@ -187,7 +296,7 @@ async function getMutablePhase(
      FROM holistic_mentorship_phases p
      JOIN holistic_mentorship_phase_plans plan ON plan.id = p.phase_plan_id
      WHERE p.id = $1 AND plan.program_id = $2
-     FOR UPDATE`,
+     FOR UPDATE OF p`,
     [phaseId, programId]
   );
   return result.rows[0] ?? null;
@@ -204,13 +313,21 @@ function checkRevision(row: MutablePhaseRow | null, expectedRevision: number): P
   return null;
 }
 
+type CheckedPhase = { phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult };
+
+// Plan first, then Phase: the order delete and reorder already used. A save and
+// a state change take the same order here, so none of them can deadlock with a
+// Grade change, which updates the later Phases of the Plan while it holds the
+// Plan row.
 async function checkedPhase(
   client: PoolClient,
   phaseId: number,
   expectedRevision: number,
   programId: number,
-): Promise<{ phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult }> {
-  const phase = await getMutablePhase(client, phaseId, programId);
+): Promise<CheckedPhase> {
+  const planId = await lockPhasePlanForPhase(client, phaseId, programId);
+  // No Plan row: the Phase does not exist in this Program, so there is nothing to lock.
+  const phase = planId === null ? null : await getMutablePhase(client, phaseId, programId);
   const error = checkRevision(phase, expectedRevision);
   return error ? { phase: null, error } : { phase: phase!, error: null };
 }
@@ -281,6 +398,8 @@ async function updatePhaseTransaction(
   const phase = checked.phase;
   const invalidChange = validateDefinitionChange(phase, input);
   if (invalidChange) return invalidChange;
+  const invalidGradeChange = await validateGradeChange(client, phase, input);
+  if (invalidGradeChange) return invalidGradeChange;
   const ownershipError = await validateQuestionOwnership(client, input.phaseId, input.questions);
   if (ownershipError) return ownershipError;
   const updated = await client.query<{ revision: number }>(
@@ -301,6 +420,9 @@ async function updatePhaseTransaction(
     "definition_updated",
     input
   );
+  if (Number(phase.grade) !== input.grade) {
+    await bumpPhasesRenumberedByGradeChange(client, phase, input.grade, input);
+  }
   return { ok: true, id: input.phaseId, revision: updated.rows[0].revision };
 }
 
@@ -342,17 +464,20 @@ export async function getHolisticPhasePlan(
   for (const row of rows) {
     if (row.state === "open") activeByGrade.set(Number(row.grade), Number(row.id));
   }
+  const numbered = withHolisticPhaseNumbers(
+    rows.map((row) => ({ ...row, grade: Number(row.grade) as 11 | 12 }))
+  );
 
   return {
     id: Number(plans[0].id),
     programId: Number(plans[0].program_id),
     academicYear: plans[0].academic_year,
     editable: academicYear === CURRENT_ACADEMIC_YEAR,
-    phases: rows.map((row, index) => ({
+    phases: numbered.map((row) => ({
       id: Number(row.id),
-      number: index + 1,
+      number: row.number,
       gradeId: Number(row.grade_id),
-      grade: Number(row.grade) as 11 | 12,
+      grade: row.grade,
       title: row.title,
       position: row.position,
       state: row.state,
@@ -361,7 +486,7 @@ export async function getHolisticPhasePlan(
       frozen: row.frozen_at !== null,
       everOpened: row.ever_opened,
       used: row.used,
-      active: activeByGrade.get(Number(row.grade)) === Number(row.id),
+      active: activeByGrade.get(row.grade) === Number(row.id),
       questions: questionRows
         .filter((question) => Number(question.phase_id) === Number(row.id))
         .map((question) => ({ ...question, id: Number(question.id) })),
@@ -390,6 +515,10 @@ export async function createHolisticPhasePlan(params: {
       );
       if (!source.rows[0]) return { ok: false, status: 404, error: "Prior Plan not found" };
       sourcePlanId = Number(source.rows[0].id);
+      const overfull = await overfullGrade(client, sourcePlanId);
+      if (overfull) return {
+        ok: false, status: 422, error: `The prior Plan has more than ${HOLISTIC_PHASES_PER_GRADE} Phases in Grade ${overfull}`,
+      };
     }
     const inserted = await client.query<{ id: number | string }>(
       `INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year, inserted_at, updated_at)
@@ -460,6 +589,9 @@ export async function addHolisticPhase(params: {
       params.programId,
     );
     if (!planId) return { ok: false, status: 404, error: "Plan not found" };
+    if (await gradeIsFull(client, planId, params.grade)) {
+      return { ok: false, status: 422, error: holisticGradeFullError(params.grade) };
+    }
     const inserted = await client.query<{ id: number | string; phase_plan_id: number | string }>(
       `INSERT INTO holistic_mentorship_phases
          (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision, inserted_at, updated_at)
@@ -640,12 +772,6 @@ async function deletePhaseTransaction(
   client: PoolClient,
   input: DeletePhaseInput
 ): Promise<PhasePlanResult> {
-  const planId = await lockPhasePlanForPhase(
-    client,
-    input.phaseId,
-    input.programId,
-  );
-  if (!planId) return { ok: false, status: 404, error: "Phase not found" };
   const checked = await checkedPhase(
     client,
     input.phaseId,
@@ -692,9 +818,11 @@ async function loadReorderPhases(
   client: PoolClient,
   academicYear: string,
   programId: number,
-): Promise<ReorderPhaseRow[]> {
-  const result = await client.query<ReorderPhaseRow>(
+): Promise<ReorderPlanRow[]> {
+  const result = await client.query<ReorderPlanRow>(
+    // Grade is a subquery so the shared grade row is not locked.
     `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.frozen_at,
+            (SELECT number FROM grade WHERE id = p.grade_id) AS grade,
             EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
                     WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
             EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
@@ -708,20 +836,30 @@ async function loadReorderPhases(
   return result.rows;
 }
 
+// A Phase's number depends on the Grades of the Phases before it (issue #516), so a
+// Phase that stays in place could still be renumbered by others moving past it.
+// Every position therefore keeps its Grade: Phases only trade places within a Grade,
+// so the place in its Grade of every position, and of every Phase that does not
+// move, stays the same. Revisions are checked first, so a stale page gets 409.
 function validateReorder(
-  rows: ReorderPhaseRow[],
+  rows: ReorderPlanRow[],
   requestedPhases: { id: number; expectedRevision: number }[]
 ): PhasePlanResult | null {
   if (!samePhaseSet(rows, requestedPhases)) {
     return { ok: false, status: 409, error: "Phase order changed" };
   }
   const byId = new Map(rows.map((row) => [Number(row.id), row]));
-  for (const [index, requested] of requestedPhases.entries()) {
-    const row = byId.get(requested.id);
-    const revisionError = reorderRevisionError(row, requested.expectedRevision);
+  for (const requested of requestedPhases) {
+    const revisionError = reorderRevisionError(byId.get(requested.id), requested.expectedRevision);
     if (revisionError) return revisionError;
-    if (row!.position === rows[index].position) continue;
-    if (immutablePhase(row!)) {
+  }
+  for (const [index, requested] of requestedPhases.entries()) {
+    const row = byId.get(requested.id)!;
+    if (row.position === rows[index].position) continue;
+    if (String(row.grade) !== String(rows[index].grade)) {
+      return { ok: false, status: 422, error: "Phases can be reordered only within their Grade" };
+    }
+    if (immutablePhase(row)) {
       return {
         ok: false,
         status: 422,

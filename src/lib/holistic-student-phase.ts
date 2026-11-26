@@ -7,6 +7,7 @@ import {
   knownHolisticChallengeCategories,
   type HolisticChallengeCategoryCode,
 } from "./holistic-challenge-categories";
+import { withHolisticPhaseNumbers } from "./holistic-phase-number";
 import {
   HOLISTIC_FOLLOW_UP_QUESTIONS,
   type HolisticFollowUpNote,
@@ -608,15 +609,16 @@ function groupNotes(rows: NotesRow[]): Map<number, PhaseNotes> {
   return grouped;
 }
 
+// Rows may span Academic Years (a continuing Grade 12 Mentee's prior-year Grade 11
+// Phases); each year's Plan is numbered on its own.
 function numberPhases(rows: PhaseRow[]): NumberedPhase[] {
-  return rows.map((row) => ({
-    ...row,
-    id: Number(row.id),
-    grade: Number(row.grade) as 11 | 12,
-    number: rows.filter((candidate) =>
-      candidate.academic_year === row.academic_year && candidate.position <= row.position
-    ).length,
-  }));
+  const typed = rows.map((row) => ({ ...row, id: Number(row.id), grade: Number(row.grade) as 11 | 12 }));
+  const years = [...new Set(typed.map((row) => row.academic_year))];
+  const numbered = years.flatMap((year) =>
+    withHolisticPhaseNumbers(typed.filter((row) => row.academic_year === year))
+  );
+  const byId = new Map(numbered.map((phase) => [phase.id, phase]));
+  return typed.map((row) => byId.get(row.id)!);
 }
 
 function progressByPhase(params: {

@@ -46,10 +46,13 @@ async function deletePhaseWithLater(laterPhase: Record<string, unknown>) {
   return { client, result };
 }
 
+// Phase update and state change lock the Plan row before the Phase row.
+const planLock = { rows: [{ id: "7" }] };
+
 describe("Holistic Phase Plans", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns stable numeric identities, dynamic Phase numbers, and Active per Grade", async () => {
+  it("returns stable numeric identities, per-Grade Phase numbers, and Active per Grade", async () => {
     mockQuery
       .mockResolvedValueOnce([{ id: "7", program_id: "1", academic_year: "2026-2027" }])
       .mockResolvedValueOnce([
@@ -66,14 +69,46 @@ describe("Holistic Phase Plans", () => {
       programId: 1,
       phases: [
         { id: 21, number: 1, gradeId: 11, grade: 11, active: false, questions: [{ id: 41 }] },
-        { id: 23, number: 2, active: false },
-        { id: 22, number: 3, active: true },
+        { id: 23, number: 4, active: false },
+        { id: 22, number: 2, active: true },
       ],
     });
   });
 
+  it("numbers the JNV CoE Plan from issue #516 as Grade 11 = 1, 2 and Grade 12 = 4, 5", async () => {
+    const phase = (id: string, grade: string, position: number) => ({
+      id, grade_id: grade, grade, title: `Phase ${id}`, position, state: "open", guidance_markdown: "Talk",
+      revision: 1, frozen_at: null, ever_opened: true, used: true,
+    });
+    mockQuery
+      .mockResolvedValueOnce([{ id: "1", program_id: "1", academic_year: "2026-2027" }])
+      .mockResolvedValueOnce([phase("1", "11", 1), phase("2", "12", 2), phase("15", "11", 3), phase("16", "12", 4)])
+      .mockResolvedValueOnce([]);
+
+    const plan = await getHolisticPhasePlan("2026-2027", 1);
+
+    expect(plan?.phases.map(({ id, grade, number }) => [id, grade, number])).toEqual([
+      [1, 11, 1], [2, 12, 4], [15, 11, 2], [16, 12, 5],
+    ]);
+  });
+
+  it("numbers Grade 12 from 4 even when it was created before Grade 11", async () => {
+    const phase = (id: string, grade: string, position: number) => ({
+      id, grade_id: grade, grade, title: `Phase ${id}`, position, state: "open", guidance_markdown: "Talk",
+      revision: 1, frozen_at: null, ever_opened: true, used: false,
+    });
+    mockQuery
+      .mockResolvedValueOnce([{ id: "5", program_id: "94", academic_year: "2026-2027" }])
+      .mockResolvedValueOnce([phase("9", "12", 1), phase("10", "11", 2)])
+      .mockResolvedValueOnce([]);
+
+    const plan = await getHolisticPhasePlan("2026-2027", 94);
+
+    expect(plan?.phases.map(({ id, number }) => [id, number])).toEqual([[9, 4], [10, 1]]);
+  });
+
   it("rejects a stale definition save with safe reload metadata", async () => {
-    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [{ id: "21", revision: 4 }] }) };
+    const client = { query: vi.fn().mockResolvedValueOnce(planLock).mockResolvedValueOnce({ rows: [{ id: "21", revision: 4 }] }) };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
     await expect(
@@ -94,14 +129,20 @@ describe("Holistic Phase Plans", () => {
   it("updates and audits the full definition of an opened but unused Phase after confirmation", async () => {
     const client = {
       query: vi.fn()
+        .mockResolvedValueOnce(planLock)
         .mockResolvedValueOnce({ rows: [{
-          id: "21", phase_plan_id: "7", position: 1, revision: 2, state: "open",
+          id: "21", phase_plan_id: "7", grade: "11", position: 1, revision: 2, state: "open",
           guidance_markdown: "Old Guidance", academic_year: "2026-2027", frozen_at: null,
           ever_opened: true, used: false,
         }] })
+        .mockResolvedValueOnce({ rows: [{ count: "2" }] })
+        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: "41" }] })
         .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
-        .mockResolvedValue({ rows: [] }),
+        // The later Phases it renumbers, returned out of Plan order.
+        .mockImplementation(async (sql: string) => String(sql).includes("SET revision = later.revision + 1")
+          ? { rows: [{ id: "22", position: 4 }, { id: "23", position: 2 }] }
+          : { rows: [] }),
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
@@ -117,14 +158,179 @@ describe("Holistic Phase Plans", () => {
       confirmed: true,
     })).resolves.toEqual({ ok: true, id: 21, revision: 3 });
 
-    expect(String(client.query.mock.calls[2][0])).not.toContain("CASE WHEN");
-    expect(client.query.mock.calls[2][1]).toEqual([21, 12, "New title", "New Guidance", 2]);
-    expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "definition_updated", 9, actor.actorEmail]);
+    // A Grade change: the target Grade is counted without this Phase, then later
+    // Phases of both Grades (11 and 12) are checked for one already opened or used.
+    expect(client.query.mock.calls[2][1]).toEqual([7, 12, 21]);
+    expect(client.query.mock.calls[3][1]).toEqual([7, 1, [11, 12]]);
+    expect(String(client.query.mock.calls[5][0])).not.toContain("CASE WHEN");
+    expect(client.query.mock.calls[5][1]).toEqual([21, 12, "New title", "New Guidance", 2]);
+    // The later Phases of both Grades are renumbered, so their revision moves too:
+    // an Admin acting on a page that shows the old number gets "Phase changed".
+    const renumberCalls = client.query.mock.calls
+      .filter(([sql]) => String(sql).includes("SET revision = later.revision + 1"));
+    expect(renumberCalls).toHaveLength(1);
+    const [renumberedSql, renumberedParams] = renumberCalls[0];
+    expect(String(renumberedSql)).toContain("later.position > $2");
+    expect(renumberedParams).toEqual([7, 1, [11, 12]]);
+    // The changed Phase's own audit row, then one "reordered" row per renumbered
+    // Phase in Plan order, with the same actor, as after a delete.
+    const auditArgs = client.query.mock.calls
+      .filter(([sql]) => String(sql).includes("phase_mutation_audits"))
+      .map(([, params]) => params);
+    expect(auditArgs).toEqual([
+      [7, 21, "definition_updated", 9, actor.actorEmail],
+      [7, 23, "reordered", 9, actor.actorEmail],
+      [7, 22, "reordered", 9, actor.actorEmail],
+    ]);
+  });
+
+  it("refuses to move a Phase into a Grade that already has 3 Phases, and changes nothing", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce(planLock)
+        .mockResolvedValueOnce({ rows: [{
+          id: "21", phase_plan_id: "7", grade: "11", position: 4, revision: 1, state: "locked",
+          guidance_markdown: "", academic_year: "2026-2027", frozen_at: null,
+          ever_opened: false, used: false,
+        }] })
+        .mockResolvedValueOnce({ rows: [{ count: "3" }] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(updateHolisticPhase({
+      programId: 1,
+      phaseId: 21,
+      expectedRevision: 1,
+      ...actor,
+      title: "Fourth",
+      grade: 12,
+      guidanceMarkdown: "",
+      questions: [{ text: "What next?" }],
+      confirmed: false,
+    })).resolves.toEqual({ ok: false, status: 422, error: "Grade 12 already has 3 Phases" });
+
+    expect(client.query).toHaveBeenCalledTimes(3);
+  });
+
+  // An opened or used Phase keeps its number: a Grade change before it would renumber it.
+  it("refuses a Grade change that would renumber a later opened Phase, and changes nothing", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce(planLock)
+        .mockResolvedValueOnce({ rows: [{
+          id: "21", phase_plan_id: "7", grade: "11", position: 2, revision: 1, state: "locked",
+          guidance_markdown: "", academic_year: "2026-2027", frozen_at: null,
+          ever_opened: false, used: false,
+        }] })
+        .mockResolvedValueOnce({ rows: [{ count: "1" }] })
+        .mockResolvedValueOnce({ rows: [{ "?column?": 1 }] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(updateHolisticPhase({
+      programId: 1,
+      phaseId: 21,
+      expectedRevision: 1,
+      ...actor,
+      title: "Moved",
+      grade: 12,
+      guidanceMarkdown: "",
+      questions: [{ text: "What next?" }],
+      confirmed: false,
+    })).resolves.toEqual({
+      ok: false, status: 422, error: "Changing the Grade would renumber an opened or used Phase",
+    });
+
+    const laterCheck = String(client.query.mock.calls[3][0]);
+    expect(laterCheck).toContain("later.position > $2");
+    expect(laterCheck).toContain("later.state <> 'locked'");
+    expect(laterCheck).toContain("later.frozen_at IS NOT NULL");
+    expect(laterCheck).toContain("t.to_state = 'open'");
+    expect(laterCheck).toContain("holistic_mentorship_post_session_notes");
+    expect(client.query.mock.calls[3][1]).toEqual([7, 2, [11, 12]]);
+    expect(client.query).toHaveBeenCalledTimes(4);
+  });
+
+  // A Plan that already holds more than 3 Phases in a Grade must stay editable.
+  it("saves a Phase that stays in its Grade without counting the Grade", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce(planLock)
+        .mockResolvedValueOnce({ rows: [{
+          id: "21", phase_plan_id: "7", grade: "11", position: 4, revision: 1, state: "locked",
+          guidance_markdown: "", academic_year: "2026-2027", frozen_at: null,
+          ever_opened: false, used: false,
+        }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ revision: 2 }] })
+        .mockResolvedValue({ rows: [] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(updateHolisticPhase({
+      programId: 1,
+      phaseId: 21,
+      expectedRevision: 1,
+      ...actor,
+      title: "Fourth Grade 11 Phase, renamed",
+      grade: 11,
+      guidanceMarkdown: "",
+      questions: [{ text: "What next?" }],
+      confirmed: false,
+    })).resolves.toEqual({ ok: true, id: 21, revision: 2 });
+
+    const statements = client.query.mock.calls.map(([sql]) => String(sql));
+    expect(statements.some((sql) => sql.includes("COUNT(*) AS count"))).toBe(false);
+    expect(statements.some((sql) => sql.includes("later.position"))).toBe(false);
+    expect(statements.some((sql) => sql.includes("revision = later.revision + 1"))).toBe(false);
+  });
+
+  // A Grade change updates the later Phases while it holds the Plan row, so a save
+  // or a state change that locked a Phase first could deadlock with it.
+  it("locks the Plan row before the Phase row on a definition save", async () => {
+    const client = { query: vi.fn().mockResolvedValueOnce(planLock).mockResolvedValueOnce({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    const result = await updateHolisticPhase({
+      programId: 1, phaseId: 21, expectedRevision: 2, ...actor,
+      title: "Belonging", grade: 11, guidanceMarkdown: "", questions: [{ text: "What matters?" }], confirmed: false,
+    });
+
+    const [planSql, planParams] = client.query.mock.calls[0];
+    expect(String(planSql)).toContain("FOR UPDATE OF plan");
+    expect(planParams).toEqual([21, 1]);
+    const [phaseSql] = client.query.mock.calls[1];
+    expect(String(phaseSql)).toContain("FOR UPDATE OF p");
+    expect(String(phaseSql)).not.toContain("FOR UPDATE OF plan");
+    expect(result).toEqual({ ok: false, status: 404, error: "Phase not found" });
+  });
+
+  it("locks the Plan row before the Phase row on a state change", async () => {
+    const client = { query: vi.fn().mockResolvedValueOnce(planLock).mockResolvedValueOnce({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await setHolisticPhaseState({ programId: 1, phaseId: 21, expectedRevision: 2, state: "open", ...actor, confirmed: true });
+
+    const [planSql] = client.query.mock.calls[0];
+    expect(String(planSql)).toContain("FOR UPDATE OF plan");
+    const [phaseSql] = client.query.mock.calls[1];
+    expect(String(phaseSql)).toContain("FOR UPDATE OF p");
+    expect(String(phaseSql)).not.toContain("FOR UPDATE OF plan");
+  });
+
+  it("is not found, and locks no Phase row, when the Phase is not in this Program", async () => {
+    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(setHolisticPhaseState({ programId: 1, phaseId: 21, expectedRevision: 2, state: "open", ...actor, confirmed: true }))
+      .resolves.toEqual({ ok: false, status: 404, error: "Phase not found" });
+    expect(client.query).toHaveBeenCalledOnce();
   });
 
   it("opens a complete Phase with more than four Questions", async () => {
     const client = {
       query: vi.fn()
+        .mockResolvedValueOnce(planLock)
         .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
         .mockResolvedValueOnce({ rows: [{ grade: "11", title: "Belonging", guidance_markdown: "Discuss goals", question_count: "5", valid_question_count: "5" }] })
         .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
@@ -134,12 +340,13 @@ describe("Holistic Phase Plans", () => {
 
     await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", ...actor, confirmed: true }))
       .resolves.toEqual({ ok: true, id: 21, revision: 3 });
-    expect(client.query.mock.calls[3][1]).toEqual([21, "locked", "open", 9, actor.actorEmail]);
+    expect(client.query.mock.calls[4][1]).toEqual([21, "locked", "open", 9, actor.actorEmail]);
   });
 
   it("does not open a Phase whose stored Question is blank", async () => {
     const client = {
       query: vi.fn()
+        .mockResolvedValueOnce(planLock)
         .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
         .mockResolvedValueOnce({ rows: [{ grade: "11", title: "Belonging", guidance_markdown: "Discuss goals", question_count: "1", valid_question_count: "0" }] }),
     };
@@ -147,12 +354,13 @@ describe("Holistic Phase Plans", () => {
 
     await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", ...actor, confirmed: true }))
       .resolves.toEqual({ ok: false, status: 422, error: "Complete Grade, title, Guidance, and Questions before opening" });
-    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   it("does not open a Phase with an unsupported Grade", async () => {
     const client = {
       query: vi.fn()
+        .mockResolvedValueOnce(planLock)
         .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
         .mockResolvedValueOnce({ rows: [{
           grade: "10", title: "Belonging", guidance_markdown: "Discuss goals",
@@ -180,8 +388,8 @@ describe("Holistic Phase Plans", () => {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "7" }] })
         .mockResolvedValueOnce({ rows: [
-          { id: "21", phase_plan_id: "7", position: 1, revision: 1, state: "locked", frozen_at: null, ever_opened: false, used: false },
-          { id: "22", phase_plan_id: "7", position: 2, revision: 2, state: "locked", frozen_at: null, ever_opened: false, used: false },
+          { id: "21", phase_plan_id: "7", grade: "11", position: 1, revision: 1, state: "locked", frozen_at: null, ever_opened: false, used: false },
+          { id: "22", phase_plan_id: "7", grade: "11", position: 2, revision: 2, state: "locked", frozen_at: null, ever_opened: false, used: false },
         ] })
         .mockResolvedValue({ rows: [] }),
     };
@@ -197,10 +405,83 @@ describe("Holistic Phase Plans", () => {
       .toHaveLength(2);
   });
 
+  // The server side of a same-Grade move: 22 swaps with 21 across the other Grade's
+  // Phase 31. Which Phases Phase Setup swaps is covered in PhasePlanSetup.test.tsx.
+  it("swaps two Phases around a Phase that keeps its position", async () => {
+    const row = (id: string, position: number, overrides = {}) => ({
+      id, phase_plan_id: "7", grade: "11", position, revision: 1, state: "locked", frozen_at: null,
+      ever_opened: false, used: false, ...overrides,
+    });
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+        .mockResolvedValueOnce({ rows: [
+          row("21", 1), row("31", 2, { grade: "12", state: "open", ever_opened: true, used: true }), row("22", 3),
+        ] })
+        .mockResolvedValue({ rows: [] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(reorderHolisticPhases({ programId: 1, academicYear: "2026-2027", ...actor, phases: [
+      { id: 22, expectedRevision: 1 }, { id: 31, expectedRevision: 1 }, { id: 21, expectedRevision: 1 },
+    ] })).resolves.toEqual({ ok: true });
+
+    const positionWrites = client.query.mock.calls
+      .filter(([sql]) => String(sql).includes("SET position = $2"))
+      .map(([, params]) => params);
+    expect(positionWrites).toEqual([[22, 1, 1], [21, 3, 1]]);
+    expect(client.query.mock.calls[2][1]).toEqual([[22, 21]]);
+  });
+
+  // A (Grade 11, Locked), B (Grade 11, Open), C (Grade 12, Locked) sent as C, B, A:
+  // B stays in place but would go from Phase 2 to Phase 1, so the order is refused.
+  it("refuses a reorder that moves a Phase into another Grade's position, and changes nothing", async () => {
+    const row = (id: string, grade: string, position: number, overrides = {}) => ({
+      id, phase_plan_id: "7", grade, position, revision: 1, state: "locked", frozen_at: null,
+      ever_opened: false, used: false, ...overrides,
+    });
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+        .mockResolvedValueOnce({ rows: [
+          row("21", "11", 1), row("22", "11", 2, { state: "open", ever_opened: true }), row("31", "12", 3),
+        ] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(reorderHolisticPhases({ programId: 1, academicYear: "2026-2027", ...actor, phases: [
+      { id: 31, expectedRevision: 1 }, { id: 22, expectedRevision: 1 }, { id: 21, expectedRevision: 1 },
+    ] })).resolves.toEqual({ ok: false, status: 422, error: "Phases can be reordered only within their Grade" });
+
+    // The Plan lock and the read: no position was written.
+    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(String(client.query.mock.calls[1][0])).toContain("(SELECT number FROM grade WHERE id = p.grade_id) AS grade");
+  });
+
+  // A stale page is told to reload before it is told the order is not allowed.
+  it("answers a stale reorder with 409 even when it also crosses a Grade", async () => {
+    const row = (id: string, grade: string, position: number, revision = 1) => ({
+      id, phase_plan_id: "7", grade, position, revision, state: "locked", frozen_at: null,
+      ever_opened: false, used: false,
+    });
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+        .mockResolvedValueOnce({ rows: [row("21", "11", 1), row("31", "12", 2), row("22", "11", 5, 2)] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(reorderHolisticPhases({ programId: 1, academicYear: "2026-2027", ...actor, phases: [
+      { id: 31, expectedRevision: 1 }, { id: 21, expectedRevision: 1 }, { id: 22, expectedRevision: 1 },
+    ] })).resolves.toEqual({ ok: false, status: 409, error: "Phase changed", currentRevision: 2 });
+    expect(client.query).toHaveBeenCalledTimes(2);
+  });
+
   it("copies only prior definitions into independent Locked Phases", async () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "5" }] })
+        .mockResolvedValueOnce({ rows: [] }) // no Grade of the prior Plan is over the limit
         .mockResolvedValueOnce({ rows: [{ id: "7" }] })
         .mockResolvedValueOnce({ rows: [{ old_id: "21", new_id: "31" }] })
         .mockResolvedValueOnce({ rows: [] }),
@@ -214,15 +495,39 @@ describe("Holistic Phase Plans", () => {
       ...actor,
     }))
       .resolves.toEqual({ ok: true, id: 7 });
-    expect(String(client.query.mock.calls[2][0])).toContain("'locked'");
-    expect(client.query.mock.calls[3][1]).toEqual([31, 21]);
-    expect(client.query.mock.calls[4][1]).toEqual([7, 31, "created", 9, actor.actorEmail]);
+    expect(client.query.mock.calls[1][1]).toEqual([5, 3]);
+    expect(String(client.query.mock.calls[3][0])).toContain("'locked'");
+    expect(client.query.mock.calls[4][1]).toEqual([31, 21]);
+    expect(client.query.mock.calls[5][1]).toEqual([7, 31, "created", 9, actor.actorEmail]);
+  });
+
+  // A Plan made before the limit: copying 4 Grade 11 Phases would show two "Phase 4".
+  it("refuses to copy a prior Plan with more than 3 Phases in a Grade, and creates nothing", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "5" }] })
+        .mockResolvedValueOnce({ rows: [{ grade: "11" }] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(createHolisticPhasePlan({
+      programId: 1,
+      academicYear: "2026-2027",
+      copyFromAcademicYear: "2025-2026",
+      ...actor,
+    })).resolves.toEqual({ ok: false, status: 422, error: "The prior Plan has more than 3 Phases in Grade 11" });
+
+    const [overLimitSql, overLimitParams] = client.query.mock.calls[1];
+    expect(String(overLimitSql)).toContain("HAVING COUNT(*) > $2");
+    expect(overLimitParams).toEqual([5, 3]);
+    expect(client.query).toHaveBeenCalledTimes(2);
   });
 
   it("audits a newly added Phase", async () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+        .mockResolvedValueOnce({ rows: [{ count: "2" }] })
         .mockResolvedValueOnce({ rows: [{ id: "21", phase_plan_id: "7" }] })
         .mockResolvedValue({ rows: [] }),
     };
@@ -233,8 +538,24 @@ describe("Holistic Phase Plans", () => {
 
     expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
     expect(client.query.mock.calls[0][1]).toEqual([1, "2026-2027"]);
-    expect(String(client.query.mock.calls[1][0])).toContain("MAX(position) + 1");
+    expect(client.query.mock.calls[1][1]).toEqual([7, 11, null]);
+    expect(String(client.query.mock.calls[2][0])).toContain("MAX(position) + 1");
     expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "created", 9, actor.actorEmail]);
+  });
+
+  it("refuses a 4th Phase in a Grade and inserts nothing", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+        .mockResolvedValueOnce({ rows: [{ count: "3" }] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(addHolisticPhase(newPhase))
+      .resolves.toEqual({ ok: false, status: 422, error: "Grade 11 already has 3 Phases" });
+
+    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO"))).toBe(false);
   });
 
   it("returns before calculating a Phase position when the locked Plan is missing", async () => {

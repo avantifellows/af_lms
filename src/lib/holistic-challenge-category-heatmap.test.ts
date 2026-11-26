@@ -22,8 +22,7 @@ const programManager: UserPermission = {
 const phaseRows = [
   { id: "70", position: 1, title: "Kick-off", state: "locked" },
   { id: "71", position: 2, title: "Check-in", state: "open" },
-  { id: "72", position: 3, title: "Review", state: "open" },
-  { id: "73", position: 4, title: "Wrap-up", state: "locked" },
+  { id: "72", position: 4, title: "Review", state: "open" },
 ];
 
 // Total rows (no School), School rows, and a hidden School, in database order.
@@ -109,9 +108,23 @@ describe("getHolisticChallengeCategoryHeatmap", () => {
       { id: 70, number: 1, title: "Kick-off", state: "locked" },
       { id: 71, number: 2, title: "Check-in", state: "open" },
       { id: 72, number: 3, title: "Review", state: "open" },
-      { id: 73, number: 4, title: "Wrap-up", state: "locked" },
     ]);
     expect(mockQuery.mock.calls[0][1]).toEqual([1, "2026-2027", 11]);
+  });
+
+  // Issue #516: Grade 12 Phases are numbered from 4, whatever their Plan positions.
+  it("numbers a Grade 12 heatmap's Phases 4 and 5", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (sql.includes("WITH heatmap_phases") ? gridRows : [
+      { id: "2", position: 2, title: "Better Stress Management", state: "open" },
+      { id: "16", position: 4, title: "Strategic Preparation", state: "locked" },
+    ]) as never);
+
+    const heatmap = await getHolisticChallengeCategoryHeatmap(filters({ grade: 12 }), admin);
+
+    expect(heatmap?.phases).toEqual([
+      { id: 2, number: 4, title: "Better Stress Management", state: "open" },
+      { id: 16, number: 5, title: "Strategic Preparation", state: "locked" },
+    ]);
   });
 
   it("defaults to All Phases when the Grade has no Open Phase", async () => {
