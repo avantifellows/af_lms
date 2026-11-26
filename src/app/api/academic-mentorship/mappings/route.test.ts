@@ -12,17 +12,6 @@ vi.mock("@/lib/db", () => ({
   withTransaction: vi.fn(),
 }));
 
-vi.mock("@/lib/permissions", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/permissions")>();
-  return {
-    ...actual,
-    getFeatureAccess: (permission: { read_only?: boolean } | null) => ({
-      access: permission?.read_only ? "view" : "edit",
-      canView: true,
-      canEdit: !permission?.read_only,
-    }),
-  };
-});
 
 import { query, withTransaction } from "@/lib/db";
 import { DELETE, GET, PATCH, POST } from "./route";
