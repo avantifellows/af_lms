@@ -241,18 +241,26 @@ describe("getFeatureAccess", () => {
     });
 
     it.each([
-      "teacher",
-      "program_manager",
-      "program_admin",
-      "holistic_mentorship_admin",
-      "admin",
-    ] as const)("disables academic mentorship for %s", (role) => {
+      ["teacher", "view"],
+      ["program_manager", "view"],
+      ["program_admin", "edit"],
+      ["admin", "edit"],
+      ["holistic_mentorship_admin", "none"],
+      ["blended_mentor", "none"],
+      ["blended_admin", "none"],
+      ["alumni_manager", "none"],
+    ] as const)("gives NVS-only %s %s access to academic mentorship", (role, access) => {
       const permission = makePermission({ role, program_ids: [PROGRAM_IDS.NVS] });
       expect(getFeatureAccess(permission, "academic_mentorship")).toEqual({
-        access: "none",
-        canView: false,
-        canEdit: false,
+        access,
+        canView: access !== "none",
+        canEdit: access === "edit",
       });
+    });
+
+    it("downgrades read_only admin to view on academic mentorship", () => {
+      const permission = makePermission({ role: "admin", read_only: true });
+      expect(getFeatureAccess(permission, "academic_mentorship").access).toBe("view");
     });
 
     it("gives admin edit on visits", () => {
