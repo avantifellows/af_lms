@@ -906,8 +906,10 @@ describe("AddUserModal — PMU roles", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
 
     await user.selectOptions(roleSelect, "pmu_manager");
+    // The option label is short enough to show in full once selected; the description carries the detail.
+    expect(screen.getByRole("option", { name: "PMU Manager - JNV NVS Schools" })).toHaveProperty("selected", true);
     expect(
-      screen.getByText("PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools")
+      screen.getByText("PMU Managers can view and manage JNV NVS students, view performance and view Test Attendance in their assigned JNV Schools")
     ).toBeInTheDocument();
     expect(screen.getByText("JNV NVS")).toBeInTheDocument();
     expect(screen.getByText(/PMU roles are pinned to the JNV NVS program/)).toBeInTheDocument();
@@ -915,7 +917,7 @@ describe("AddUserModal — PMU roles", () => {
 
     await user.selectOptions(roleSelect, "pmu_govt_school_user");
     expect(
-      screen.getByText("PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School")
+      screen.getByText("PMU Govt School Users can view and manage JNV NVS students, view performance and view Test Attendance in their one JNV School")
     ).toBeInTheDocument();
     expect(screen.getByText(/PMU roles are pinned to the JNV NVS program/)).toBeInTheDocument();
     expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();

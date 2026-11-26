@@ -14,7 +14,7 @@ edges:
     condition: for the testing stack (Vitest + RTL) specifics
   - target: context/permissions.md
     condition: when the component imports shared constants (use @/lib/constants, not @/lib/permissions)
-last_updated: 2026-10-27
+last_updated: 2026-11-18
 ---
 
 # Add a React Component
@@ -39,8 +39,11 @@ inputs (`RadioPair`, `RemarkField`, `FormLabel`). Test stack: Vitest + `@testing
 - **Constructor/`new`-able mocks** need `vi.fn(function(){ return {...} })`, not arrow functions.
 - **Variables used inside a `vi.mock()` factory** must be wrapped in `vi.hoisted()` (the factory is hoisted above `const`s).
 - **Fake timers + async rendering**: call `vi.useFakeTimers()` AFTER `await ServerComponent(props)` + `render(jsx)`; use `fireEvent` not `userEvent`, wrap advances in `act(async () => await vi.advanceTimersByTimeAsync(n))`; don't pair `waitFor` with fake timers.
+- **Fake timers + a client component that fetches on mount** (e.g. a polling tab): call `vi.useFakeTimers()` *before* `render`, so timers set after the first load are fake too; then don't use `findBy*` (it waits on the faked `setTimeout` and hangs). Instead flush with a small helper that loops `await act(async () => { await vi.advanceTimersByTimeAsync(0); })` a few times, and assert with `getBy*`. See `TestAttendanceTab.test.tsx` "refresh".
 - **Shared `ui/Modal`**: it already renders `role="dialog"` + `aria-modal="true"` on its root (callers pass `aria-labelledby` etc. straight to `<Modal>` — never nest another `role="dialog"` inside it), moves focus to the first focusable element (or the dialog itself) on open, traps Tab/Shift+Tab while it is the topmost open Modal, and restores focus to the opener on close.
 - **`ui/SearchableMultiSelect`** (#476): a button-opened, searchable checkbox list for multi-value filters — props `{ label, options: {value, label}[], selected, allLabel, pluralNoun, onChange }`. The button reads `allLabel`, the one selected label, or "n `pluralNoun`"; no chips. Selected options are listed first, in an order fixed when the list opens (so a ticked option doesn't jump). It wraps everything in `role="group"` named by `label`, so tests find it with `getByRole("group", { name })`, open it via its button, and tick native checkboxes. It is controlled: the caller owns `selected` and any URL writing. First used by the Visit Summary filter bar.
+- **`ui/SegmentedControl`**: an option `label` may be a node (the Test Attendance period strip's "live" pill); `hideLabel` keeps the group label for screen readers only (`aria-label` still names the group). Re-clicking the selected option does not call `onChange`.
+- **Phone card layout (style guide §15)**: render the cards in a `sm:hidden` list and the table in a `hidden sm:block` wrapper, as `src/app/visits/page.tsx` does. jsdom applies no CSS, so both are in the DOM in tests: scope queries to one (`within(getByRole("table", { name }))`, or `getByRole("list", { name })` for the cards), or `getByText` finds two. Playwright skips the hidden one. See `src/components/test-attendance/MonthPage.test.tsx`.
 - **GPS state machines** (visit forms): mock `@/lib/geolocation` (`getAccurateLocation`/`getAccuracyStatus`); hold the fetch promise open to observe intermediate states (see `src/components/visits/AGENTS.md`).
 
 ## Verify
