@@ -256,6 +256,16 @@ vi.mock("@/components/alumni/AlumniTab", () => ({
   ),
 }));
 
+// The real Test Attendance tab fetches on mount; its own tests cover it.
+vi.mock("@/components/test-attendance/TestAttendanceTab", () => ({
+  __esModule: true,
+  default: ({ schoolUdise }: { schoolUdise: string }) => (
+    <div data-testid="test-attendance-tab" data-school-udise={schoolUdise}>
+      TestAttendanceTab
+    </div>
+  ),
+}));
+
 vi.mock("@/components/EditStudentModal", () => ({
   __esModule: true,
   default: () => null,
@@ -1138,6 +1148,111 @@ describe("SchoolPage (server component)", () => {
       });
     },
   );
+
+  // Test Attendance tab (#517): NVS Schools only. Real matrix, so the
+  // `test_attendance` row decides the role part of the rule.
+  describe("Test Attendance tab", () => {
+    const listedStudent = () =>
+      makeStudent({ group_user_id: "gu-nvs", user_id: "u-nvs", grade: 11, student_program_ids: [64] });
+
+    // The outer tab ids in display order (content wrappers excluded).
+    const tabOrder = () =>
+      screen
+        .getAllByTestId(/^tab-/)
+        .map((element) => element.dataset.testid!)
+        .filter((id) => !id.startsWith("tab-content-"))
+        .map((id) => id.slice("tab-".length));
+
+    async function setupViewer(
+      role: string,
+      { schoolOverrides = {}, permissionOverrides = {}, students = [listedStudent()] }: {
+        schoolOverrides?: Record<string, unknown>;
+        permissionOverrides?: Record<string, unknown>;
+        students?: ReturnType<typeof makeStudent>[];
+      } = {},
+    ) {
+      setupAdminDefaults(schoolOverrides);
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+        "@/lib/permissions",
+      );
+      const pmu = role === "pmu_manager" || role === "pmu_govt_school_user";
+      mockGetUserPermission.mockResolvedValue(
+        makePermission({
+          role,
+          ...(pmu
+            ? { level: 1, school_codes: ["70705"], program_ids: [64] }
+            : { level: 3, school_codes: null, program_ids: [1, 64] }),
+          ...permissionOverrides,
+        }),
+      );
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+      if (pmu) mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+      mockProcessStudents.mockResolvedValue({ students, issues: [] });
+    }
+
+    describe.each([
+      ["admin", {}],
+      ["read_only admin", { read_only: true }],
+      ["pmu_manager", {}],
+      ["pmu_govt_school_user", {}],
+      ["read_only pmu_govt_school_user", { read_only: true }],
+    ] as const)("%s", (label, permissionOverrides) => {
+      const role = label.replace("read_only ", "");
+
+      it("shows Test Attendance right after Performance at a JNV School with NVS Students", async () => {
+        await setupViewer(role, { permissionOverrides });
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-test_attendance")).toHaveTextContent("Test Attendance");
+        const order = tabOrder();
+        expect(order[order.indexOf("performance") + 1]).toBe("test_attendance");
+        expect(screen.getByTestId("test-attendance-tab")).toHaveAttribute(
+          "data-school-udise",
+          "24120100101",
+        );
+      });
+    });
+
+    it.each(["teacher", "program_manager", "program_admin"])(
+      "is hidden for %s",
+      async (role) => {
+        await setupViewer(role);
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-test_attendance")).not.toBeInTheDocument();
+      },
+    );
+
+    it("is hidden at a non-JNV School", async () => {
+      await setupViewer("admin", {
+        schoolOverrides: { af_school_category: "Punjab CoE", centre_program_ids: [94] },
+      });
+
+      await renderPage();
+
+      expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-test_attendance")).not.toBeInTheDocument();
+    });
+
+    it("is hidden at a JNV School whose roster has no listed Student", async () => {
+      await setupViewer("admin", {
+        schoolOverrides: { centre_program_ids: [1, 64] },
+        students: [
+          makeStudent({ group_user_id: "gu-coe", user_id: "u-coe", program_id: 1, program_name: "JNV CoE", student_program_ids: [1] }),
+          makeStudent({ group_user_id: "gu-drop", user_id: "u-drop", status: "dropout", student_program_ids: [], dropout_program_ids: [64] }),
+          makeStudent({ group_user_id: "gu-13", user_id: "u-13", grade: 13, student_program_ids: [64] }),
+        ],
+      });
+
+      await renderPage();
+
+      expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-test_attendance")).not.toBeInTheDocument();
+    });
+  });
 
   // PR #376 review #1: the client only filters by the selected card, so the
   // server must hand a PMU user nothing but NVS Students (and their issues).
