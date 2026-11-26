@@ -55,7 +55,7 @@ function str(v: unknown): string {
  * its 63-character identifier limit. College/branch columns hold college.id /
  * branch.id in the table but codes (C-xxxx / branch_id) in the form.
  */
-const ALUMNI_DB_COLUMN: Record<string, string> = Object.fromEntries(
+export const ALUMNI_DB_COLUMN: Record<string, string> = Object.fromEntries(
   ALUMNI_FIELDS.map((f) => [f.column, f.column.slice(0, 63)]),
 );
 export const CODE_COLUMNS = {
@@ -159,41 +159,57 @@ export async function getAlumnusContext(alumniId: string): Promise<EntryContext 
   return context?.kind === "edit" && context.ids.alumniId === alumniId ? context : null;
 }
 
-/** The student's alumni row (latest if somehow more than one), with college/branch as codes. */
-async function loadAlumni(studentPk: string) {
-  const [r] = await query<Record<string, unknown>>(
-    `SELECT a.*, a.updated_at::text AS row_version,
-       cu.college_id AS college_code_ug, cu.name AS college_name_ug,
-       cp.college_id AS college_code_pg, cp.name AS college_name_pg,
-       bu.branch_id AS branch_code_ug, bu.name AS branch_name_ug,
-       bp.branch_id AS branch_code_pg, bp.name AS branch_name_pg
-     FROM alumni a
-     LEFT JOIN college cu ON cu.id = a.college_id_ug
-     LEFT JOIN college cp ON cp.id = a.college_id_pg
-     LEFT JOIN branch bu ON bu.id = a.branch_id_ug
-     LEFT JOIN branch bp ON bp.id = a.branch_id_pg
-     WHERE a.student_id = $1
-     ORDER BY a.updated_at DESC NULLS LAST, a.id DESC
-     LIMIT 1`,
-    [studentPk],
-  );
-  if (!r) return null;
-
+/**
+ * An alumni table row (`a.*` plus college_code_ug/pg and branch_code_ug/pg)
+ * as the form's values: full column names, college/branch as codes.
+ */
+export function alumniValues(r: Record<string, unknown>): Values {
   const alumni: Values = {};
   for (const [formCol, dbCol] of Object.entries(ALUMNI_DB_COLUMN)) alumni[formCol] = str(r[dbCol]);
   for (const level of ["ug", "pg"]) {
     alumni[`college_id_${level}`] = str(r[`college_code_${level}`]);
     alumni[`branch_id_${level}`] = str(r[`branch_code_${level}`]);
   }
-  return {
-    alumniId: str(r.id),
-    version: str(r.row_version),
-    alumni,
-    codeNames: {
-      college_id_ug: str(r.college_name_ug), college_id_pg: str(r.college_name_pg),
-      branch_id_ug: str(r.branch_name_ug), branch_id_pg: str(r.branch_name_pg),
-    },
-  };
+  return alumni;
+}
+
+/** Alumni rows with their college/branch codes and names (`alumniValues` reads the codes). */
+const ALUMNI_WITH_CODES = `
+  SELECT a.*, a.updated_at::text AS row_version,
+    cu.college_id AS college_code_ug, cu.name AS college_name_ug,
+    cp.college_id AS college_code_pg, cp.name AS college_name_pg,
+    bu.branch_id AS branch_code_ug, bu.name AS branch_name_ug,
+    bp.branch_id AS branch_code_pg, bp.name AS branch_name_pg
+  FROM alumni a
+  LEFT JOIN college cu ON cu.id = a.college_id_ug
+  LEFT JOIN college cp ON cp.id = a.college_id_pg
+  LEFT JOIN branch bu ON bu.id = a.branch_id_ug
+  LEFT JOIN branch bp ON bp.id = a.branch_id_pg`;
+
+/** Display names for the college/branch codes of one row from ALUMNI_WITH_CODES. */
+const codeNamesOf = (r: Record<string, unknown>): Record<string, string> => ({
+  college_id_ug: str(r.college_name_ug), college_id_pg: str(r.college_name_pg),
+  branch_id_ug: str(r.branch_name_ug), branch_id_pg: str(r.branch_name_pg),
+});
+
+/** The student's alumni row (latest if somehow more than one), with college/branch as codes. */
+async function loadAlumni(studentPk: string) {
+  const [r] = await query<Record<string, unknown>>(
+    `${ALUMNI_WITH_CODES}
+     WHERE a.student_id = $1
+     ORDER BY a.updated_at DESC NULLS LAST, a.id DESC
+     LIMIT 1`,
+    [studentPk],
+  );
+  if (!r) return null;
+  return { alumniId: str(r.id), version: str(r.row_version), alumni: alumniValues(r), codeNames: codeNamesOf(r) };
+}
+
+/** Several alumni records by alumni.id: their answers (codes for college/branch) and code names. */
+export async function loadAlumniRecords(alumniIds: string[]): Promise<Map<string, { alumni: Values; codeNames: Record<string, string> }>> {
+  if (!alumniIds.length) return new Map();
+  const rows = await query<Record<string, unknown>>(`${ALUMNI_WITH_CODES} WHERE a.id = ANY($1::bigint[])`, [alumniIds]);
+  return new Map(rows.map((r) => [str(r.id), { alumni: alumniValues(r), codeNames: codeNamesOf(r) }]));
 }
 
 /** Program, school and cohort year for an existing alumnus: their most recent ones. */

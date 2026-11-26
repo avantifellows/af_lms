@@ -59,12 +59,12 @@ export default function FindAlumnus() {
   const [q, setQ] = useState("");
   const state = useFind(q);
   return (
-    <section className="mb-6 rounded-lg bg-white p-4 shadow">
-      <label htmlFor="find-alumnus" className="mb-2 block text-sm font-medium text-gray-900">
+    <section className="mb-6 rounded-xl border border-border bg-bg-card p-4 shadow-sm">
+      <label htmlFor="find-alumnus" className="mb-2 block text-sm font-bold uppercase tracking-wide text-text-primary">
         Find an alumnus
       </label>
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" aria-hidden />
         <input
           id="find-alumnus"
           type="search"
@@ -73,7 +73,7 @@ export default function FindAlumnus() {
           placeholder="Name or AFID"
           autoComplete="off"
           maxLength={MAX_LENGTH}
-          className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none"
+          className="w-full rounded-md border border-border bg-bg-card py-2 pl-9 pr-3 text-sm text-text-primary focus:border-accent focus:outline-none"
         />
       </div>
       <Results state={state} />
@@ -83,22 +83,22 @@ export default function FindAlumnus() {
 
 function Results({ state }: { state: State }) {
   if (state.kind === "idle") return null;
-  if (state.kind === "loading") return <p className="mt-3 text-sm text-gray-500">Searching…</p>;
-  if (state.kind === "error") return <p className="mt-3 text-sm text-red-600">{state.message}</p>;
-  if (!state.results.length) return <p className="mt-3 text-sm text-gray-500">No alumni found.</p>;
+  if (state.kind === "loading") return <p className="mt-3 text-sm text-text-muted">Searching…</p>;
+  if (state.kind === "error") return <p className="mt-3 text-sm text-danger">{state.message}</p>;
+  if (!state.results.length) return <p className="mt-3 text-sm text-text-muted">No alumni found.</p>;
   return (
-    <ul className="mt-3 divide-y divide-gray-100" aria-label="Alumni found">
+    <ul className="mt-3 divide-y divide-border" aria-label="Alumni found">
       {state.results.map((a) => (
         <li key={a.alumniId}>
           <Link
             href={`/alumni/record/${encodeURIComponent(a.alumniId)}`}
-            className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 hover:bg-gray-50"
+            className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 hover:bg-hover-bg"
           >
             <span>
-              <span className="font-medium text-gray-900">{a.name}</span>
-              {a.afid && <span className="ml-2 font-mono text-xs text-gray-500">{a.afid}</span>}
+              <span className="font-medium text-text-primary">{a.name}</span>
+              {a.afid && <span className="ml-2 font-mono text-xs text-text-muted">{a.afid}</span>}
             </span>
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-text-secondary">
               {a.schoolName || "No school on record"}
               {a.cohortYear && ` · cohort ${a.cohortYear}`}
             </span>
