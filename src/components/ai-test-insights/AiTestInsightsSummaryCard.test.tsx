@@ -898,3 +898,191 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
     ]);
   });
 });
+
+describe("AiTestInsightsSummaryCard Generate again", () => {
+  // The Student already has an AI Summary of Mock Test 1 and Major Test 2
+  // (#567). The same tests again ask to confirm; other tests do not.
+  const SUMMARY_URL = "/api/ai-test-insights/students/1001/requests/key-1/summary";
+  const MARKDOWN = "## Where Asha stands\n\n- Physics is improving\n";
+  const CONFIRM_TEXT =
+    "This keeps the earlier AI Summary and writes a new one for these tests. It takes about 4 minutes.";
+  const EXISTS_NOTE = "An AI Summary for these tests already exists";
+
+  const completed = (overrides: Partial<InsightRequestView> = {}): InsightRequestView => ({
+    requestKey: "key-1",
+    state: "completed",
+    outcomeCode: null,
+    selectedTestIds: ["T9", "T4"],
+    requestedAt: "2026-11-27T05:30:00Z",
+    requestedByName: "Asha Teacher",
+    finishedAt: "2026-11-27T05:34:10Z",
+    ...overrides,
+  });
+  const queued = (overrides: Partial<InsightRequestView> = {}): InsightRequestView => ({
+    requestKey: "key-2",
+    state: "queued",
+    outcomeCode: null,
+    selectedTestIds: ["T9", "T4"],
+    requestedAt: new Date().toISOString(),
+    requestedByName: "Asha Teacher",
+    finishedAt: null,
+    ...overrides,
+  });
+
+  /** The summary route answers the text; the create route answers `post`. */
+  function answer(post: { status: number; json: unknown }) {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>((url, init) =>
+      Promise.resolve(
+        init?.method === "POST"
+          ? { ok: post.status < 300, status: post.status, json: () => Promise.resolve(post.json) }
+          : url.endsWith("/summary")
+            ? { ok: true, status: 200, json: () => Promise.resolve({ markdown: MARKDOWN }) }
+            : new Promise(() => {}),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  const posts = (fetchMock: ReturnType<typeof answer>) =>
+    fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([url, init]) => [url, JSON.parse(String(init?.body))]);
+
+  function renderWith(initialRequest: InsightRequestView | null, canEdit = true) {
+    return render(
+      <AiTestInsightsSummaryCard
+        tests={{ status: "loaded", tests: TESTS }}
+        canEdit={canEdit}
+        onRetry={() => {}}
+        requestsUrl={URL}
+        initialRequest={initialRequest}
+      />,
+    );
+  }
+
+  const button = (name: string) => within(card()).queryByRole("button", { name });
+  const dialog = () => screen.queryByRole("dialog", { name: "Generate again?" });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads Generate again while the ticked tests are the shown AI Summary's tests", async () => {
+    const user = userEvent.setup();
+    answer({ status: 201, json: {} });
+    renderWith(completed());
+
+    expect(button("Generate")).toBeInTheDocument();
+    await user.click(box(/Major Test 2/));
+    expect(button("Generate again")).toBeInTheDocument();
+    expect(button("Generate")).not.toBeInTheDocument();
+
+    await user.click(box(/Full Syllabus Test 1/));
+    expect(button("Generate")).toBeInTheDocument();
+    await user.click(box(/Full Syllabus Test 1/));
+    expect(button("Generate again")).toBeInTheDocument();
+  });
+
+  it("reads Generate for the same tests when the shown request did not complete", async () => {
+    const user = userEvent.setup();
+    answer({ status: 201, json: {} });
+    renderWith(completed({ state: "failed", outcomeCode: "interrupted" }));
+
+    await user.click(box(/Major Test 2/));
+    expect(button("Generate")).toBeInTheDocument();
+    expect(button("Generate again")).not.toBeInTheDocument();
+  });
+
+  it("asks to confirm: it keeps the earlier AI Summary, writes a new one and takes about 4 minutes", async () => {
+    const user = userEvent.setup();
+    answer({ status: 201, json: {} });
+    renderWith(completed());
+
+    await user.click(box(/Major Test 2/));
+    await user.click(button("Generate again")!);
+
+    expect(dialog()).toBeInTheDocument();
+    expect(within(dialog()!).getByText(CONFIRM_TEXT)).toBeInTheDocument();
+  });
+
+  it("Cancel closes the confirmation and sends nothing", async () => {
+    const user = userEvent.setup();
+    const fetchMock = answer({ status: 201, json: {} });
+    renderWith(completed());
+
+    await user.click(box(/Major Test 2/));
+    await user.click(button("Generate again")!);
+    await user.click(within(dialog()!).getByRole("button", { name: "Cancel" }));
+
+    expect(dialog()).not.toBeInTheDocument();
+    expect(posts(fetchMock)).toEqual([]);
+    expect(within(card()).getByRole("article", { name: "AI Summary text" })).toBeInTheDocument();
+  });
+
+  it("Confirm sends the same tests with generateAgain and shows the new request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = answer({ status: 201, json: { outcome: "created", request: queued() } });
+    renderWith(completed());
+
+    await user.click(box(/Major Test 2/));
+    await user.click(button("Generate again")!);
+    await user.click(within(dialog()!).getByRole("button", { name: "Generate again" }));
+
+    expect(posts(fetchMock)).toEqual([[URL, { selectedTestIds: ["T9", "T4"], generateAgain: true }]]);
+    expect(dialog()).not.toBeInTheDocument();
+    expect(
+      await within(card()).findByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
+    ).toBeInTheDocument();
+  });
+
+  it("sends other tests with no confirmation and no generateAgain", async () => {
+    const user = userEvent.setup();
+    const fetchMock = answer({ status: 201, json: { outcome: "created", request: queued({ selectedTestIds: ["T9"] }) } });
+    renderWith(completed());
+
+    await user.click(button("Generate")!);
+
+    expect(dialog()).not.toBeInTheDocument();
+    expect(posts(fetchMock)).toEqual([[URL, { selectedTestIds: ["T9"] }]]);
+  });
+
+  it("shows an existing answer's AI Summary with a note, and offers Generate again", async () => {
+    const user = userEvent.setup();
+    const fetchMock = answer({ status: 200, json: { outcome: "existing", request: completed() } });
+    renderWith(null);
+
+    await user.click(box(/Major Test 2/));
+    await user.click(button("Generate")!);
+
+    expect(await within(card()).findByText(EXISTS_NOTE)).toBeInTheDocument();
+    expect(await within(card()).findByRole("article", { name: "AI Summary text" })).toHaveTextContent("Where Asha stands");
+    expect(button("Generate again")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([URL, SUMMARY_URL]);
+  });
+
+  it("drops the note once the Teacher generates again", async () => {
+    const user = userEvent.setup();
+    const fetchMock = answer({ status: 200, json: { outcome: "existing", request: completed() } });
+    renderWith(null);
+
+    await user.click(box(/Major Test 2/));
+    await user.click(button("Generate")!);
+    await within(card()).findByText(EXISTS_NOTE);
+    fetchMock.mockImplementation(() =>
+      Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ outcome: "created", request: queued() }) }),
+    );
+    await user.click(button("Generate again")!);
+    await user.click(within(dialog()!).getByRole("button", { name: "Generate again" }));
+
+    await within(card()).findByText("Waiting to start. This can take about 2 minutes if the server was asleep.");
+    expect(within(card()).queryByText(EXISTS_NOTE)).not.toBeInTheDocument();
+  });
+
+  it("shows a viewer no Generate again", async () => {
+    answer({ status: 201, json: {} });
+    renderWith(completed({ selectedTestIds: ["T9"] }), false);
+
+    await within(card()).findByRole("article", { name: "AI Summary text" });
+    expect(ticked()).toEqual(["T9"]);
+    expect(button("Generate again")).not.toBeInTheDocument();
+    expect(button("Generate")).not.toBeInTheDocument();
+  });
+});

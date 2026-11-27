@@ -135,6 +135,24 @@ async function inProgressRequest(studentId: number): Promise<InsightRequestView 
 }
 
 /**
+ * The Student's newest `completed` request of exactly these tests (jsonb
+ * equality: the same ids in the same order, which is always newest first),
+ * if any.
+ */
+async function completedRequestOfTests(studentId: number, selectedTestIds: string[]): Promise<InsightRequestView | null> {
+  const rows = await query<RequestRow>(
+    `SELECT ${VIEW_COLUMNS}
+     FROM ai_test_insight_requests r
+     JOIN "user" u ON u.id = r.requested_by_user_id
+     WHERE r.student_id = $1 AND r.state = 'completed' AND r.selected_test_ids = $2::jsonb
+     ORDER BY r.requested_at DESC, r.id DESC
+     LIMIT 1`,
+    [studentId, JSON.stringify(selectedTestIds)],
+  );
+  return rows[0] ? toView(rows[0]) : null;
+}
+
+/**
  * The actor's User: the permission's linked User, otherwise the lowest-id
  * User with the same email (case-insensitive), as the existing actor lookup
  * does. Null when there is neither.
@@ -151,6 +169,7 @@ export async function resolveActorUserId(actor: { email: string; linkedUserId: n
 export type CreateRequestResult =
   | { outcome: "created"; request: InsightRequestView }
   | { outcome: "already_running"; request: InsightRequestView }
+  | { outcome: "existing"; request: InsightRequestView }
   | { outcome: "not_configured" };
 
 function isActiveStudentConflict(error: unknown): boolean {
@@ -160,12 +179,14 @@ function isActiveStudentConflict(error: unknown): boolean {
 
 /**
  * Asks for an AI Summary of the Student's ticked tests. The PRD's steps, in
- * order (step 2 arrives with a later slice):
+ * order:
  *
  * 1. A fresh (not stalled) `queued` or `running` request exists for the
  *    Student: `already_running` with it.
- * 2. (Later: a `completed` request with the same tests and no `generateAgain`
- *    returns `existing`.)
+ * 2. A `completed` request of the Student with the same `selected_test_ids`
+ *    (jsonb equality) exists and `generateAgain` is not true: `existing` with
+ *    the newest such request, and nothing is written. With `generateAgain` a
+ *    new request is made and the earlier one is left as it is.
  * 3. Generation is not configured (`@/lib/ai-test-insights-delivery`):
  *    `not_configured`, and nothing is written.
  * 4. In one transaction, close the Student's stalled request (`failed`,
@@ -181,15 +202,21 @@ export async function createRequest(params: {
   actorUserId: number;
   /** Newest first, as the picker sent them. */
   selectedTestIds: string[];
-  /** Accepted; has no effect until the "same tests" step exists. */
+  /** Make a new request even when a completed one of the same tests exists. */
   generateAgain?: boolean;
 }): Promise<CreateRequestResult> {
-  const { student, actorUserId, selectedTestIds } = params;
+  const { student, actorUserId, selectedTestIds, generateAgain } = params;
 
   // 1. One running request per Student. A stalled one reads `failed`, so it
   //    does not count.
   const running = await inProgressRequest(student.studentId);
   if (running && isInsightRequestInProgress(running)) return { outcome: "already_running", request: running };
+
+  // 2. The same tests already have an AI Summary: show it, unless asked again.
+  if (generateAgain !== true) {
+    const existing = await completedRequestOfTests(student.studentId, selectedTestIds);
+    if (existing) return { outcome: "existing", request: existing };
+  }
 
   // 3. Generation must be configured before anything is written.
   const delivery = aiTestInsightsDeliverySettings();

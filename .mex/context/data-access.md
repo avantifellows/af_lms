@@ -1026,7 +1026,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `selectedTestIds`, `requestedAt` / `finishedAt` (`to_char(… 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`, so
   no layer reads the UTC `timestamp(0)` as local time) and `requestedByName` (the requester
   `user`'s name, else their email). `createRequest` keeps the PRD's step order in comments: (1) a
-  `queued`/`running` request → `already_running` with it; (2, 3: later) same tests / not
+  `queued`/`running` request → `already_running` with it; (2) same tests (#567, below); (3) not
   configured; (4) `withTransaction`: close a stalled request (#566), then insert — a `23505` on
   `ati_requests_active_student_unique` returns `already_running` with the winner; (5: later)
   deliver. The insert writes a server `randomUUID()` key, the Student context's `school.id` and
@@ -1038,6 +1038,18 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `getAcademicMentorshipActorUserId`); neither → 409 `no_linked_user`. The Student page reads
   `latestRequest` on the server (no "page data" route). E2E: `readInsightRequests` and
   `markInsightRequestRunning` in `e2e/helpers/ai-test-insights-fixtures.ts`.
+- **Same tests again (#567):** step 2 of `createRequest`, after the already-running check and
+  before the not-configured check: unless the body says `generateAgain: true`, it reads the
+  Student's newest `completed` request `WHERE student_id = $1 AND state = 'completed' AND
+  selected_test_ids = $2::jsonb` (jsonb equality, so the same ids in the same order; the picker
+  always sends newest first) `ORDER BY requested_at DESC, id DESC LIMIT 1`, and if there is one
+  returns `existing` with it — route 200 `{ outcome: "existing", request }`, nothing written, no
+  wake or enqueue, even where generation is not configured. `no_data` and `failed` rows never
+  count. With `generateAgain: true` the step is skipped and a new row is inserted; the earlier
+  completed row is not touched. On the card, Generate reads "Generate again" while the ticked set
+  equals the shown `completed` request's set and opens a confirmation (`Modal`, "Generate again?")
+  first; an `existing` answer shows that request with "An AI Summary for these tests already
+  exists". E2E "AI Summary" uses a second, stale tab of the Teacher to get an `existing` answer.
 - **Stall rule (#566):** a `queued` or `running` request whose `requested_at` is 20 minutes old or
   more is shown as `failed` with `outcomeCode: "timed_out"`. The rule lives in one place,
   `insightRequestAsShown(view, nowUtc)` in `src/lib/ai-test-insights-requests.ts`, and `toView`

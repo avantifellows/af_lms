@@ -83,6 +83,8 @@ const viewRow = (overrides: Record<string, unknown> = {}) => ({
 let permissionRow: Record<string, unknown> | null;
 let usersByEmail: Array<Record<string, unknown>>;
 let openRequest: Record<string, unknown> | null;
+/** Student 1001's ended requests, newest first, as Postgres holds them. */
+let endedRequests: Array<Record<string, unknown>>;
 /** The requests the route inserted, by request key, as Postgres holds them. */
 let stored: Map<string, Record<string, unknown>>;
 
@@ -145,6 +147,7 @@ beforeEach(() => {
   permissionRow = row("teacher");
   usersByEmail = [];
   openRequest = null;
+  endedRequests = [];
   stored = new Map();
   mockGetServerSession.mockResolvedValue({ user: { email } });
   mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
@@ -159,6 +162,16 @@ beforeEach(() => {
       if (!target || (guarded && target.state !== "queued")) return [];
       Object.assign(target, { state: "failed", outcome_code: "enqueue_rejected", finished_at: "2026-11-27T05:30:02Z" });
       return [target];
+    }
+    if (sql.includes("ai_test_insight_requests") && sql.includes("r.selected_test_ids = $2::jsonb")) {
+      // Postgres applies the state filter and compares the two jsonb arrays:
+      // the same ids in the same order. The newest match first.
+      const onlyCompleted = sql.includes("r.state = 'completed'");
+      const matches = endedRequests.filter(
+        (request) =>
+          (!onlyCompleted || request.state === "completed") && JSON.stringify(request.selected_test_ids) === params[1],
+      );
+      return params[0] === 1001 ? matches.slice(0, 1) : [];
     }
     if (sql.includes("ai_test_insight_requests") && sql.includes("r.request_key = $2")) {
       const found = stored.get(String(params[1]));
@@ -234,11 +247,133 @@ describe("POST /api/ai-test-insights/students/[studentId]/requests", () => {
     expect(first).not.toBe(second);
   });
 
-  it("generateAgain is accepted and changes nothing yet", async () => {
-    const response = await post("1001", { selectedTestIds: ["T9"], generateAgain: true });
+  describe("the same tests again", () => {
+    // Student 1001 already has a finished AI Summary of T9 and T4.
+    const done = (overrides: Record<string, unknown> = {}) =>
+      viewRow({
+        request_key: "done-key",
+        state: "completed",
+        selected_test_ids: ["T9", "T4"],
+        finished_at: "2026-11-27T05:34:10Z",
+        ...overrides,
+      });
 
-    expect(response.status).toBe(201);
-    expect(inserts()).toHaveLength(1);
+    it("answers 200 existing with the completed request of the same tests, writing nothing and calling nothing", async () => {
+      endedRequests = [done()];
+
+      const response = await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        outcome: "existing",
+        request: {
+          requestKey: "done-key",
+          state: "completed",
+          outcomeCode: null,
+          selectedTestIds: ["T9", "T4"],
+          requestedAt: "2026-11-27T05:30:00Z",
+          requestedByName: "Asha Teacher",
+          finishedAt: "2026-11-27T05:34:10Z",
+        },
+      });
+      expect(inserts()).toHaveLength(0);
+      expect(mockClientQuery).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("looks for the Student's newest completed request with exactly these ids", async () => {
+      endedRequests = [done()];
+
+      await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+      const [[sql, params]] = mockQuery.mock.calls.filter(([text]) => String(text).includes("r.selected_test_ids = $2::jsonb"));
+      expect(params).toEqual([1001, '["T9","T4"]']);
+      expect(sql).toContain("r.state = 'completed'");
+      expect(sql).toMatch(/ORDER BY r\.requested_at DESC, r\.id DESC\s+LIMIT 1/);
+    });
+
+    it("records a new request with generateAgain, leaving the earlier one as it was", async () => {
+      endedRequests = [done()];
+
+      const response = await post("1001", { selectedTestIds: ["T9", "T4"], generateAgain: true });
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.outcome).toBe("created");
+      expect(body.request.requestKey).not.toBe("done-key");
+      expect(inserts()).toHaveLength(1);
+      expect(enqueueCalls()).toHaveLength(1);
+      // Nothing touched the earlier request.
+      const updates = [...mockQuery.mock.calls, ...mockClientQuery.mock.calls].filter(([sql]) =>
+        /UPDATE ai_test_insight_requests/.test(String(sql)),
+      );
+      for (const [sql] of updates) expect(sql).toContain("state IN ('queued', 'running')");
+      expect(endedRequests[0]).toMatchObject({ request_key: "done-key", state: "completed" });
+    });
+
+    it("does not look for an existing request with generateAgain", async () => {
+      endedRequests = [done()];
+
+      await post("1001", { selectedTestIds: ["T9", "T4"], generateAgain: true });
+
+      expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes("r.selected_test_ids = $2::jsonb"))).toBe(false);
+    });
+
+    it.each([
+      ["a different set", ["T9"]],
+      ["one more test", ["T9", "T7", "T4"]],
+    ])("records a new request for %s of tests", async (_label, selectedTestIds) => {
+      endedRequests = [done()];
+
+      const response = await post("1001", { selectedTestIds });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).outcome).toBe("created");
+      expect(inserts()).toHaveLength(1);
+    });
+
+    it.each([
+      ["no_data", "missing_category_for_cutoff"],
+      ["failed", "interrupted"],
+    ])("does not count a %s request of the same tests as existing", async (state, outcomeCode) => {
+      endedRequests = [done({ request_key: "ended-key", state, outcome_code: outcomeCode })];
+
+      const response = await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).outcome).toBe("created");
+      expect(inserts()).toHaveLength(1);
+    });
+
+    it("answers already_running before existing", async () => {
+      endedRequests = [done()];
+      openRequest = viewRow({ request_key: "running-key", state: "running", selected_test_ids: ["T9", "T4"] });
+
+      const response = await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ outcome: "already_running", request: { requestKey: "running-key" } });
+    });
+
+    it("answers existing even when generation is not configured", async () => {
+      configureDelivery({ AI_TEST_INSIGHTS_ENQUEUE_URL: "" });
+      endedRequests = [done()];
+
+      const response = await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ outcome: "existing", request: { requestKey: "done-key" } });
+    });
+
+    it("still answers not_configured for the same tests with generateAgain", async () => {
+      configureDelivery({ AI_TEST_INSIGHTS_ENQUEUE_URL: "" });
+      endedRequests = [done()];
+
+      const response = await post("1001", { selectedTestIds: ["T9", "T4"], generateAgain: true });
+
+      expect(response.status).toBe(503);
+      expect(inserts()).toHaveLength(0);
+    });
   });
 
   describe("the actor's User", () => {

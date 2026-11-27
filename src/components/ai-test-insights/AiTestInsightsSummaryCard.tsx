@@ -43,10 +43,20 @@
 // It also offers "Download PDF" (#565): a link to the PDF route, which
 // answers with the PDF the generator made. The link stays whether the text
 // loads, is loading or failed. Viewers download it too.
+//
+// The same tests again (#567): while the ticked tests are the shown
+// completed request's tests, Generate reads "Generate again" and opens a
+// confirmation (it keeps the earlier AI Summary, writes a new one and takes
+// about 4 minutes); Cancel sends nothing, Confirm sends `generateAgain: true`.
+// Other tests are sent with no confirmation. When the create route answers
+// `existing` (a completed request of these tests is already there), the card
+// shows that request with the note "An AI Summary for these tests already
+// exists", and the ticked tests now match it, so "Generate again" is offered.
+// Viewers never see Generate or "Generate again".
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import TestInsightText from "@/components/ai-test-insights/TestInsightText";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Modal } from "@/components/ui";
 import {
   aiTestInsightsRequestPdfUrl,
   aiTestInsightsRequestStatusUrl,
@@ -82,6 +92,10 @@ const IN_PROGRESS_MESSAGES = {
 const NO_LINKED_USER_MESSAGE = "Your login is not linked to a user record. Contact your program admin.";
 const NOT_CONFIGURED_MESSAGE = "AI Summary generation is not set up in this environment.";
 const REQUEST_FAILED_MESSAGE = "The AI Summary could not be requested. Try again.";
+const EXISTING_NOTE = "An AI Summary for these tests already exists";
+const GENERATE_AGAIN_TITLE_ID = "ai-test-insights-generate-again-title";
+const GENERATE_AGAIN_TEXT =
+  "This keeps the earlier AI Summary and writes a new one for these tests. It takes about 4 minutes.";
 
 /** How often the card asks for the status of a `queued` or `running` request. */
 const POLL_INTERVAL_MS = 10_000;
@@ -309,10 +323,14 @@ function PickerAndGenerate({
   canEdit: boolean;
   request: InsightRequestView | null;
   submitting: boolean;
-  onGenerate: (selectedTestIds: string[]) => void;
+  onGenerate: (selectedTestIds: string[], generateAgain?: boolean) => void;
 }) {
   const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set([tests[0].id]));
+  const [confirming, setConfirming] = useState(false);
   const inProgress = isInsightRequestInProgress(request);
+  // The picker's order: newest first.
+  const tickedIds = tests.filter((test) => ticked.has(test.id)).map((test) => test.id);
+  const again = request?.state === "completed" && sameTests(request.selectedTestIds, ticked);
 
   function toggle(id: string) {
     setTicked((current) => {
@@ -339,19 +357,56 @@ function PickerAndGenerate({
       {canEdit && !inProgress && (
         <GenerateButton
           disabled={submitting}
-          // The picker's order: newest first.
-          onClick={() => onGenerate(tests.filter((test) => ticked.has(test.id)).map((test) => test.id))}
+          label={again ? "Generate again" : "Generate"}
+          onClick={() => (again ? setConfirming(true) : onGenerate(tickedIds))}
         />
       )}
+      <Modal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        aria-labelledby={GENERATE_AGAIN_TITLE_ID}
+        className="p-6"
+      >
+        <h3 id={GENERATE_AGAIN_TITLE_ID} className="text-lg font-bold text-text-primary">
+          Generate again?
+        </h3>
+        <p className="mt-2 text-sm text-text-secondary">{GENERATE_AGAIN_TEXT}</p>
+        <div className="mt-6 flex justify-end gap-3">
+          <Button variant="secondary" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirming(false);
+              onGenerate(tickedIds, true);
+            }}
+          >
+            Generate again
+          </Button>
+        </div>
+      </Modal>
     </>
   );
 }
 
-function GenerateButton({ disabled, onClick }: { disabled: boolean; onClick?: () => void }) {
+/** The ticked tests are exactly a request's tests. */
+function sameTests(selectedTestIds: string[], ticked: ReadonlySet<string>): boolean {
+  return selectedTestIds.length === ticked.size && selectedTestIds.every((id) => ticked.has(id));
+}
+
+function GenerateButton({
+  disabled,
+  label = "Generate",
+  onClick,
+}: {
+  disabled: boolean;
+  label?: "Generate" | "Generate again";
+  onClick?: () => void;
+}) {
   return (
     <div className="mt-4">
       <Button onClick={onClick} disabled={disabled}>
-        Generate
+        {label}
       </Button>
     </div>
   );
@@ -370,7 +425,7 @@ function CardBody({
   onRetry: () => void;
   request: InsightRequestView | null;
   submitting: boolean;
-  onGenerate: (selectedTestIds: string[]) => void;
+  onGenerate: (selectedTestIds: string[], generateAgain?: boolean) => void;
 }) {
   // No tests to send: Generate is shown off, unless a request is in progress.
   const generateOff = canEdit && !isInsightRequestInProgress(request) && <GenerateButton disabled />;
@@ -416,21 +471,22 @@ function CardBody({
   );
 }
 
-/** Posts Generate; returns the request to show, or the message to show instead. */
+/** Posts Generate; returns the request to show and whether it already existed, or the message to show instead. */
 async function postGenerate(
   url: string,
   selectedTestIds: string[],
-): Promise<{ request: InsightRequestView } | { error: string }> {
+  generateAgain: boolean,
+): Promise<{ request: InsightRequestView; existing: boolean } | { error: string }> {
   try {
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selectedTestIds }),
+      body: JSON.stringify(generateAgain ? { selectedTestIds, generateAgain: true } : { selectedTestIds }),
     });
     const body = (await response.json().catch(() => null)) as
       | (Partial<AiTestInsightsCreateRequestResponse> & { code?: string })
       | null;
-    if (response.ok && body?.request) return { request: body.request };
+    if (response.ok && body?.request) return { request: body.request, existing: body.outcome === "existing" };
     if (response.status === 409 && body?.code === NO_LINKED_USER_CODE) return { error: NO_LINKED_USER_MESSAGE };
     if (response.status === 503 && body?.code === NOT_CONFIGURED_CODE) return { error: NOT_CONFIGURED_MESSAGE };
   } catch {
@@ -505,14 +561,20 @@ export default function AiTestInsightsSummaryCard({
   const [request, setRequest] = useState<InsightRequestView | null>(initialRequest);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The shown request is the `existing` answer to the last Generate. */
+  const [existing, setExisting] = useState(false);
   useRequestPolling(requestsUrl, request, setRequest);
 
-  async function generate(selectedTestIds: string[]) {
+  async function generate(selectedTestIds: string[], generateAgain = false) {
     setSubmitting(true);
     setError(null);
-    const result = await postGenerate(requestsUrl, selectedTestIds);
-    if ("request" in result) setRequest(result.request);
-    else setError(result.error);
+    const result = await postGenerate(requestsUrl, selectedTestIds, generateAgain);
+    if ("request" in result) {
+      setRequest(result.request);
+      setExisting(result.existing);
+    } else {
+      setError(result.error);
+    }
     setSubmitting(false);
   }
 
@@ -522,6 +584,11 @@ export default function AiTestInsightsSummaryCard({
         <h2 className="mb-4 text-lg font-bold text-text-primary">AI Summary</h2>
         {request && (request.state === "queued" || request.state === "running") && (
           <InProgress request={{ ...request, state: request.state }} />
+        )}
+        {existing && request?.state === "completed" && (
+          <p role="status" className="mb-3 text-sm font-medium text-text-primary">
+            {EXISTING_NOTE}
+          </p>
         )}
         {request?.state === "completed" && (
           <CompletedSummary key={request.requestKey} request={request} tests={tests} requestsUrl={requestsUrl} />

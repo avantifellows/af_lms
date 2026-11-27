@@ -1100,9 +1100,91 @@ test.describe("AI Test Insights tab", () => {
             await expect(summary.getByText("Made from: Mock Test 1", { exact: true })).toBeVisible();
             await expect(summary.getByText(/^Asked for by E2E ATI Teacher on /)).toBeVisible();
             await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+            // The ticked test is the AI Summary's test, which reads "Generate again" for a Teacher (#567).
+            await expect(summary.getByRole("checkbox", { name: /Mock Test 1/ })).toBeChecked();
+            await expect(summary.getByRole("button", { name: "Generate again" })).toHaveCount(0);
             await expectFixedPdfDownload(viewer, summary, `ai-summary-${ids.studentIds.esha}-2026-11-28.pdf`);
           }
           expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+        });
+
+        // The same tests again (#567): the existing AI Summary comes back at
+        // once, and "Generate again" asks to confirm before a new request.
+        test("shows the existing AI Summary for the same tests with no new row, and Generate again makes exactly one", async ({
+          page,
+        }) => {
+          test.slow();
+          const EXISTS = "An AI Summary for these tests already exists";
+          const CONFIRM =
+            "This keeps the earlier AI Summary and writes a new one for these tests. It takes about 4 minutes.";
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          // A second tab of the same Teacher, opened before the first Generate: it shows no request.
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          const staleTab = await page.context().newPage();
+          await answerTestPicker(staleTab, 200, { tests: PICKER_TESTS });
+          await staleTab.goto(studentUrl("esha"));
+          const staleSummary = staleTab.getByRole("region", { name: "AI Summary" });
+          await expect(staleSummary.getByRole("checkbox", { name: /Mock Test 1/ })).toBeChecked();
+
+          const summary = await generateForEsha(page);
+          await expectFixedText(summary, POLLED);
+          // The ticked test is the shown AI Summary's test.
+          await expect(summary.getByRole("button", { name: "Generate again" })).toBeVisible();
+          await expect(summary.getByRole("button", { name: "Generate", exact: true })).toHaveCount(0);
+          const [earlier] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(earlier).toMatchObject({ state: "completed", selectedTestIds: ["T9"] });
+          const callsBefore = await enqueueOrWakeCalls();
+
+          // Generate for the same test in the stale tab: the existing AI Summary, no new row, no call.
+          await staleSummary.getByRole("button", { name: "Generate", exact: true }).click();
+          await expect(staleSummary.getByText(EXISTS, { exact: true })).toBeVisible();
+          await expectFixedText(staleSummary);
+          await expect(staleSummary.getByRole("button", { name: "Generate again" })).toBeVisible();
+          expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([earlier]);
+          expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+
+          // Generate again asks first; Cancel sends nothing.
+          await steerFakeAiMentorshipGuide({ enqueue: "accept" });
+          await staleSummary.getByRole("button", { name: "Generate again" }).click();
+          const confirmation = staleTab.getByRole("dialog", { name: "Generate again?" });
+          await expect(confirmation.getByText(CONFIRM, { exact: true })).toBeVisible();
+          await confirmation.getByRole("button", { name: "Cancel" }).click();
+          await expect(confirmation).toHaveCount(0);
+          expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([earlier]);
+          expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+
+          // Confirm makes exactly one new request and leaves the earlier one completed.
+          await staleSummary.getByRole("button", { name: "Generate again" }).click();
+          await confirmation.getByRole("button", { name: "Generate again" }).click();
+          await expect(
+            staleSummary.getByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
+          ).toBeVisible();
+          await expect(staleSummary.getByText(EXISTS, { exact: true })).toHaveCount(0);
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows).toHaveLength(2);
+          expect(rows[0]).toEqual(earlier);
+          expect(rows[1]).toMatchObject({ state: "queued", selectedTestIds: ["T9"] });
+          expect(rows[1].requestKey).not.toBe(earlier.requestKey);
+        });
+
+        test("makes a new request for a different set of tests with no confirmation", async ({ page }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          const summary = await generateForEsha(page);
+          await expectFixedText(summary, POLLED);
+
+          await steerFakeAiMentorshipGuide({ enqueue: "accept" });
+          await summary.getByRole("checkbox", { name: /Major Test 2/ }).check();
+          await summary.getByRole("button", { name: "Generate", exact: true }).click();
+          await expect(
+            summary.getByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
+          ).toBeVisible();
+          await expect(page.getByRole("dialog")).toHaveCount(0);
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows.map((row) => [row.state, row.selectedTestIds])).toEqual([
+            ["completed", ["T9"]],
+            ["queued", ["T9", "T4"]],
+          ]);
         });
       });
     });

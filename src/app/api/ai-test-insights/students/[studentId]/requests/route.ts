@@ -13,7 +13,9 @@ import {
 // as a write: 401 no session, 422 bad id, 403 no `ai_test_insights` view, 403
 // access not `edit` (before the Student lookup reveals anything), 404 Student
 // missing, not listed or out of scope. Then the body (422), then the actor's
-// User (409 `no_linked_user`). 201 created, 200 already running, 503
+// User (409 `no_linked_user`). 201 created, 200 already running, 200
+// `existing` when a completed request of the Student has the same tests and
+// the body has no `generateAgain: true` (nothing written, nothing called), 503
 // `not_configured` when this environment has no delivery settings (#562), with
 // no row written. A created request has been delivered to AI Mentorship Guide
 // and is returned as it reads after delivery: `failed` with `enqueue_rejected`

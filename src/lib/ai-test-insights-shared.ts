@@ -139,9 +139,12 @@ export function isInsightRequestInProgress(request: InsightRequestView | null): 
   return request?.state === "queued" || request?.state === "running";
 }
 
-/** `POST /api/ai-test-insights/students/[studentId]/requests`: 201 created, 200 already running. */
+/**
+ * `POST /api/ai-test-insights/students/[studentId]/requests`: 201 created;
+ * 200 already running, or `existing` (a completed request of the same tests).
+ */
 export interface AiTestInsightsCreateRequestResponse {
-  outcome: "created" | "already_running";
+  outcome: "created" | "already_running" | "existing";
   request: InsightRequestView;
 }
 
