@@ -17,7 +17,7 @@ edges:
     condition: when writing the auth gate for a route
   - target: patterns/INDEX.md
     condition: when starting a concrete task that may have a runbook
-last_updated: 2026-11-27
+last_updated: 2026-11-28
 ---
 
 # Conventions
@@ -76,7 +76,17 @@ client-side navigations remount it. A key alone does not fix the page-load case.
 a time, with only the newest value queued behind it; `flush()` sends now (or resends after a failure)
 and `isStopped()` drops the queue (a frozen or stale form). Holistic Post-Session Notes (750 ms) and AI
 Test Insights Session Notes (1 s) both use it; a new notes form should too, rather than a third copy.
+It skips a value only when it matches what the server will hold once the queued and in-flight saves
+are done (not just the last saved one), so undoing back to the saved text mid-save still saves it.
 (`useAutoSave` is the older visit-actions hook, which drops a change made mid-save.)
+
+**Notes forms guard leaving through one hook.** `useNotesNavigationGuard`
+(`src/hooks/use-notes-navigation-guard.ts`, moved out of Holistic's `StudentPhaseWorkspace`) catches
+in-app link clicks (a Next `<Link>` never fires `beforeunload`) and Back/Forward steps (Navigation
+API), waits for the form's `beforeNavigation()` (flush the draft, or `window.confirm`), and adds the
+`beforeunload` prompt while `guardNeeded`. One guard per page: a second instance would see the first's
+`preventDefault` and do nothing, so a page with two editors (AI Test Insights: the draft form and a
+History edit) feeds both into one guard.
 
 **Structured error responses.** Visit/PM routes return via `apiError(status, error, details?)`
 from `@/lib/visits-policy`; older routes use `NextResponse.json({ error }, { status })`.

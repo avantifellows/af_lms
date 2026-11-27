@@ -1233,9 +1233,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `SessionNotesInputs.tsx`); the stale text is `SESSION_NOTES_STALE_MESSAGE` in the rules module (the
   route helper uses it too). E2E "Session Notes › Edit" uses Bhavya with `addCompletedInsightRequest`
   and `addSubmittedInsightSession` (new fixture helpers: a spec's completed request with its own Item,
-  and a submitted session by any author, both removed by the existing cleanups). Known limit: an
-  open edit closes, losing its typing, if the timeline is read again for another reason (a submit
-  from the form, the card's request completing).
+  and a submitted session by any author, both removed by the existing cleanups). An open edit
+  survives a later read of the timeline since the PR #580 fixes (below).
 - **Notes copy (#551 slice #579, 2026-11-28):** the Insight Request insert **reads
   `ai_test_insight_sessions`**: its `notes_snapshot` value is a scalar subquery the Session Notes
   module builds (`notesCopySql("$2", "$5")`, the insert's own Student and academic-year
@@ -1254,3 +1253,21 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   copy" seeds Esha with `addInsightSessions` (declared sessions and hand-written copies in
   `AI_TEST_INSIGHTS_NOTES_COPY`, removed by `removeInsightSessionsMadeBySpecs`) and breaks a copy
   with `setInsightRequestNotesCopy`.
+- **PR #580 review fixes (#551 part 2, 2026-11-28):** (1) **Drafts carry their id.** `readOwnDraft`
+  returns `draftId`; `PUT …/sessions/draft` takes `draftId` (null or absent with `expectedRevision` 0,
+  else required; 422 `draftId`) and answers `{ draftId, revision }`; `POST …/sessions` requires
+  `draftId`. Both UPDATEs add `id = $8` / `id = $12` to their WHERE, because every new draft starts at
+  revision 1: without the id a tab still holding an already-submitted draft A saved over, or
+  submitted, the author's next draft B. (2) **History keeps its timeline across reads**: only the
+  first read shows "Loading history…"; a later read keeps the last timeline (a failed one shows Retry
+  above it), so open Edits and "View AI Summary" panels stay. An edit saves at the revision it was
+  opened from and closes itself after a save or "Reload notes". (3) **Leaving**: Session Notes use
+  the shared `useNotesNavigationGuard` (see `context/conventions.md`): an in-app link saves the
+  pending draft first and goes on, and confirms when it cannot be saved (save fails again, stale, over
+  the limit, submitting) or while a History edit holds unsaved changes (History reports it through
+  `onUnsavedEditChange`; Sections passes it to the form as `unsavedEdit`). (4) `withAiTestInsightsStudent`
+  resolves Student access inside its `try`: a database error there answers the route's JSON 500 and
+  logs `student=unresolved`. Part 1's `withInsightRequest` (`ai-test-insights-request-routes.ts`) and
+  the tests route still resolve access before their `try`. (5) The fields (and an edit's Cancel) are
+  disabled while Submit or "Save changes" is sending. (6) `formatInsightSessionDate` takes its month
+  from the same list as `formatInsightRequestTime`: September is "Sep" everywhere.
