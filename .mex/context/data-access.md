@@ -867,7 +867,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   target, lists the pasted IDs not found and those found with no active Mapping (`unmatchedStudentIds`).
   The IDs are stored so Push again reaches the same list. `createCommonActionItem` inserts the item
   and materialises it in one transaction (`INSERT … SELECT … ON CONFLICT (common_action_item_id,
-  student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`); a target with no Students (or
+  student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`; open, except the JEE reminder
+  for a Student already Filled, added done: see "Blended Learning JEE form"); a target with no Students (or
   an unknown Mentor, 23503) rolls back as a 422. `pushCommonActionItem` locks the item `FOR UPDATE`
   (removed → 404) and runs the same insert, so it adds only targeted Students who don't have it
   (done included) and a repeat adds 0. `updateCommonActionItem` updates the item and its rows
@@ -947,3 +948,208 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
   Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
   `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.
+
+## Blended Learning JEE form (2026-11-10, JEE Form tab 2026-11-15)
+
+- **Audience:** every Student in an active current-year Blended Learning Mapping (all
+  programs). One exam is hard-coded: JEE Main 2027 = the `exam` row named "JEE Mains" +
+  `exam_year` 2027 (`JEE_FORM_EXAM` in the client-safe `src/lib/blended-learning-jee-form-input.ts`).
+- **Tables:** db-service #856 (branch `feat/bl-jee-form`; deploy all of its migrations before this
+  code): `20261124122211_add_blended_learning_jee_form_updates`,
+  `20261124142920_add_key_to_blended_learning_common_action_items`,
+  `20261124143246_tie_jee_form_confirmation_to_same_student` and
+  `20261124151706_tighten_blended_learning_jee_form_update_checks` (below). The first adds append-only
+  `blended_learning_jee_form_updates` (latest row per Student + exam + year is the status, the
+  rest is history; `filled` carries `application_number` and an optional
+  `confirmation_document_id` → `lms_student_documents`; `not_filled` carries `reasons` (fixed
+  codes, CHECK-listed; `other` needs `details`) and optional `details`), plus
+  `blended_learning_mentor_flags.jee_form_update_id` (recipient `jee_form`, no Conversation;
+  `bl_mentor_flags_source_check`) and `blended_learning_action_items.completed_by_jee_form_update_id`
+  (a done item is completed by a Conversation XOR a JEE form update). Mirrored for e2e by
+  `e2e/fixtures/migrations/20261124122211_add_blended_learning_jee_form_updates.sql`, with
+  `20260528120000_add_lms_student_documents.sql`, `20261015120000_…exam_details.sql` and
+  `20261019120000_…sessions_applied.sql` for the tables db-dump.sql predates (all pg_dump-identical),
+  and `20261116090707_add_exam_password_ciphertext_and_reveals.sql` (db-service `20261116085521` +
+  `20261116090707`: `application_password_ciphertext` and `lms_exam_password_reveals`).
+  `20261124142920` adds `blended_learning_common_action_items.key varchar(64)` (CHECK
+  `^[a-z][a-z0-9_]*$`, unique among active rows: `bl_common_action_items_key_unique … WHERE key IS
+  NOT NULL AND removed_at IS NULL`) and keys the lowest-id active item whose text normalises to
+  "jee form filling (reminder)" as `jee_form_reminder`; mirrored by
+  `e2e/fixtures/migrations/20261124142920_add_key_to_blended_learning_common_action_items.sql`
+  (pg_dump- and row-identical against the `.exs` on two scratch DBs, re-runnable).
+  `20261124143246` makes `confirmation_document_id` a composite FK, `(confirmation_document_id,
+  student_id)` → `lms_student_documents(id, student_id)` (same constraint name, backed by the new
+  unique index `lms_student_documents_id_student_unique`), so an update's confirmation must be a
+  document of the same Student; mirrored by
+  `e2e/fixtures/migrations/20261124143246_tie_jee_form_confirmation_to_same_student.sql`
+  (pg_dump-identical, re-runnable; `lms_student_documents` comes from the earlier
+  `20260528120000` mirror).
+  `20261124151706` rejects repeated `reasons` (`bl_jee_form_updates_reasons_unique_check`, via the
+  IMMUTABLE helper `blended_learning_array_has_no_duplicates(anyarray)`) and replaces the non-blank
+  `academic_year` check with the Mappings' strict `YYYY-YYYY` consecutive-years check
+  (`bl_jee_form_updates_academic_year_format_check`); mirrored by
+  `e2e/fixtures/migrations/20261124151706_tighten_blended_learning_jee_form_update_checks.sql`
+  (re-runnable).
+- **Write:** `POST /api/blended-learning/students/[id]/jee-form` (multipart) → `recordJeeForm` in
+  `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (a Mentor mutation: only the
+  Mentor of the active Mapping, never read-only; Blended Learning Admins and LMS admins get 403 and
+  see the form view only, with "Change status" disabled as "View only" but "Show password"
+  working unless read-only) + `canAccessBlendedStudent`. Filled:
+  `planExamRecordWrite` picks the Student's JEE Mains 2027 `student_exam_record` (PATCH), else
+  takes over their older JEE Mains record of any other year or none, whatever number it holds
+  (PATCH + `exam_year: 2027`; the newest by id should there be several; its score/rank/date fields
+  are left as is), else POST only when the Student has no JEE Mains record at all. Until
+  registrations are kept per year (af_lms#568), a new JEE form entry overrides the older
+  registration, as the Exams tab does with one row per exam, so the form never leaves a Student
+  with two JEE Mains records. A number held by any record other than that target (another exam's,
+  or another JEE Mains record should there ever be two) is a 409 and is never moved (the DB
+  Service's create upserts on student + number). The
+  PDF (≤ 5 MB) goes through `uploadDocumentPages` + `createDocument` as document type
+  `jee_main_confirmation` (labelled in the Documents tab by `documentTypeLabel`, not offered in its
+  picker). The update (Mapping's Mentor/program/year, actor as `recorded_by_email`) then either
+  raises the `jee_form` flag (comment = exam + reason labels + details) or ticks the Student's open
+  Action Items whose Common Action Item holds the key `jee_form_reminder` (whatever its text; no id
+  is hard-coded). **Save order (one transaction):** a per-Student
+  `pg_advisory_xact_lock(hashtextextended('blended_learning_jee_form:<studentId>', 0))` (serializes
+  two tabs) → `lockMappingInScope` (out of scope → 404 before any KMS/S3/DB Service write) →
+  latest update → for Filled, `writeApplication` (plan/409, password/422/403, KMS, PDF, exam record;
+  its reads on the transaction client; a refusal rolls back with the same status) → append the
+  update + flag/tick → commit. The lock is held across those HTTP calls (accepted). Left as is: if
+  the insert/commit fails after the exam record write, the record keeps the new number/password
+  while the tab shows the old status (the PDF is still withdrawn); saving again repairs it. A
+  same-form re-save still runs `writeApplication`, which sends nothing while the record holds the
+  number shown (it writes the record again if it was removed elsewhere). E2E: the JEE spec holds
+  the lock, ends the Mapping, and expects 404 with no stub write. Re-saving the same values
+  (no new PDF, no password typed) appends nothing (200), but a Filled re-save still ticks an open
+  reminder, done by the latest update. For Filled, "the same" compares with the number the tab
+  shows (`shownNumber`: the exam record's as it was before the save, else the latest update's), so
+  re-saving the form after an Exams tab edit is no change (200, ticks), a different number is a
+  change (201, the record patched), and a typed password with the number shown keeps the PDF; the POST's `form` is read after the save, so the tab's
+  "Reminder" line shows Done. A typed password can't be compared with the saved ciphertext, so it
+  always counts as a change (201, a new update that keeps the PDF). A failed DB Service/S3 call is
+  a 502 and withdraws the stored PDF.
+- **Sessions applied (2026-11-24):** Filled also takes one multipart `sessions` entry per JEE Main
+  session applied for (Session 1 / Session 2 checkboxes in `JeeFormEditor`, worded as the Exams
+  tab's "Sessions applied"; at least one, 422 `fieldErrors.sessions` in the browser and on the
+  server). `validateJeeForm` parses them (text or numbers) through the Exams tab's exported
+  `canonicalizeSessions` (`exam-records-payload.ts`: deduped, sorted, only
+  `examSessionsFor("JEE Mains")` = [1, 2]); Not filled ignores them and never touches the record.
+  They live only on the JEE Mains 2027 `student_exam_record.sessions_applied` (no column on
+  `blended_learning_jee_form_updates`, no migration; history entries carry none): the plan's
+  POST/PATCH always sends `sessions_applied` (`createExamRecordWithoutPlaintext` /
+  `patchExamRecordWithoutPlaintext` name the key), and `planExamRecordWrite` patches the 2027 record
+  when the number or the sessions differ (compared sorted, once each). A Filled re-save whose
+  sessions differ from the record's before the save (`savedSessions`; null without a 2027 record)
+  counts as a change, like a typed password: the record is patched and a new update recorded (201,
+  keeps the PDF, ticks). Number, sessions and password all unchanged: no DB Service write (200,
+  still ticks). Read: `listSavedRecords` returns them as `JeeFormView.sessionsApplied` (sorted, []
+  without), which pre-fills the checkboxes and shows read-only for Filled in `JeeFormPanel`
+  ("Sessions applied: Session 1, Session 2"), the tab's row summary and the Mentee page's status
+  line (`JeeStatusDetail`: "Sessions 1, 2"). Status-only (team lead) views never carry them.
+- **Exam-portal password (write-only):** Filled also takes `password`. It is required (422
+  `fieldErrors.password`, also checked in the browser through `validateJeeForm(…, { requirePassword })`)
+  while the record being written has no `application_password_ciphertext`, and always when the
+  record is an older one taken over (its ciphertext is the old registration's: it counts as no
+  password saved, and the new ciphertext replaces it); once one is saved on the 2027 record, a
+  blank password keeps it and a new one replaces it. It is trimmed, ≤ 255, refused (403) for a JNV
+  NVS-only Student (`isPmuOnlyStudent`, a safety net), encrypted with Aman's `encryptExamPassword`
+  (KMS, bound to the Student) before anything is written, sent as `application_password_ciphertext`
+  with the plan's POST/PATCH (or a PATCH of its own when the number is unchanged) together with
+  `application_password: null`, which clears any legacy plaintext as the Exams tab does (a number
+  change without a new password sends neither password key, as the Exams tab's "keep"), then read
+  back from Postgres (`confirmCiphertextStored`: this ciphertext AND `application_password IS NULL`,
+  the legacy value never selected) because an old DB Service drops the unknown key with a 2xx; a
+  record still holding a plaintext there is a 502. A KMS failure is a 502 before any write. Page data carries only `JeeFormView.passwordSaved`
+  (ciphertext IS NOT NULL on the 2027 record), never the password or the ciphertext.
+  So a JNV NVS-only Student can't be recorded as Filled (422 without a password, 403 with one);
+  Not filled still works. Accepted on review of #507 (Blended Learning has no NVS Students); if
+  NVS Students are ever mapped, don't offer Filled for them or drop the password requirement.
+- **Reveal:** `POST /api/blended-learning/students/[id]/jee-form/password` (`reveal_exam_password`:
+  not read-only, Mentor or admin, as the Exams tab needs edit rights; a read-only account gets 403
+  before anything is decrypted or logged, and `JeePasswordReveal` renders "Show password" disabled
+  as "View only" from the tab's `canReveal`; `Cache-Control: no-store`) → `revealJeeFormPassword` in
+  `src/lib/blended-learning-jee-password.ts`: `canAccessBlendedStudent` (404 `Not found` otherwise,
+  as the form's save and confirmation answer: a Mentor, team leads included, only their own Mentees,
+  never a supervised Mentor's; admins any mapped Student; the read-only 403 comes first, from the
+  guard), not JNV NVS-only (403), the 2027 record's
+  ciphertext (404 without one), `decryptExamPassword`, then Aman's `recordExamPasswordReveal` (viewer
+  email + BL role) before the password is returned; a failed log is a 500 and no reveal. The Exams
+  tab's `exam-records-gate` can't be used here (it denies Blended roles). UI: `jee-form/JeePassword.tsx`.
+- **Never the plaintext:** no read selects the legacy `application_password` (no `SELECT *`; the
+  read-back only tests it IS NULL; a record holding only legacy plaintext counts as no password, so
+  the form asks again), and the only value ever written to it is null, with a new ciphertext;
+  `createExamRecordWithoutPlaintext` / `patchExamRecordWithoutPlaintext` in
+  `src/lib/db-service-exam-records.ts` send named fields only (number, year, sessions, ciphertext, and the
+  legacy key only as the literal null) and never
+  read the DB Service's response body (it contains the legacy password); failures log the status
+  only. Nothing logs a password or ciphertext (error names only). E2E encrypts against a fake KMS in
+  the DB Service stub (`EXAM_PASSWORD_KMS_ENDPOINT`, e2e only; in production only a localhost
+  endpoint is honoured, see `context/student-addition.md`).
+- **Current number from the exam record:** for a Filled current status, the tab's rows, the
+  Student's form (the POST's `form`, `getJeeForm`) and the Mentee page's status line show the
+  application number of the Student's JEE Mains 2027 `student_exam_record` (`listSavedRecords`, one
+  read with `passwordSaved` and `sessionsApplied`: `DISTINCT ON` the Student, the first record with a
+  non-blank number, `bool_or` over a window for the ciphertext; named columns only, never
+  `application_password`), so an Exams
+  tab edit shows here. Without a 2027 record, or one with a blank number, they show the number the
+  update recorded (not "—": Filled was recorded with that number, and blanking it would hide it).
+  Not filled shows no number. Earlier updates (history) keep the number recorded at the time; the
+  updates table stays the record of who recorded Filled / Not filled and when. Team leads'
+  status-only rows still never read the exam record or carry a number.
+- **Read/UI:** the JEE Form tab `/blended-learning/jee-form` (`view_list`) reads `listJeeFormRows`:
+  the Students with an active current-year Mapping (a Mentor's own; a team lead's own and their
+  reportees', the latter `viewOnly` with the status only from a separate status-only read; every
+  Mentor's for an admin),
+  then every Student's updates in one query (`row_number()` per Student, newest 20) and their
+  reminder items in another. The client list (`jee-form/JeeFormTab.tsx`) shows counts, a status
+  filter and rows that open in place to `JeeFormPanel` / `JeeFormEditor`; saving updates the row
+  and counts from the POST's `form` (a `viewOnly` row never opens). URL params: `status`, `mentor`
+  (admins, team leads), `student` (open row,
+  scrolled to on arrival), written with `history.pushState` / `replaceState`. The Mentee page shows
+  `JeeFormStatusLine` (from `getJeeFormLine`: by `blendedStudentScope`, the whole form or, view
+  only, the status alone) linking to `?student=<id>`; it renders without the data
+  when the read fails, and so does the tab.
+- **Reminder rule:** `src/lib/blended-learning-jee-reminder.ts` finds the reminder by its key
+  (`JEE_FORM_REMINDER_KEY = 'jee_form_reminder'`, bound as a parameter, never by text):
+  `jeeReminderMatchSql` (`common.key = $n`, for joining an Action Item to its Common Action Item:
+  `tickReminder`, `listReminderItems`, `jeeReminderItemIds`, `getMenteeDetail`'s `jee_reminder`,
+  `materialise`) and `activeJeeReminderSql` (`key = $n AND removed_at IS NULL`, for the reminder
+  itself). The key is hidden: the Manage page never shows, sets or edits it, and
+  `updateCommonActionItem` writes text and owner only, so a rename keeps it. `createCommonActionItem`
+  gives a new item the key when its text is the reminder's (`isJeeReminderText`, case and spacing
+  aside) and no active item holds it, so a removed and re-created reminder is linked again; an item
+  with the reminder's text created while another holds the key is an ordinary one. (Two such
+  creates at the same moment: the second hits the unique index, a 500; accepted as unlikely.)
+  `getMenteeDetail` marks the open item `jeeReminder`, so the Mentee page and the log form show a
+  "Fill in JEE tab" link instead of a tick; `completeActionItems` (the only manual tick path, used
+  by the log form and draft saves) answers 409 when a ticked id is the reminder. Only the JEE form
+  ticks it, so it must never be left open for a Student already Filled: a Filled save or re-save
+  ticks an open one, and `materialise` in `blended-learning-common-action-items.ts` (first push and
+  Push again; the only path that creates pushed rows: a new Mapping gets nothing until Push again)
+  adds it done for a Student whose latest JEE Mains 2027 update is Filled
+  (`latestFilledJeeUpdateSql`: `completed_by_jee_form_update_id` = that update, `completed_by_email`
+  = its `recorded_by_email`, `completed_at` = now), open for everyone else; every other Common
+  Action Item is added open as before. It is never unticked. (Renaming another Common Action Item
+  to the reminder's text doesn't make it the reminder: it has no key.)
+  `GET …/jee-form/confirmation` redirects to a 5-minute presigned GET (anyone who can view the
+  Mentee). The Flags feed shows `jee_form` flags as "JEE form (program team)": `listFlags` and
+  `listFlagMentors` LEFT JOIN the Conversation and the JEE form update and COALESCE Mentor,
+  program and date; `getMenteeDetail` reads Conversation flags only.
+- **E2E:** Playwright now starts `e2e/helpers/db-service-stub.mjs` (port 3902) and points
+  `DB_SERVICE_URL` at it, so no spec reaches a real DB Service; it writes `student_exam_record` /
+  `lms_student_documents` as the DB Service does and lists requests at `/__requests`.
+  `blended-learning-jee-form.spec.ts` (the tab, the status line and the reminder rule) uses Mentor
+  C's `JEE_FORM_MENTEES` (K1–K3, seeded last, with
+  the reminder pushed to them and K2's yearless JEE Mains record, which the phone test takes over
+  with a new number). `blended-learning-jee-reminder.spec.ts`
+  (a push and Push again to a Filled / Not filled / not-recorded mix; a reminder left open for a
+  Filled Student ticked by a re-save; a renamed reminder still ticked while an un-keyed twin with
+  its text isn't; a removed reminder created again gets the key) uses `JEE_REMINDER_MENTEES` (L1–L7,
+  seeded with no Mapping): it borrows the fixture reminder's key (the fixture seeds it with
+  `JEE_REMINDER_KEY`) and gives it back, maps them to Mentor C, then removes its Common Action
+  Items and ends those Mappings (`ended_by_email` `e2e-cleanup@example.com`). E2E has no S3, so the PDF upload is route-tested only.
+- **Not built:** a write-only encrypted application password (the panel leaves a row for it), other
+  exams, any import or prefill, per-year JEE Mains registrations (af_lms#568: until then the form
+  overrides the older record). The Exams tab keeps one record per exam, so a Student with both a
+  yearless and a 2027 JEE Mains record (which the form no longer creates) shows only one there.
+

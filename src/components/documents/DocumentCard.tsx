@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ExternalLink, FileText, Image as ImageIcon, Trash2 } from "lucide-react";
 import { Badge, Button, Card } from "@/components/ui";
-import { isValidDocumentType, labelFor } from "@/lib/document-types";
+import { documentTypeLabel } from "@/lib/document-types";
 import type { LmsStudentDocumentRow } from "@/lib/db-service-documents";
 
 interface DocumentCardProps {
@@ -31,9 +31,7 @@ export function DocumentCard({ doc, onDelete, canDelete = true }: DocumentCardPr
   const [error, setError] = useState<string | null>(null);
 
   const pdf = isPdfDoc(doc);
-  const typeLabel = isValidDocumentType(doc.document_type)
-    ? labelFor(doc.document_type)
-    : doc.document_type;
+  const typeLabel = documentTypeLabel(doc.document_type);
   const pageCount = doc.pages?.length ?? 0;
 
   async function handleDelete() {

@@ -165,7 +165,9 @@ page and API denies them (`getUserPermission` returns `null` for them).
   (`manage`: Resources and Common Action Items) is for Blended Learning Admins
   who are not read-only; Mentors and read-only admins get no tab and 403.
   Playing Call Recordings and reading transcripts and the Mentors tab are for
-  Blended Learning Admins only (read-only ones included). The Flags feed shows an
+  Blended Learning Admins only (read-only ones included). Revealing the JEE form's
+  exam-portal password (`reveal_exam_password`) needs an account that is not
+  read-only. The Flags feed shows an
   admin every flag and a Mentor only the flags on their own Students. A Student is
   in scope only with an active current-year Mapping (for a Mentor, to them):
   one whose period (`started_at` up to, not including, `ended_at`) contains
@@ -209,6 +211,20 @@ Edit Student Exams tab. It sits on top of the tab's own gate (edit rights on the
 school-scoped, never a JNV NVS Student), so a teacher sees their schools' Students and a PM
 their assigned schools'. Every reveal is logged to `lms_exam_password_reveals`. Every other
 role is `none`.
+
+Blended Learning roles don't use `exam_passwords`. On the Blended Learning JEE form, only the
+Mentor (not read-only) records the form and sets the password; Blended Learning Admins (and LMS
+`admin`s) see the form view only and can't fill it or set, replace or clear the password.
+Revealing the password needs edit rights, as on the Exams tab: an account that is not read-only
+may reveal it for a Student in their scope, a Mentor (team leads included) only for their own
+active Mentees, a `blended_admin` or LMS `admin` for any Student with an active Mapping. A team
+lead sees only the JEE status of a supervised Mentor's Mentees (view only: Filled or Not filled,
+the Not filled reasons and the date recorded), never the application number, the details, the
+confirmation PDF or the password, and can't record or reveal for them (404 for both, as for any
+Student out of their scope, such as another Mentor's Mentee).
+Read-only accounts, Mentor or admin, can't reveal it (403 for any Student, nothing decrypted or logged; "Show
+password" is disabled as "View only"). Those reveals are logged to `lms_exam_password_reveals`
+too.
 
 ### NVS-Only Users
 

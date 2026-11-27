@@ -183,6 +183,48 @@ export const SCREENER_MENTEES = {
 export const SCREENER_RACE_MENTEE = {
   key: "J5", firstName: "Kavya", lastName: "Race", gender: "Female", grade: 12, programId: 80,
 } as const satisfies FixtureMentee;
+// Mentor C's Mentees for the JEE form spec, never contacted, each with
+// the JEE_REMINDER Common Action Item open. "mentor" is recorded by Mentor C,
+// "mobile" by Mentor C at 360 px (and already has a yearless JEE Mains exam
+// record, JEE_EXISTING_RECORD, as the Exams tab saves them), "admin" by a
+// Blended Learning Admin. The spec appends JEE form updates to them.
+export const JEE_FORM_MENTEES = {
+  mentor: { key: "K1", firstName: "Kiran", lastName: "Jee", gender: "Female", grade: 12, programId: 80 },
+  mobile: { key: "K2", firstName: "Kunal", lastName: "Jee", gender: "Male", grade: 13, programId: 90 },
+  admin: { key: "K3", firstName: "Lata", lastName: "Jee", gender: "Female", grade: 12, programId: 80 },
+} as const satisfies Record<string, FixtureMentee>;
+export const JEE_REMINDER_TEXT = "JEE Form Filling (Reminder)";
+// The hidden key the app finds the reminder by (db-service 20261124142920),
+// whatever its text.
+export const JEE_REMINDER_KEY = "jee_form_reminder";
+// Students for the JEE reminder spec (blended-learning-jee-reminder.spec.ts),
+// seeded with no Mapping: the spec maps them to Mentor C, the push ones
+// before the first push and the pushAgain ones after it, and ends those
+// Mappings when it is done, so no other spec lists them. In each set the
+// spec records "filled" as Filled and "notFilled" as Not filled, and leaves
+// "notRecorded" alone. "raced" is recorded Filled and then given an open
+// reminder, as a push that ran alongside that save would leave it.
+export const JEE_REMINDER_MENTEES = {
+  push: {
+    filled: { key: "L1", firstName: "Leela", lastName: "Pushfilled", gender: "Female", grade: 12, programId: 80 },
+    notFilled: { key: "L2", firstName: "Lalit", lastName: "Pushnotfilled", gender: "Male", grade: 12, programId: 80 },
+    notRecorded: { key: "L3", firstName: "Lina", lastName: "Pushnotrecorded", gender: "Female", grade: 13, programId: 90 },
+  },
+  pushAgain: {
+    filled: { key: "L4", firstName: "Lakshya", lastName: "Againfilled", gender: "Male", grade: 12, programId: 80 },
+    notFilled: { key: "L5", firstName: "Lavanya", lastName: "Againnotfilled", gender: "Female", grade: 13, programId: 90 },
+    notRecorded: { key: "L6", firstName: "Lokesh", lastName: "Againnotrecorded", gender: "Male", grade: 12, programId: 80 },
+  },
+  raced: { key: "L7", firstName: "Latika", lastName: "Raced", gender: "Female", grade: 12, programId: 80 },
+} as const satisfies {
+  push: Record<string, FixtureMentee>;
+  pushAgain: Record<string, FixtureMentee>;
+  raced: FixtureMentee;
+};
+// Synthetic only. The password is seeded to prove the card never reads,
+// changes or shows it.
+export const JEE_EXISTING_RECORD = { applicationNumber: "E2E-JEE-0002", password: "e2e-not-for-display" } as const;
+
 export function screenerLink(mentee: { key: string }): string {
   return `https://forms.gle/e2e-screener-${mentee.key.toLowerCase()}`;
 }
@@ -607,6 +649,39 @@ async function seedFeedFlags(
   }
 }
 
+// The JEE form Mentees' Mappings, their open "JEE Form Filling (Reminder)"
+// (pushed as a Common Action Item to these Students only, holding the
+// reminder's key as the db-service migration gives it) and the mobile
+// Mentee's yearless JEE Mains record.
+async function seedJeeForm(client: Client, studentIds: number[], mentorC: number) {
+  const mentees = Object.values(JEE_FORM_MENTEES);
+  for (const [index, mentee] of mentees.entries()) {
+    await seedMapping(client, {
+      studentId: studentIds[index],
+      mentorUserId: mentorC,
+      programId: mentee.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+      startedDaysAgo: 90,
+    });
+  }
+  const common = await client.query<{ id: string }>(
+    `INSERT INTO blended_learning_common_action_items (text, owner, target_kind, target_student_ids, created_by_email, key)
+     VALUES ($1, 'student', 'students', $2::text[], 'e2e-blended-admin@test.local', $3)
+     RETURNING id`,
+    [JEE_REMINDER_TEXT, mentees.map(programStudentId), JEE_REMINDER_KEY]
+  );
+  await client.query(
+    `INSERT INTO blended_learning_action_items (common_action_item_id, student_id, position, text, owner)
+     SELECT $1, student_id, 1, $3, 'student' FROM unnest($2::bigint[]) AS student_id`,
+    [common.rows[0].id, studentIds, JEE_REMINDER_TEXT]
+  );
+  await client.query(
+    `INSERT INTO student_exam_record (student_id, exam_id, application_number, application_password, inserted_at, updated_at)
+     SELECT $1, exam.id, $2, $3, now(), now() FROM exam WHERE exam.name = 'JEE Mains'`,
+    [studentIds[mentees.indexOf(JEE_FORM_MENTEES.mobile)], JEE_EXISTING_RECORD.applicationNumber, JEE_EXISTING_RECORD.password]
+  );
+}
+
 export async function seedBlendedLearningFixtures(client: Client): Promise<void> {
   const mentorA = await mentorUserId(client, BLENDED_MENTOR_A.email);
   const mentorB = await seedMentor(client, BLENDED_MENTOR_B);
@@ -632,6 +707,14 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     ...Object.values(SCREENER_MENTEES).flatMap((set) => Object.values(set)),
     SCREENER_RACE_MENTEE,
   ];
+  // Seeded after the Screener Mentees for the same reason.
+  const jeeFormMentees = Object.values(JEE_FORM_MENTEES);
+  // Seeded last for the same reason, with no Mapping (the spec maps them).
+  const jeeReminderMentees = [
+    ...Object.values(JEE_REMINDER_MENTEES.push),
+    ...Object.values(JEE_REMINDER_MENTEES.pushAgain),
+    JEE_REMINDER_MENTEES.raced,
+  ];
   for (const [index, mentee] of [
     ...Object.values(MENTEES),
     ...Object.values(OTHER_STUDENTS),
@@ -640,6 +723,8 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     ...screenerMentees,
     DROPOUT_MENTEE,
     SUPERVISOR_MENTEE,
+    ...jeeFormMentees,
+    ...jeeReminderMentees,
   ].entries()) {
     ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
@@ -701,6 +786,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
       startedDaysAgo: 90,
     });
   }
+  await seedJeeForm(client, jeeFormMentees.map((mentee) => ids[mentee.key]), mentorC);
   for (const withLink of [...Object.values(SCREENER_MENTEES).map((set) => set.withLink), SCREENER_RACE_MENTEE]) {
     await client.query(`INSERT INTO blended_learning_student_links (student_id, screener_url) VALUES ($1, $2)`, [
       ids[withLink.key],

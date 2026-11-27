@@ -2,7 +2,12 @@ import type { PoolClient } from "pg";
 
 import { query, withTransaction } from "./db";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
-import { activeBlendedMappingSql, canBlendedLearning, type BlendedLearningAccess } from "./blended-learning-access";
+import {
+  activeBlendedMappingSql,
+  canBlendedLearning,
+  mentorNameSql,
+  type BlendedLearningAccess,
+} from "./blended-learning-access";
 import {
   validateCommonItem,
   validateCommonItemEdit,
@@ -11,6 +16,14 @@ import {
   type CommonTarget,
   type FieldErrors,
 } from "./blended-learning-manage-input";
+import { JEE_FORM_EXAM } from "./blended-learning-jee-form-input";
+import {
+  JEE_FORM_REMINDER_KEY,
+  activeJeeReminderSql,
+  isJeeReminderText,
+  jeeReminderMatchSql,
+  latestFilledJeeUpdateSql,
+} from "./blended-learning-jee-reminder";
 import { currentGradeLateralSql } from "./blended-learning-mentees";
 
 // Common Action Items (server-only): an Action Item a Blended Learning Admin
@@ -21,9 +34,13 @@ import { currentGradeLateralSql } from "./blended-learning-mentees";
 // Action Item per targeted Student (conversation_id NULL); Students mapped
 // later get it only when it is pushed again, which adds it to targeted
 // Students who don't have it yet (the partial unique index makes that
-// idempotent). Mentors tick these off like any open Action Item. Editing
-// updates the still-open rows; removing deletes them, keeps done ones and
-// soft-removes the Common Action Item. Every call needs `manage`.
+// idempotent). Mentors tick these off like any open Action Item, except the
+// "JEE Form Filling (Reminder)" (the one holding the hidden key
+// 'jee_form_reminder', whatever its text), which only the JEE form ticks: a
+// push adds it done to a Student whose latest JEE form update is already
+// Filled. Editing updates the still-open rows (text and owner only: the key is
+// never set, changed or cleared here); removing deletes them, keeps done ones
+// and soft-removes the Common Action Item. Every call needs `manage`.
 
 export type CommonActionItem = {
   id: number;
@@ -59,8 +76,6 @@ function validId(id: number): boolean {
   return Number.isSafeInteger(id) && id > 0;
 }
 
-const MENTOR_NAME_SQL = (alias: string, idSql: string) =>
-  `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${alias}.first_name, ${alias}.last_name)), ''), ${alias}.email, CONCAT('Mentor ', ${idSql}))`;
 
 type TargetSql = { kind: string; grade: string; mentor: string; ids: string };
 
@@ -157,7 +172,7 @@ export async function previewCommonTarget(
 export async function listTargetMentors(access: BlendedLearningAccess): Promise<TargetMentor[]> {
   if (!canBlendedLearning(access, "manage")) return [];
   const rows = await query<{ user_id: number | string; name: string; students: number | string }>(
-    `SELECT mapping.mentor_user_id AS user_id, ${MENTOR_NAME_SQL("mentor", "mapping.mentor_user_id")} AS name,
+    `SELECT mapping.mentor_user_id AS user_id, ${mentorNameSql("mentor", "mapping.mentor_user_id")} AS name,
             count(*) AS students
      FROM blended_learning_mentor_mentee_mappings mapping
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
@@ -213,7 +228,7 @@ export async function listCommonActionItems(access: BlendedLearningAccess): Prom
     `SELECT common.id, common.text, common.owner, common.target_kind, common.target_grade,
             common.target_mentor_user_id, common.target_student_ids,
             CASE WHEN common.target_mentor_user_id IS NULL THEN NULL
-                 ELSE ${MENTOR_NAME_SQL("mentor", "common.target_mentor_user_id")} END AS target_mentor_name,
+                 ELSE ${mentorNameSql("mentor", "common.target_mentor_user_id")} END AS target_mentor_name,
             (SELECT count(*) FROM blended_learning_action_items item
              WHERE item.common_action_item_id = common.id AND item.status = 'open') AS open_count,
             (SELECT count(*) FROM blended_learning_action_items item
@@ -234,17 +249,33 @@ export async function listCommonActionItems(access: BlendedLearningAccess): Prom
 }
 
 // Add the Common Action Item, as an open Action Item, to every targeted
-// Student who doesn't have it yet. Returns how many were added.
+// Student who doesn't have it yet. Returns how many were added (open or done).
+//
+// The JEE reminder (the Common Action Item holding JEE_FORM_REMINDER_KEY) is the exception: a
+// Student whose latest JEE form update for JEE_FORM_EXAM is already Filled
+// gets it done by that update, as if saving Filled had ticked it, with the
+// update's recorder as `completed_by_email`. Added open, nothing could close
+// it: a Conversation can't tick it, and saving the same Filled form again
+// records nothing new. Every other Common Action Item, and the reminder for
+// a Student Not filled or not recorded, is added open as before.
 async function materialise(client: PoolClient, commonId: number): Promise<number> {
   const result = await client.query(
-    `INSERT INTO blended_learning_action_items (common_action_item_id, student_id, position, owner, text)
-     SELECT common.id, targeted.student_id, 1, common.owner, common.text
+    `INSERT INTO blended_learning_action_items
+       (common_action_item_id, student_id, position, owner, text,
+        status, completed_by_jee_form_update_id, completed_at, completed_by_email)
+     SELECT common.id, targeted.student_id, 1, common.owner, common.text,
+            CASE WHEN filled.id IS NULL THEN 'open' ELSE 'done' END,
+            filled.id,
+            CASE WHEN filled.id IS NULL THEN NULL ELSE now() END,
+            filled.recorded_by_email
      FROM blended_learning_common_action_items common
      CROSS JOIN LATERAL (${targetedStudentsSql(COMMON_TARGET_COLUMNS, "$2")}) targeted
+     LEFT JOIN LATERAL (${latestFilledJeeUpdateSql("targeted.student_id", "$4", "$5")}) filled
+       ON ${jeeReminderMatchSql("common", "$3")}
      WHERE common.id = $1 AND common.removed_at IS NULL
      ON CONFLICT (common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING
      RETURNING id`,
-    [commonId, CURRENT_ACADEMIC_YEAR]
+    [commonId, CURRENT_ACADEMIC_YEAR, JEE_FORM_REMINDER_KEY, JEE_FORM_EXAM.examName, JEE_FORM_EXAM.examYear]
   );
   return result.rowCount ?? result.rows.length;
 }
@@ -254,7 +285,11 @@ class NoStudents extends Error {}
 const NO_STUDENTS_ERRORS: FieldErrors = { target: "No students match this target. Choose another." };
 
 // Save a new Common Action Item and push it to its target, in one
-// transaction. A target that reaches no Student saves nothing (422).
+// transaction. A target that reaches no Student saves nothing (422). The key
+// is never taken from the request: an item whose text is the JEE reminder's
+// (isJeeReminderText) gets JEE_FORM_REMINDER_KEY when no active Common Action
+// Item holds it, so a reminder removed and created again is still the one the
+// JEE form ticks; otherwise (another holds it, or other text) it has none.
 export async function createCommonActionItem(
   access: BlendedLearningAccess,
   raw: unknown
@@ -267,10 +302,14 @@ export async function createCommonActionItem(
     return await withTransaction(async (client) => {
       const inserted = await client.query<{ id: number | string }>(
         `INSERT INTO blended_learning_common_action_items
-           (text, owner, target_kind, target_grade, target_mentor_user_id, target_student_ids, created_by_email)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (text, owner, target_kind, target_grade, target_mentor_user_id, target_student_ids, created_by_email, key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7,
+                 CASE WHEN $8::varchar IS NOT NULL AND NOT EXISTS (
+                   SELECT 1 FROM blended_learning_common_action_items held
+                   WHERE ${activeJeeReminderSql("held", "$8::varchar")}
+                 ) THEN $8::varchar END)
          RETURNING id`,
-        [text, owner, ...targetParams(target), access.actorEmail]
+        [text, owner, ...targetParams(target), access.actorEmail, isJeeReminderText(text) ? JEE_FORM_REMINDER_KEY : null]
       );
       const id = Number(inserted.rows[0].id);
       const added = await materialise(client, id);

@@ -3,15 +3,15 @@ import Link from "next/link";
 import type { BlendedLearningAccess } from "@/lib/blended-learning-access";
 
 // The section's top-level tabs, as links so each tab has a URL: a Mentor's
-// My Students, Flags and Resources; a team lead's (a Mentor who supervises
-// other Mentors) Team (their own and their reportees' cards), My Students,
-// Flags and Resources; a Blended Learning Admin's Mentors, Flags and
-// Resources, then Manage for an admin who may manage (not read-only). One bar
-// for all: the first tabs, and what Flags holds (a Mentor's own Students'
-// flags, a team lead's reportees' too), differ. On a narrow phone the tabs
-// wrap rather than hide. Flags carries the "N new" badge: flags raised since
-// the viewer's last visit.
-export type SectionTab = "students" | "mentors" | "flags" | "resources" | "manage";
+// My Students, JEE Form, Flags and Resources; a team lead's (a Mentor who
+// supervises other Mentors) Team (their own and their reportees' cards), My
+// Students, JEE Form (their own Mentees only), Flags and Resources; a Blended
+// Learning Admin's Mentors, JEE Form, Flags and Resources, then Manage for an
+// admin who may manage (not read-only). One bar for all: the first tabs, and
+// what Flags holds (a Mentor's own Students' flags, a team lead's reportees'
+// too), differ. On a narrow phone the tabs wrap rather than hide. Flags
+// carries the "N new" badge: flags raised since the viewer's last visit.
+export type SectionTab = "students" | "mentors" | "jee_form" | "flags" | "resources" | "manage";
 
 // Where a Mentor's own list lives: the landing, or a team lead's My Students
 // tab (their landing is the Team cards).
@@ -26,20 +26,28 @@ type TabLink = { tab: SectionTab; label: string; href: string };
 
 const FLAGS: TabLink = { tab: "flags", label: "Flags", href: "/blended-learning?tab=flags" };
 const RESOURCES: TabLink = { tab: "resources", label: "Resources", href: "/blended-learning/resources" };
-const MENTOR_TABS: TabLink[] = [{ tab: "students", label: "My Students", href: MY_STUDENTS_HREF }, FLAGS, RESOURCES];
-const TEAM_LEAD_TABS: TabLink[] = [
-  { tab: "mentors", label: "Team", href: "/blended-learning" },
-  { tab: "students", label: "My Students", href: TEAM_LEAD_MY_STUDENTS_HREF },
+const JEE_FORM: TabLink = { tab: "jee_form", label: "JEE Form", href: "/blended-learning/jee-form" };
+const MENTOR_TABS: TabLink[] = [
+  { tab: "students", label: "My Students", href: MY_STUDENTS_HREF },
+  JEE_FORM,
   FLAGS,
   RESOURCES,
 ];
-const ADMIN_TABS: TabLink[] = [{ tab: "mentors", label: "Mentors", href: "/blended-learning" }, FLAGS, RESOURCES];
+const TEAM_LEAD_TABS: TabLink[] = [
+  { tab: "mentors", label: "Team", href: "/blended-learning" },
+  { tab: "students", label: "My Students", href: TEAM_LEAD_MY_STUDENTS_HREF },
+  JEE_FORM,
+  FLAGS,
+  RESOURCES,
+];
+const ADMIN_TABS: TabLink[] = [{ tab: "mentors", label: "Mentors", href: "/blended-learning" }, JEE_FORM, FLAGS, RESOURCES];
 const MANAGE: TabLink = { tab: "manage", label: "Manage", href: "/blended-learning/manage" };
 
 // The page's name for the open tab (its H1, visually hidden: the bar names it).
 const SECTION_TAB_TITLE: Record<SectionTab, string> = {
   students: "My Students",
   mentors: "Mentors",
+  jee_form: "JEE Form",
   flags: "Flags",
   resources: "Resources",
   manage: "Manage",

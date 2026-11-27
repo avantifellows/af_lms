@@ -1,0 +1,83 @@
+import { query } from "./db";
+import { canAccessBlendedStudent, type BlendedLearningAccess } from "./blended-learning-access";
+import { JEE_FORM_EXAM } from "./blended-learning-jee-form-input";
+import { jeeExamId } from "./blended-learning-jee-form";
+import { decryptExamPassword } from "./exam-password-crypto";
+import { isPmuOnlyStudent } from "./permissions";
+import { recordExamPasswordReveal } from "./student-exam-records";
+
+// The JEE form's "Show password" (server-only): the one place the Blended
+// Learning side decrypts a Mentee's exam-portal password, and every reveal is
+// logged to `lms_exam_password_reveals` (viewer email and role) before the
+// password is returned. A reveal that can't be logged isn't made.
+//
+// Who: an account that is not read-only (the route's reveal_exam_password
+// check, canBlendedLearning) and has the Student in Blended Learning scope —
+// canAccessBlendedStudent, i.e. a Mentor (team leads included) only for their
+// own Mentees with an active current-year Mapping (never a supervised Mentor's
+// Mentee: view only shows the status alone), a Blended Learning Admin or
+// LMS admin for any Student with one. Read-only accounts never reveal, as on
+// the Exams tab, where a reveal needs edit rights. That gate
+// (`exam-records-gate`) can't be reused: it is school-scoped and gives Blended
+// Learning roles no access.
+//
+// Only the ciphertext of the Student's JEE Mains 2027 record is read. The
+// legacy plaintext `application_password` column is never read here: a record
+// holding only a legacy password counts as having none, and the form asks for
+// the password again.
+
+export type RevealJeePasswordResult =
+  | { ok: true; password: string }
+  | { ok: false; status: 403 | 404; error: string };
+
+const FORBIDDEN: RevealJeePasswordResult = { ok: false, status: 403, error: "Forbidden" };
+// Out of scope: the same answer the JEE form's save and confirmation give.
+const NOT_FOUND: RevealJeePasswordResult = { ok: false, status: 404, error: "Not found" };
+const NONE_SAVED: RevealJeePasswordResult = { ok: false, status: 404, error: "No password saved" };
+
+type CiphertextRow = { id: number | string; exam_id: number | string; application_password_ciphertext: string };
+
+async function jeeCiphertext(studentId: number, examId: number): Promise<CiphertextRow | undefined> {
+  const rows = await query<CiphertextRow>(
+    `SELECT ser.id, ser.exam_id, ser.application_password_ciphertext
+     FROM student_exam_record ser
+     WHERE ser.student_id = $1 AND ser.exam_id = $2 AND ser.exam_year = $3
+       AND ser.application_password_ciphertext IS NOT NULL
+     ORDER BY ser.id DESC
+     LIMIT 1`,
+    [studentId, examId, JEE_FORM_EXAM.examYear]
+  );
+  return rows[0];
+}
+
+// 404 out of scope (another Mentor's Mentee, a supervised Mentor's Mentee,
+// no active Mapping), as the JEE form's other routes answer; 403 for a JNV
+// NVS-only Student; 404 with no password saved. (403 for a read-only account
+// or a role without reveal_exam_password comes from the route's guard,
+// before this runs.)
+// Throws when KMS or the reveal log fails; the caller logs only the error's
+// name, never the ciphertext or the password.
+export async function revealJeeFormPassword(
+  access: BlendedLearningAccess,
+  studentId: number
+): Promise<RevealJeePasswordResult> {
+  if (!(await canAccessBlendedStudent(access, studentId))) return NOT_FOUND;
+  // A safety net, as on the Exams tab: exam registrations aren't collected
+  // for a JNV NVS-only Student.
+  if (await isPmuOnlyStudent(studentId)) return FORBIDDEN;
+
+  const examId = await jeeExamId();
+  if (examId === null) return NONE_SAVED;
+  const row = await jeeCiphertext(studentId, examId);
+  if (!row) return NONE_SAVED;
+
+  const password = await decryptExamPassword(row.application_password_ciphertext, studentId);
+  await recordExamPasswordReveal({
+    studentId,
+    recordId: Number(row.id),
+    examId: Number(row.exam_id),
+    viewerEmail: access.actorEmail,
+    viewerRole: access.role,
+  });
+  return { ok: true, password };
+}

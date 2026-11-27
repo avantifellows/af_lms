@@ -312,6 +312,12 @@ describe("canBlendedLearning", () => {
     ["view_mentors", false, true, true],
     // Resources and Common Action Items: the one thing an admin edits.
     ["manage", false, true, false],
+    // The JEE form (and its password): the Mentor only, never an admin.
+    ["record_jee_form", true, false, false],
+    // Showing the exam-portal password needs edit rights, as on the Exams
+    // tab: a Mentor or an admin, never a read-only account (scope is
+    // canAccessBlendedStudent's: a Mentor's own Mentees only).
+    ["reveal_exam_password", true, true, false],
   ];
 
   it.each(table)("%s: Mentor %s, Admin %s, read-only Admin %s", (action, forMentor, forAdmin, forReadOnly) => {
@@ -321,10 +327,13 @@ describe("canBlendedLearning", () => {
     expect(canBlendedLearning(readOnlyAdmin, action)).toBe(forReadOnly);
   });
 
-  it.each(["log", "upload", "manage_draft", "manage"] as const)("refuses a read-only Mentor %s", (action) => {
-    expect(canBlendedLearning(readOnlyMentor, action)).toBe(false);
-    expect(canBlendedLearning(readOnlyMentor, "view_student")).toBe(true);
-  });
+  it.each(["log", "upload", "manage_draft", "manage", "record_jee_form", "reveal_exam_password"] as const)(
+    "refuses a read-only Mentor %s",
+    (action) => {
+      expect(canBlendedLearning(readOnlyMentor, action)).toBe(false);
+      expect(canBlendedLearning(readOnlyMentor, "view_student")).toBe(true);
+    }
+  );
 
   it("refuses every action without access", () => {
     expect(canBlendedLearning(null, "view_list")).toBe(false);

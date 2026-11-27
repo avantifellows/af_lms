@@ -342,7 +342,7 @@ describe("getMenteeDetail", () => {
         { conversation_id: "10", from_profile_doc: false, id: "100", text: "Old open item", owner: "parent", status: "open", added_on: "2026-10-12" },
         { conversation_id: "12", from_profile_doc: false, id: "120", text: "Revise optics", owner: "student", status: "open", added_on: "2026-10-20" },
         // Pushed: no Conversation. A done one shows in its ticking Conversation's history.
-        { conversation_id: null, from_profile_doc: false, id: "130", text: "Fill in the form", owner: "student", status: "open", added_on: "2026-10-25" },
+        { conversation_id: null, from_profile_doc: false, id: "130", text: "JEE Form Filling (Reminder)", owner: "student", status: "open", added_on: "2026-10-25", jee_reminder: true },
         { conversation_id: null, from_profile_doc: false, id: "131", text: "Same day push", owner: "mentor", status: "open", added_on: "2026-10-20" },
         { conversation_id: null, completed_by_conversation_id: "12", from_profile_doc: false, id: "132", text: "Already done", owner: "parent", status: "done", added_on: "2026-10-01" },
         // A done Profile Doc item stays with the Profile Doc entry, not its ticking Conversation.
@@ -354,7 +354,8 @@ describe("getMenteeDetail", () => {
 
     // Newest first by date; on the same day a Conversation's items come first.
     expect(detail?.openActionItems).toEqual([
-      { id: 130, text: "Fill in the form", owner: "student", agreedOn: "2026-10-25", source: "common" },
+      // The JEE form reminder is marked: it links to the JEE Form tab instead of a tick.
+      { id: 130, text: "JEE Form Filling (Reminder)", owner: "student", agreedOn: "2026-10-25", source: "common", jeeReminder: true },
       { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
       { id: 131, text: "Same day push", owner: "mentor", agreedOn: "2026-10-20", source: "common" },
       { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", source: "conversation" },
@@ -369,7 +370,13 @@ describe("getMenteeDetail", () => {
     expect(conversationItems(10)).toEqual([{ id: 100, text: "Old open item", owner: "parent", status: "open" }]);
     // Every Action Item of the Student is read, a pushed one included.
     const actionItemsSql = mockQuery.mock.calls.map(([sql]) => sql).find((sql) => sql.includes("FROM blended_learning_action_items"));
-    expect(actionItemsSql).toMatch(/WHERE student_id = \$1\s+ORDER BY/);
+    expect(actionItemsSql).toMatch(/WHERE item\.student_id = \$1\s+ORDER BY/);
     expect(actionItemsSql).not.toMatch(/JOIN/);
+    // The reminder is its Common Action Item's key, bound as $2 (not its text,
+    // which the program team may rename; not removed_at, so a removed
+    // reminder's items are still marked).
+    const actionItemsCall = mockQuery.mock.calls.find(([sql]) => sql.includes("FROM blended_learning_action_items"));
+    expect(actionItemsCall?.[1]).toEqual([501, "jee_form_reminder"]);
+    expect(actionItemsSql).toMatch(/WHERE common\.id = item\.common_action_item_id AND common\.key = \$2\)\s+AS jee_reminder/);
   });
 });

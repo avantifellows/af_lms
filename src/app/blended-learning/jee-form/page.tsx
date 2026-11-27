@@ -1,0 +1,68 @@
+import { Card } from "@/components/ui";
+import { canBlendedLearning, isTeamLead, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import { requireBlendedLearningPage } from "@/lib/blended-learning-guard";
+import { countNewFlags } from "@/lib/blended-learning-flags";
+import { listJeeFormRows } from "@/lib/blended-learning-jee-form";
+import type { JeeFormRow } from "@/lib/blended-learning-jee-form-input";
+import { loadDashboardChrome } from "@/lib/dashboard-chrome";
+
+import { BlendedPageShell } from "../BlendedPageShell";
+import { sectionTabTitle, SectionTabs } from "../SectionTabs";
+import { JeeFormTab } from "./JeeFormTab";
+
+// The JEE Form tab: every Student in the viewer's scope (a Mentor's own
+// Mentees; a team lead's own and, status only, their reportees', with a Mentor
+// filter; every Mentor's for a Blended Learning Admin, with a Mentor filter)
+// with their JEE Main 2027 form
+// status, recorded in place. Only the Mentor (not read-only) records; Blended
+// Learning Admins and read-only accounts view, and may still reveal the
+// exam-portal password. The status filter, Mentor filter and open row are URL params read
+// by the client list (`status`, `mentor`, `student`).
+
+// The rows, or null when they can't be read (e.g. a database without the JEE
+// form migration, or no "JEE Mains" exam row): the tab says so.
+async function loadRows(access: BlendedLearningAccess): Promise<JeeFormRow[] | null> {
+  try {
+    return await listJeeFormRows(access);
+  } catch (error) {
+    console.error("Failed to load the JEE Form tab:", error instanceof Error ? error.name : "unknown");
+    return null;
+  }
+}
+
+export default async function JeeFormPage() {
+  const access = await requireBlendedLearningPage("view_list");
+  const [chrome, newFlags, rows] = await Promise.all([
+    loadDashboardChrome(access),
+    countNewFlags(access),
+    loadRows(access),
+  ]);
+  return (
+    <BlendedPageShell access={access} chrome={chrome}>
+      <div className="space-y-5">
+        {/* The header's name isn't a heading, so the open tab names the page. */}
+        <h1 className="sr-only">{sectionTabTitle("jee_form")}</h1>
+        <SectionTabs
+          kind={access.kind}
+          current="jee_form"
+          newFlags={newFlags}
+          canManage={canBlendedLearning(access, "manage")}
+          teamLead={isTeamLead(access)}
+        />
+        {rows ? (
+          <JeeFormTab
+            rows={rows}
+            canRecord={canBlendedLearning(access, "record_jee_form")}
+            canReveal={canBlendedLearning(access, "reveal_exam_password")}
+            showMentor={access.kind === "admin" || isTeamLead(access)}
+            ownMentorUserId={isTeamLead(access) ? (access.mentorUserId ?? null) : null}
+          />
+        ) : (
+          <Card elevation="sm" className="p-4 sm:p-6">
+            <p className="text-sm text-text-secondary">The JEE form can&apos;t be shown right now.</p>
+          </Card>
+        )}
+      </div>
+    </BlendedPageShell>
+  );
+}

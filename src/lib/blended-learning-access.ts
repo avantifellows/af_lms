@@ -19,7 +19,9 @@ export type BlendedLearningAction =
   | "play_recording"
   | "view_flags"
   | "view_mentors"
-  | "manage";
+  | "manage"
+  | "record_jee_form"
+  | "reveal_exam_password";
 
 export type BlendedLearningAccess = {
   // A Blended Learning Mentor sees and logs for their own Mentees; a Blended
@@ -42,7 +44,7 @@ export type BlendedLearningAccess = {
 // "view_only" for a supervised Mentor's Mentee.
 export type BlendedStudentScope = "full" | "view_only";
 
-const MUTATIONS: ReadonlySet<BlendedLearningAction> = new Set(["log", "upload", "manage_draft"]);
+const MUTATIONS: ReadonlySet<BlendedLearningAction> = new Set(["log", "upload", "manage_draft", "record_jee_form"]);
 const ADMIN_ONLY: ReadonlySet<BlendedLearningAction> = new Set(["play_recording", "view_mentors"]);
 
 // A Mentor's `user` id: user_permission.user_id, else the `user` row whose
@@ -111,15 +113,25 @@ export async function getBlendedLearningAccess(
 }
 
 // Only a Mentor who is not read-only mutates Mentee records (logs, uploads,
-// manages drafts), and only their own Mentees (canAccessBlendedStudent,
-// lockMappingInScope); a Blended Learning Admin views them. The Manage page
-// (Resources and Common Action Items) is the one thing an admin edits, and
-// only when not read-only; Mentors never. Recordings and every Mentor's cards
-// (view_mentors) are for Blended Learning Admins (including read-only ones); a
-// team lead gets only their own and their reportees' cards (isTeamLead,
-// listMentorCards). Everyone sees flags: an
+// manages drafts, records the JEE form), and only their own Mentees
+// (canAccessBlendedStudent, lockMappingInScope); a Blended Learning Admin views
+// them. The Manage page (Resources and Common Action Items) is the one thing an
+// admin edits, and only when not read-only; Mentors never. Recordings and every
+// Mentor's cards (view_mentors) are for Blended Learning Admins (including
+// read-only ones); a team lead gets only their own and their reportees' cards
+// (isTeamLead, listMentorCards). Everyone sees flags: an
 // admin every flag, a Mentor only those on their own Students
-// (blended-learning-flags).
+// (blended-learning-flags). The JEE form, with the Mentee's exam-portal
+// password, is recorded only by their Mentor (a mutation above): a Blended
+// Learning Admin sees it but never fills it or sets the password. Revealing
+// that password needs edit rights, as on the Exams tab (exam-records-gate): a
+// Mentor or admin who is not read-only may, and only for a Student in their
+// scope (canAccessBlendedStudent: a Mentor's own Mentees, any mapped Student
+// for an admin); each reveal is logged (blended-learning-jee-password).
+// Read-only accounts, Mentor or admin, never reveal it. A team lead's
+// supervised Mentees are view only: their JEE status alone (getJeeFormLine,
+// listJeeFormRows), never recording, revealing or the confirmation (full
+// scope only).
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction
@@ -127,6 +139,7 @@ export function canBlendedLearning(
   if (!access) return false;
   if (MUTATIONS.has(action)) return access.kind === "mentor" && !access.readOnly;
   if (action === "manage") return access.kind === "admin" && !access.readOnly;
+  if (action === "reveal_exam_password") return !access.readOnly;
   if (ADMIN_ONLY.has(action)) return access.kind === "admin";
   return true;
 }
@@ -205,6 +218,12 @@ export function supervisedMentor(access: BlendedLearningAccess, mentorUserId: nu
 function scopeForMapping(access: BlendedLearningAccess, mappedMentorUserId: number): BlendedStudentScope | null {
   if (access.kind === "admin" || mappedMentorUserId === access.mentorUserId) return "full";
   return supervisedMentor(access, mappedMentorUserId) === null ? null : "view_only";
+}
+
+// A Mentor's display name from the `user` row `alias` (joined on the
+// Mapping's mentor_user_id, `idSql`): full name, else email, else "Mentor <id>".
+export function mentorNameSql(alias: string, idSql: string): string {
+  return `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${alias}.first_name, ${alias}.last_name)), ''), ${alias}.email, CONCAT('Mentor ', ${idSql}))`;
 }
 
 // A Student is in scope with an active current-year Mapping and not marked a

@@ -1,0 +1,450 @@
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { JeeFormUpdate, JeeFormView } from "@/lib/blended-learning-jee-form-input";
+
+import { JeeFormPanel } from "./JeeFormPanel";
+
+const REMINDER_OPEN = { id: 81, text: "JEE Form Filling (Reminder)", status: "open" as const };
+const EMPTY: JeeFormView = {
+  current: null,
+  earlier: [],
+  reminderItems: [REMINDER_OPEN],
+  passwordSaved: false,
+  sessionsApplied: [],
+};
+const FILLED: JeeFormUpdate = {
+  id: 3,
+  status: "filled",
+  applicationNumber: "270310000001",
+  hasConfirmation: true,
+  reasons: [],
+  details: null,
+  recordedOn: "2026-11-10",
+  flagRaised: false,
+};
+const NOT_FILLED: JeeFormUpdate = {
+  id: 2,
+  status: "not_filled",
+  applicationNumber: null,
+  hasConfirmation: false,
+  reasons: ["certificate_not_available", "other"],
+  details: "Waiting for the income certificate",
+  recordedOn: "2026-11-03",
+  flagRaised: true,
+};
+const SAVED_FILLED: JeeFormView = {
+  current: FILLED,
+  earlier: [NOT_FILLED],
+  reminderItems: [{ ...REMINDER_OPEN, status: "done" }],
+  passwordSaved: true,
+  sessionsApplied: [1, 2],
+};
+// A fake exam-portal password, as a Mentor would type it.
+const TYPED = "fake-portal-pass-1";
+
+let fetchMock: ReturnType<typeof vi.fn>;
+const onSaved = vi.fn();
+const onClose = vi.fn();
+
+function sentForm(): FormData {
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("/api/blended-learning/students/501/jee-form");
+  expect(init.method).toBe("POST");
+  return init.body as FormData;
+}
+
+// A recorder (canRecord) is a Mentor who is not read-only, so may reveal; a
+// viewer may reveal unless read-only.
+function panel(form: JeeFormView, canRecord = true, canReveal = true) {
+  return render(
+    <JeeFormPanel studentId={501} form={form} canRecord={canRecord} canReveal={canReveal} onSaved={onSaved} onClose={onClose} />
+  );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  fetchMock = vi.fn(async () => new Response(JSON.stringify({ form: SAVED_FILLED }), { status: 201 }));
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("JeeFormPanel for a recorder", () => {
+  it("opens straight to the choice; Filled asks for a required, masked, write-only password", async () => {
+    panel(EMPTY);
+
+    const group = screen.getByRole("group", { name: "Has the student filled the form?" });
+    expect(within(group).getAllByRole("radio").map((radio) => radio.closest("label")?.textContent)).toEqual([
+      "Filled",
+      "Not filled",
+    ]);
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    expect(screen.getByLabelText("Application number")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Confirmation page/)).toHaveAttribute("accept", "application/pdf,.pdf");
+    const password = screen.getByLabelText("Exam portal password");
+    expect(password).toBeRequired();
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveAttribute("autocomplete", "new-password");
+    expect(password).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Show password" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show typed password" }));
+    expect(password).toHaveAttribute("type", "text");
+  });
+
+  it("is prefilled from what is saved, and Cancel closes the row", async () => {
+    panel({ current: NOT_FILLED, earlier: [], reminderItems: [], passwordSaved: false, sessionsApplied: [] });
+
+    expect(screen.getByRole("radio", { name: "Not filled" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Other" })).toBeChecked();
+    expect(screen.getByLabelText("Details")).toHaveValue("Waiting for the income certificate");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("links the saved confirmation page from the Filled form", () => {
+    panel(SAVED_FILLED);
+    expect(screen.getByRole("link", { name: "View PDF" })).toHaveAttribute(
+      "href",
+      "/api/blended-learning/students/501/jee-form/confirmation"
+    );
+  });
+
+  it("needs an application number and, while none is saved, the password before posting", async () => {
+    panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText("Enter the application number.")).toBeInTheDocument();
+    expect(screen.getByText("Enter the exam portal password.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Choose the session the student applied for: Session 1, Session 2 or both.")
+    ).toBeInTheDocument();
+
+    // A number alone is still not enough: no partial details now, password later.
+    await userEvent.type(screen.getByLabelText("Application number"), "270310000001");
+    await userEvent.type(screen.getByLabelText("Exam portal password"), "   ");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Enter the exam portal password.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Exam portal password")).toHaveAttribute("aria-invalid", "true");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("names the open reminder by its current text, so a renamed one reads right", async () => {
+    panel({ ...EMPTY, reminderItems: [{ ...REMINDER_OPEN, text: "Fill the JEE Main form" }] });
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    expect(screen.getByText("Saving ticks the student's “Fill the JEE Main form” action item.")).toBeInTheDocument();
+  });
+
+  it("posts the number and the PDF, then shows what was saved with the ticked reminder", async () => {
+    const { rerender } = panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    expect(screen.getByText(/Saving ticks the student's “JEE Form Filling \(Reminder\)” action item/)).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Application number"), "270310000001");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 2" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
+    await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
+    const pdf = new File(["%PDF-"], "confirmation.pdf", { type: "application/pdf" });
+    await userEvent.upload(screen.getByLabelText(/Confirmation page/), pdf);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const body = sentForm();
+    expect([...new Set(body.keys())].sort()).toEqual(["applicationNumber", "confirmation", "password", "sessions", "status"]);
+    expect(body.getAll("sessions")).toEqual(["1", "2"]);
+    expect(body.get("status")).toBe("filled");
+    expect(body.get("password")).toBe(TYPED);
+    expect(body.get("applicationNumber")).toBe("270310000001");
+    expect((body.get("confirmation") as File).name).toBe("confirmation.pdf");
+    expect(onSaved).toHaveBeenCalledWith(SAVED_FILLED);
+
+    // The tab passes the saved form back down.
+    rerender(<JeeFormPanel studentId={501} form={SAVED_FILLED} canRecord canReveal onSaved={onSaved} onClose={onClose} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Saved");
+    expect(screen.getByText("270310000001")).toHaveClass("font-mono");
+    expect(screen.getByText("Sessions applied").nextElementSibling).toHaveTextContent("Session 1, Session 2");
+    expect(screen.getByText("JEE Form Filling (Reminder)")).toHaveClass("line-through");
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
+    // Only that a password is saved; the typed one is gone with the draft.
+    expect(screen.getByText("Saved", { selector: "span" })).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(TYPED);
+    await userEvent.click(screen.getByRole("button", { name: "Change status" }));
+    expect(screen.getByRole("radio", { name: "Filled" })).toBeChecked();
+    expect(screen.getByText("Password saved")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Exam portal password")).not.toBeInTheDocument();
+  });
+
+  it("refuses a confirmation that isn't a PDF in the browser", async () => {
+    panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    await userEvent.type(screen.getByLabelText("Application number"), "2703");
+    await userEvent.upload(screen.getByLabelText(/Confirmation page/), new File(["x"], "photo.png", { type: "image/png" }), {
+      applyAccept: false,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText("Choose a PDF file.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's field error, such as a number held by another record, and keeps the form", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "This application number is already saved for JEE Advanced.",
+          fieldErrors: { applicationNumber: "This application number is already saved for JEE Advanced." },
+        }),
+        { status: 409 }
+      )
+    );
+    panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    await userEvent.type(screen.getByLabelText("Application number"), "2703");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
+    await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("This application number is already saved for JEE Advanced.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Application number")).toHaveValue("2703");
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("says so when the save can't reach the server", async () => {
+    fetchMock.mockRejectedValue(new TypeError("offline"));
+    panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    await userEvent.type(screen.getByLabelText("Application number"), "2703");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
+    await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't save. Check your connection and try again.");
+  });
+});
+
+describe("JeeFormPanel sessions applied", () => {
+  it("asks for Session 1 / Session 2 only when Filled, and needs at least one before posting", async () => {
+    panel(EMPTY);
+    expect(screen.queryByRole("group", { name: "Sessions applied" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
+    expect(screen.queryByRole("group", { name: "Sessions applied" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Session 1" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    const sessions = screen.getByRole("group", { name: "Sessions applied" });
+    expect(within(sessions).getAllByRole("checkbox").map((box) => box.closest("label")?.textContent)).toEqual([
+      "Session 1",
+      "Session 2",
+    ]);
+    expect(within(sessions).getByRole("checkbox", { name: "Session 1" })).not.toBeChecked();
+
+    await userEvent.type(screen.getByLabelText("Application number"), "270310000001");
+    await userEvent.type(screen.getByLabelText("Exam portal password"), TYPED);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      screen.getByText("Choose the session the student applied for: Session 1, Session 2 or both.")
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Ticking one clears the message; it is posted once per session.
+    await userEvent.click(within(sessions).getByRole("checkbox", { name: "Session 2" }));
+    expect(screen.queryByText(/Choose the session the student applied for/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().getAll("sessions")).toEqual(["2"]);
+  });
+
+  it("is pre-filled from the exam record's saved sessions, even before Filled is recorded", async () => {
+    panel({ ...EMPTY, sessionsApplied: [2] });
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    expect(screen.getByRole("checkbox", { name: "Session 1" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Session 2" })).toBeChecked();
+  });
+
+  it("posts the saved sessions on a re-save, and what is unticked is left out", async () => {
+    panel(SAVED_FILLED);
+    expect(screen.getByRole("checkbox", { name: "Session 1" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Session 2" })).toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Session 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().getAll("sessions")).toEqual(["2"]);
+  });
+
+  it("sends no sessions with Not filled, even when some were ticked under Filled", async () => {
+    panel(SAVED_FILLED);
+    await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Not aware about the exam" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().has("sessions")).toBe(false);
+  });
+
+  it("shows the saved sessions read-only for Filled, or Not recorded when the record has none", () => {
+    const { unmount } = panel(SAVED_FILLED, false);
+    expect(screen.getByText("Sessions applied").nextElementSibling).toHaveTextContent("Session 1, Session 2");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    unmount();
+    panel({ ...SAVED_FILLED, sessionsApplied: [] }, false);
+    expect(screen.getByText("Sessions applied").nextElementSibling).toHaveTextContent("Not recorded");
+  });
+
+  it("shows no sessions for Not filled", () => {
+    panel({ ...SAVED_FILLED, current: NOT_FILLED }, false);
+    expect(screen.queryByText("Sessions applied")).not.toBeInTheDocument();
+  });
+});
+
+describe("JeeFormPanel with a password already saved", () => {
+  it("shows Password saved, posts without a password to keep it, and offers Replace", async () => {
+    panel(SAVED_FILLED);
+    expect(screen.getByText("Password saved")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Exam portal password")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().has("password")).toBe(false);
+  });
+
+  it("replaces it only when a new one is typed; blank keeps the saved one", async () => {
+    panel(SAVED_FILLED);
+    await userEvent.click(screen.getByRole("button", { name: "Replace password" }));
+    const field = screen.getByLabelText(/Exam portal password/);
+    expect(field).not.toBeRequired();
+    await userEvent.click(screen.getByRole("button", { name: "Keep saved password" }));
+    expect(screen.getByText("Password saved")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Replace password" }));
+    await userEvent.type(screen.getByLabelText(/Exam portal password/), "fake-new-pass-2");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sentForm().get("password")).toBe("fake-new-pass-2");
+  });
+
+  it("reveals it on Show password through the logged POST, and Hide forgets it", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ password: "fake-revealed-3" }), { status: 200 }));
+    panel(SAVED_FILLED);
+    await userEvent.click(screen.getByRole("button", { name: "Show password" }));
+
+    expect(await screen.findByText("fake-revealed-3")).toHaveClass("font-mono");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/blended-learning/students/501/jee-form/password");
+    expect(init).toMatchObject({ method: "POST", cache: "no-store" });
+    await userEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(screen.queryByText("fake-revealed-3")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [403, "Forbidden"],
+    // Out of scope (the Mapping ended since the page loaded): as any other failure.
+    [404, "Not found"],
+  ])("says so when the reveal is refused (%i)", async (status, error) => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error }), { status }));
+    panel(SAVED_FILLED, false);
+    await userEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(error);
+    expect(screen.getByRole("button", { name: "Show password" })).toBeInTheDocument();
+  });
+});
+
+describe("JeeFormPanel recording Not filled", () => {
+  it("offers the eleven reasons and needs at least one", async () => {
+    panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
+
+    const reasons = screen.getByRole("group", { name: "Why hasn't it been filled?" });
+    expect(within(reasons).getAllByRole("checkbox")).toHaveLength(11);
+    expect(within(reasons).getByRole("checkbox", { name: "Will fill the form after parent's get the salary" })).toBeInTheDocument();
+    expect(screen.getByText("Saving flags this to the program team.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Choose at least one reason.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("makes details required once Other is ticked, then posts every reason and the details", async () => {
+    panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
+    expect(screen.getByLabelText(/Details/)).not.toBeRequired();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Not aware about the exam" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Other" }));
+    expect(screen.getByLabelText("Details")).toBeRequired();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Describe the other reason.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await userEvent.type(screen.getByLabelText("Details"), "Family moved this month");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const body = sentForm();
+    expect(body.get("status")).toBe("not_filled");
+    expect(body.getAll("reasons")).toEqual(["not_aware", "other"]);
+    expect(body.get("details")).toBe("Family moved this month");
+    expect(body.has("applicationNumber")).toBe(false);
+    expect(onSaved).toHaveBeenCalled();
+  });
+});
+
+describe("JeeFormPanel for a viewer (an admin or a read-only account)", () => {
+  it("says Not recorded yet, with no form and Record status disabled as View only", () => {
+    panel(EMPTY, false);
+    expect(screen.getByText("Not recorded yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    const record = screen.getByRole("button", { name: "Record status" });
+    expect(record).toBeDisabled();
+    expect(record).toHaveAttribute("title", "View only");
+  });
+
+  it("shows an admin Filled with the number, PDF link and an enabled Show password; Change status is disabled as View only", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ password: "fake-revealed-4" }), { status: 200 }));
+    panel(SAVED_FILLED, false);
+    expect(screen.getByText("270310000001")).toHaveClass("font-mono");
+    expect(screen.getByRole("link", { name: "View PDF" })).toBeInTheDocument();
+    const change = screen.getByRole("button", { name: "Change status" });
+    expect(change).toBeDisabled();
+    expect(change).toHaveAttribute("title", "View only");
+    await userEvent.click(change);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replace password" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Exam portal password/)).not.toBeInTheDocument();
+
+    const show = screen.getByRole("button", { name: "Show password" });
+    expect(show).toBeEnabled();
+    await userEvent.click(show);
+    expect(await screen.findByText("fake-revealed-4")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/blended-learning/students/501/jee-form/password");
+  });
+
+  it("gives a read-only account Show password disabled as View only, still saying the password is saved", async () => {
+    panel(SAVED_FILLED, false, false);
+    expect(screen.getByText("Saved", { selector: "span" })).toBeInTheDocument();
+    const show = screen.getByRole("button", { name: "Show password" });
+    expect(show).toBeDisabled();
+    expect(show).toHaveAttribute("title", "View only");
+    await userEvent.click(show);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("says Not saved for a Filled form without a password, with nothing to reveal", () => {
+    panel({ ...SAVED_FILLED, passwordSaved: false }, false);
+    expect(screen.getByText("Not saved")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show password" })).not.toBeInTheDocument();
+  });
+
+  it("shows Not filled with its reasons, details and flag, and earlier updates", async () => {
+    panel({ current: NOT_FILLED, earlier: [FILLED], reminderItems: [], passwordSaved: false, sessionsApplied: [] }, false);
+
+    expect(within(screen.getByRole("list", { name: "Reasons" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Certificate is not available",
+      "Other",
+    ]);
+    expect(screen.getByText("Waiting for the income certificate")).toBeInTheDocument();
+    expect(screen.getByText("Flagged to the program team")).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Earlier updates (1)"));
+    expect(screen.getByText(/Filled · 270310000001/)).toBeInTheDocument();
+  });
+});

@@ -12,7 +12,9 @@ const {
   mockRedirect,
   mockNotFound,
   mockLoadDashboardChrome,
+  mockGetJeeForm,
 } = vi.hoisted(() => ({
+  mockGetJeeForm: vi.fn(),
   mockLoadDashboardChrome: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
 vi.mock("@/lib/blended-learning-mentee-detail", () => ({ getMenteeDetail: mockGetMenteeDetail }));
 vi.mock("@/lib/blended-learning-drafts", () => ({ getDraftStatus: mockGetDraftStatus }));
 vi.mock("@/lib/dashboard-chrome", () => ({ loadDashboardChrome: mockLoadDashboardChrome }));
+vi.mock("@/lib/blended-learning-jee-form", () => ({ getJeeFormLine: mockGetJeeForm }));
 // DraftStatus polls and has its own tests; here only the props it gets matter.
 vi.mock("./DraftStatus", () => ({
   DraftStatus: (props: Record<string, unknown>) => {
@@ -86,6 +89,8 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   };
 }
 
+const JEE_FORM = { current: null, earlier: [], reminderItems: [], passwordSaved: false, sessionsApplied: [] };
+
 function signedInAs(access: { actorEmail: string }) {
   mockGetServerSession.mockResolvedValue({ user: { email: access.actorEmail } });
   mockGetBlendedLearningAccess.mockResolvedValue(access);
@@ -102,6 +107,7 @@ beforeEach(() => {
   mockGetMenteeDetail.mockResolvedValue(MENTEE);
   mockGetDraftStatus.mockResolvedValue(null);
   mockLoadDashboardChrome.mockResolvedValue(null);
+  mockGetJeeForm.mockResolvedValue(JEE_FORM);
   // ConversationPhotos loads its photos as it mounts.
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ photos: [] }))));
 });
@@ -255,6 +261,46 @@ describe("MenteeDetailPage", () => {
       expect(mockDraftStatus).toHaveBeenCalledWith(
         expect.objectContaining({ canManage: false, reviewHref: null, initialRetryOffered: false, hideActions: true })
       );
+    });
+
+    it("shows the JEE status only: Filled or Not filled with its reasons and date, nothing to record or reveal", async () => {
+      mockGetMenteeDetail.mockResolvedValue({
+        ...SUPERVISED,
+        openActionItems: [
+          { id: 130, text: "JEE Form Filling (Reminder)", owner: "student", agreedOn: "2026-10-25", source: "common", jeeReminder: true },
+        ],
+      });
+      mockGetJeeForm.mockResolvedValue({
+        statusOnly: true,
+        current: { status: "not_filled", reasons: ["not_aware"], recordedOn: "2026-11-10" },
+      });
+
+      await renderPage("502");
+
+      expect(mockGetJeeForm).toHaveBeenCalledWith(SUPERVISOR, 502);
+      const line = screen.getByRole("region", { name: "JEE Main 2027 form" });
+      expect(within(line).getByText("Not filled")).toBeInTheDocument();
+      expect(within(line).getByText("Not aware about the exam")).toBeInTheDocument();
+      expect(within(line).getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
+      expect(within(line).getByRole("link", { name: "View in JEE tab" })).toHaveAttribute(
+        "href",
+        "/blended-learning/jee-form?student=502"
+      );
+      expect(within(line).queryByRole("button")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /password/i })).not.toBeInTheDocument();
+      const items = screen.getByRole("region", { name: "Open Action Items" });
+      expect(within(items).getByRole("link", { name: "View in JEE tab" })).toBeInTheDocument();
+    });
+
+    it("shows a supervised Mentee's Filled status with no application number", async () => {
+      mockGetJeeForm.mockResolvedValue({ statusOnly: true, current: { status: "filled", reasons: [], recordedOn: "2026-11-10" } });
+
+      await renderPage("502");
+
+      const line = screen.getByRole("region", { name: "JEE Main 2027 form" });
+      expect(within(line).getByText("Filled")).toBeInTheDocument();
+      expect(within(line).queryByText(/App no\./)).not.toBeInTheDocument();
+      expect(within(line).queryByText(/Session/)).not.toBeInTheDocument();
     });
 
     it("sends them back to the supervised Mentor's list, or to Flags when they came from it", async () => {
@@ -628,5 +674,110 @@ describe("MenteeDetailPage", () => {
     expect(recordingOnly.getByRole("button", { name: "Play recording" })).toBeInTheDocument();
     expect(recordingOnly.queryByRole("button", { name: "Show transcript" })).not.toBeInTheDocument();
     expect(neither.queryByRole("region", { name: "Call Recording" })).not.toBeInTheDocument();
+  });
+
+  describe("the JEE form status line", () => {
+    const FILLED = {
+      id: 3, status: "filled" as const, applicationNumber: "270310000001", hasConfirmation: false, reasons: [],
+      details: null, recordedOn: "2026-11-10", flagRaised: false,
+    };
+    const NOT_FILLED = {
+      ...FILLED, status: "not_filled" as const, applicationNumber: null, reasons: ["not_aware" as const, "other" as const],
+      details: "Moving", flagRaised: true,
+    };
+    const line = () => screen.getByRole("region", { name: "JEE Main 2027 form" });
+
+    it.each([
+      ["a Mentor", MENTOR, "Fill in JEE tab"],
+      ["a team lead on their own Mentee", { ...MENTOR, actorEmail: "lead@test.local", supervisedMentorUserIds: [9002] }, "Fill in JEE tab"],
+      ["a Blended Learning Admin", BLENDED_ADMIN, "View in JEE tab"],
+      ["a read-only Blended Learning Admin", READ_ONLY_ADMIN, "View in JEE tab"],
+    ] as const)("shows %s Not recorded and links to the Student's row in the JEE Form tab", async (_who, access, link) => {
+      signedInAs(access);
+
+      await renderPage();
+
+      expect(mockGetJeeForm).toHaveBeenCalledWith(access, 501);
+      expect(within(line()).getByText("Not recorded")).toBeInTheDocument();
+      expect(within(line()).getByRole("link", { name: link })).toHaveAttribute("href", "/blended-learning/jee-form?student=501");
+      // The form itself lives in the JEE Form tab.
+      expect(within(line()).queryByRole("radio")).not.toBeInTheDocument();
+      expect(within(line()).queryByRole("button")).not.toBeInTheDocument();
+    });
+
+    it("shows Filled with the application number and the sessions applied, and Update for a recorder", async () => {
+      signedInAs(MENTOR);
+      mockGetJeeForm.mockResolvedValue({
+        current: FILLED,
+        earlier: [],
+        reminderItems: [],
+        passwordSaved: false,
+        sessionsApplied: [1, 2],
+      });
+
+      await renderPage();
+
+      expect(within(line()).getByText("Filled")).toBeInTheDocument();
+      expect(within(line()).getByText("270310000001")).toHaveClass("font-mono");
+      expect(within(line()).getByText("1, 2")).toHaveClass("font-mono");
+      expect(within(line()).getByText("1, 2").previousElementSibling).toHaveTextContent("Sessions");
+      expect(within(line()).getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
+      expect(within(line()).getByRole("link", { name: "Update in JEE tab" })).toBeInTheDocument();
+    });
+
+    it("shows Not filled with its reasons", async () => {
+      signedInAs(MENTOR);
+      mockGetJeeForm.mockResolvedValue({
+        current: NOT_FILLED,
+        earlier: [],
+        reminderItems: [],
+        passwordSaved: false,
+        sessionsApplied: [1],
+      });
+
+      await renderPage();
+
+      expect(within(line()).getByText("Not filled")).toBeInTheDocument();
+      expect(within(line()).getByText("Not aware about the exam; Other")).toBeInTheDocument();
+      // Sessions are a Filled detail only.
+      expect(within(line()).queryByText(/Session/)).not.toBeInTheDocument();
+    });
+
+    it("still renders the page when the status fails to load, without logging what failed", async () => {
+      signedInAs(MENTOR);
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockGetJeeForm.mockRejectedValue(Object.assign(new Error("relation does not exist"), { name: "DatabaseError" }));
+
+      await renderPage();
+
+      expect(screen.getByRole("heading", { name: "Ira Sharma" })).toBeInTheDocument();
+      expect(within(line()).getByText("Can't be shown right now")).toBeInTheDocument();
+      expect(within(line()).getByRole("link", { name: "Fill in JEE tab" })).toBeInTheDocument();
+      expect(error).toHaveBeenCalledWith("Failed to load the JEE form status:", "DatabaseError");
+      error.mockRestore();
+    });
+
+    it.each([
+      ["a Mentor", MENTOR, "Fill in JEE tab"],
+      ["a Blended Learning Admin", BLENDED_ADMIN, "View in JEE tab"],
+    ] as const)("links the JEE Form Filling (Reminder) Open Action Item to the JEE Form tab for %s", async (_who, access, link) => {
+      signedInAs(access);
+      mockGetMenteeDetail.mockResolvedValue({
+        ...MENTEE,
+        openActionItems: [
+          { id: 130, text: "JEE Form Filling (Reminder)", owner: "student", agreedOn: "2026-10-25", source: "common", jeeReminder: true },
+          { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
+        ],
+      });
+
+      await renderPage();
+
+      const [reminder, other] = within(screen.getByRole("region", { name: "Open Action Items" })).getAllByRole("listitem");
+      expect(within(reminder).getByRole("link", { name: link })).toHaveAttribute(
+        "href",
+        "/blended-learning/jee-form?student=501"
+      );
+      expect(within(other).queryByRole("link")).not.toBeInTheDocument();
+    });
   });
 });

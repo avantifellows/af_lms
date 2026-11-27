@@ -83,7 +83,7 @@ describe("ResourcesPage", () => {
     render(await ResourcesPage());
 
     const tabs = screen.getByRole("navigation", { name: "Mentor views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["My Students", "Flags3 new", "Resources"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["My Students", "JEE Form", "Flags3 new", "Resources"]);
     expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("href", "/blended-learning");
     expect(within(tabs).getByRole("link", { name: "Resources" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 1, name: "Resources" })).toBeInTheDocument();
@@ -111,6 +111,7 @@ describe("ResourcesPage", () => {
     expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
       "Team",
       "My Students",
+      "JEE Form",
       "Flags3 new",
       "Resources",
     ]);
@@ -136,6 +137,7 @@ describe("ResourcesPage", () => {
     const tabs = screen.getByRole("navigation", { name: "Admin views" });
     expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
       "Mentors",
+      "JEE Form",
       "Flags3 new",
       "Resources",
       "Manage",
@@ -149,7 +151,7 @@ describe("ResourcesPage", () => {
     render(await ResourcesPage());
 
     const tabs = screen.getByRole("navigation", { name: "Admin views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Mentors", "Flags3 new", "Resources"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Mentors", "JEE Form", "Flags3 new", "Resources"]);
     expect(within(tabs).getByRole("link", { name: "Resources" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: TOOLKIT })).toBeInTheDocument();
   });

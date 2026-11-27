@@ -3,10 +3,10 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useOptimistic, useTransition, type ChangeEvent } from "react";
 
-import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
+import type { FeedFlagRecipient } from "@/lib/blended-learning-flags";
 
 import { BlendedSelect } from "./BlendedSelect";
-import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
+import { FEED_FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 
 // The Flags feed's filters: Mentor (admins only) and Flag Recipient. Changing either one
 // applies it straight away: the URL is pushed with the new filters, so the
@@ -20,7 +20,7 @@ export type FlagsFilterValues = {
   // Null for a Mentor's own feed: no Mentor filter.
   mentors: { mentorUserId: number; name: string }[] | null;
   mentorUserId: number | null;
-  recipient: FlagRecipient | null;
+  recipient: FeedFlagRecipient | null;
   since: string;
 };
 
@@ -85,9 +85,9 @@ export function FlagsFilters({ filters }: { filters: FlagsFilterValues }) {
           className="bg-bg-input text-text-primary"
         >
           <option value="">All recipients</option>
-          {(Object.keys(FLAG_RECIPIENT) as FlagRecipient[]).map((recipient) => (
+          {(Object.keys(FEED_FLAG_RECIPIENT) as FeedFlagRecipient[]).map((recipient) => (
             <option key={recipient} value={recipient}>
-              {FLAG_RECIPIENT[recipient]}
+              {FEED_FLAG_RECIPIENT[recipient]}
             </option>
           ))}
         </BlendedSelect>

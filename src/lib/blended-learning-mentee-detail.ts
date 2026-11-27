@@ -6,6 +6,7 @@ import {
   canViewBlendedStudent,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
+import { JEE_FORM_REMINDER_KEY, jeeReminderMatchSql } from "./blended-learning-jee-reminder";
 import type { OpenDraftState } from "./blended-learning-mentees";
 import { getObjectText, headObject, presignDocumentPage } from "./s3";
 
@@ -34,7 +35,13 @@ export type ActionItemSource = "conversation" | "profile_doc" | "common";
 // An open Action Item with the date of the Conversation that agreed it (for
 // a Profile Doc one, that entry's date, legacy_last_contact_on; for a pushed
 // one, the date it was pushed).
-export type OpenActionItem = Omit<ActionItem, "status" | "source"> & { agreedOn: string; source: ActionItemSource };
+// `jeeReminder` marks the "JEE Form Filling (Reminder)" item, which is ticked
+// from the JEE Form tab, never by hand.
+export type OpenActionItem = Omit<ActionItem, "status" | "source"> & {
+  agreedOn: string;
+  source: ActionItemSource;
+  jeeReminder?: true;
+};
 export type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type MentorFlag = { recipient: FlagRecipient; comment: string | null };
 // The Mentor's once-per-Student ratings of the Screener, each 1 to 5.
@@ -175,6 +182,8 @@ type ActionItemRow = {
   // IST date it was added: when a Common Action Item was pushed, or a
   // Profile Doc item's date when its entry has none.
   added_on: string;
+  // Pushed from the "JEE Form Filling (Reminder)" Common Action Item.
+  jee_reminder?: boolean;
 };
 
 // Rows by Conversation; Profile Doc and pushed Action Items have no
@@ -213,6 +222,7 @@ function openItem(item: ActionItemRow, agreedOn: string): OpenActionItem {
     owner: item.owner,
     agreedOn,
     source: itemSource(item),
+    ...(item.jee_reminder ? { jeeReminder: true as const } : {}),
   };
 }
 
@@ -365,17 +375,21 @@ export async function getMenteeDetail(
       [studentId]
     ),
     query<ActionItemRow>(
-      `SELECT conversation_id, completed_by_conversation_id, from_profile_doc, id, text, owner, status,
-              ((inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS added_on
-       FROM blended_learning_action_items
-       WHERE student_id = $1
-       ORDER BY conversation_id, position, id`,
-      [studentId]
+      `SELECT item.conversation_id, item.completed_by_conversation_id, item.from_profile_doc, item.id, item.text,
+              item.owner, item.status,
+              ((item.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS added_on,
+              EXISTS (SELECT 1 FROM blended_learning_common_action_items common
+                      WHERE common.id = item.common_action_item_id AND ${jeeReminderMatchSql("common", "$2")})
+                AS jee_reminder
+       FROM blended_learning_action_items item
+       WHERE item.student_id = $1
+       ORDER BY item.conversation_id, item.position, item.id`,
+      [studentId, JEE_FORM_REMINDER_KEY]
     ),
     query<FlagRow>(
       `SELECT conversation_id, recipient, comment
        FROM blended_learning_mentor_flags
-       WHERE student_id = $1
+       WHERE student_id = $1 AND conversation_id IS NOT NULL
        ORDER BY conversation_id, CASE recipient
          WHEN 'emotional_wellbeing' THEN 1 WHEN 'physics' THEN 2 WHEN 'chemistry' THEN 3 ELSE 4 END`,
       [studentId]

@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-11-16
+last_updated: 2026-11-24
 ---
 
 # Student Addition
@@ -195,7 +195,12 @@ exam-portal password with AWS KMS (`src/lib/exam-password-crypto.ts`, key
 `EXAM_PASSWORD_KMS_KEY_ID`, its own IAM user) before it goes to the DB Service, which stores
 the base64 ciphertext in `student_exam_record.application_password_ciphertext` without any
 key that could read it; BigQuery gets the ciphertext only. The encryption context carries
-the Student id, so a ciphertext copied to another Student's row won't decrypt. No read in
+the Student id, so a ciphertext copied to another Student's row won't decrypt.
+`EXAM_PASSWORD_KMS_ENDPOINT` points the client at the e2e fake KMS; with `NODE_ENV=production`
+it is honoured only for a loopback host (`localhost`, `127.0.0.1`, `::1`, parsed with `new URL`;
+anything else or a malformed value is ignored for the AWS endpoint, with one `console.warn` that
+never names the value), so a stray setting can't send passwords and signed requests elsewhere
+(2026-11-24). No read in
 the LMS selects a password: the tab and the card both get `has_password` (ciphertext, or a
 non-blank legacy plaintext the backfill has not reached). A stored password shows masked
 with **Show** (roles with `exam_passwords` view), **Change** and **Remove**. Show calls

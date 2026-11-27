@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DecryptCommand, EncryptCommand, KMSClient } from "@aws-sdk/client-kms";
 import {
@@ -65,5 +65,73 @@ describe("decryptExamPassword", () => {
     kms.on(DecryptCommand).rejects(new Error("InvalidCiphertextException"));
 
     await expect(decryptExamPassword("AQID", 8)).rejects.toThrow("InvalidCiphertextException");
+  });
+});
+
+describe("the EXAM_PASSWORD_KMS_ENDPOINT override (the e2e fake KMS)", () => {
+  // The endpoint the KMS client was built with, or undefined for AWS's own.
+  async function endpointUsed(): Promise<string | undefined> {
+    kms.on(EncryptCommand).resolves({ CiphertextBlob: new Uint8Array([1]) });
+    await encryptExamPassword("fake-portal-pass", 7);
+    const client = kms.send.getCall(0).thisValue as KMSClient;
+    const endpoint = await client.config.endpoint?.();
+    return endpoint ? `${endpoint.protocol}//${endpoint.hostname}${endpoint.port ? `:${endpoint.port}` : ""}` : undefined;
+  }
+
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("ignores a remote host in production, warning once without naming it", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EXAM_PASSWORD_KMS_ENDPOINT", "https://kms.attacker.example:8443/kms");
+
+    expect(await endpointUsed()).toBeUndefined();
+    await encryptExamPassword("fake-portal-pass", 7);
+    expect(warn.mock.calls).toEqual([
+      ["EXAM_PASSWORD_KMS_ENDPOINT ignored in production: only a localhost endpoint is honoured."],
+    ]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("attacker");
+  });
+
+  it.each(["http://localhost:3902/kms", "http://127.0.0.1:3902/kms", "http://[::1]:3902/kms"])(
+    "uses a loopback endpoint in production: %s",
+    async (endpoint) => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("EXAM_PASSWORD_KMS_ENDPOINT", endpoint);
+
+      expect(await endpointUsed()).toBe(new URL(endpoint).origin);
+      expect(warn).not.toHaveBeenCalled();
+    }
+  );
+
+  it("uses any endpoint outside production, as before", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("EXAM_PASSWORD_KMS_ENDPOINT", "https://kms.fake-remote.example");
+
+    expect(await endpointUsed()).toBe("https://kms.fake-remote.example");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // "localhost:3902" parses as a URL with scheme "localhost:" and no host.
+  it.each(["not a url", "localhost:3902"])("ignores a malformed endpoint in production: %s", async (endpoint) => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EXAM_PASSWORD_KMS_ENDPOINT", endpoint);
+
+    expect(await endpointUsed()).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses AWS's own endpoint when none is set, with no warning", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EXAM_PASSWORD_KMS_ENDPOINT", "");
+
+    expect(await endpointUsed()).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
   });
 });

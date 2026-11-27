@@ -29,6 +29,10 @@ const YEAR = "2026-2027";
 const DROPOUTS_LEFT_OUT =
   /mapping\.started_at <= \(now\(\) AT TIME ZONE 'UTC'\) AND \(mapping\.ended_at IS NULL OR mapping\.ended_at > \(now\(\) AT TIME ZONE 'UTC'\)\) AND NOT EXISTS \(SELECT 1 FROM student dropout_student\s+WHERE dropout_student\.id = mapping\.student_id AND dropout_student\.status = 'dropout'\)/;
 
+// What every push binds after the Common Action Item and the year: the JEE
+// reminder's key and the exam sitting whose latest update decides it.
+const JEE_PARAMS = ["jee_form_reminder", "JEE Mains", 2027];
+
 function result(rows: Record<string, unknown>[] = [], rowCount = rows.length) {
   return { rows, rowCount };
 }
@@ -178,13 +182,14 @@ describe("createCommonActionItem", () => {
     clientQuery.mockResolvedValueOnce(result([{ id: "12" }])).mockResolvedValueOnce(result([{ id: 1 }, { id: 2 }]));
 
     expect(await createCommonActionItem(ADMIN, body)).toEqual({ ok: true, id: 12, added: 2 });
-    expect(clientQuery.mock.calls[0][1]).toEqual(["Fill in the form", "student", "mentor", null, 77, null, ADMIN.actorEmail]);
+    // Not the reminder's text, so no key is offered.
+    expect(clientQuery.mock.calls[0][1]).toEqual(["Fill in the form", "student", "mentor", null, 77, null, ADMIN.actorEmail, null]);
     const [pushSql, pushParams] = clientQuery.mock.calls[1];
     expect(pushSql).toMatch(/ON CONFLICT \(common_action_item_id, student_id\) WHERE common_action_item_id IS NOT NULL DO NOTHING/);
     expect(pushSql).toMatch(/common\.removed_at IS NULL/);
     // Never fanned out to a dropout, though their Mapping is still active.
     expect(pushSql).toMatch(DROPOUTS_LEFT_OUT);
-    expect(pushParams).toEqual([12, YEAR]);
+    expect(pushParams).toEqual([12, YEAR, ...JEE_PARAMS]);
   });
 
   it("stores listed Student IDs, leading zeros and all, so a later push reaches them", async () => {
@@ -193,7 +198,7 @@ describe("createCommonActionItem", () => {
     expect(
       await createCommonActionItem(ADMIN, { text: "Bring the form", owner: "parent", target: { kind: "students", studentIds: "0012345678 0012345678" } })
     ).toEqual({ ok: true, id: 13, added: 1 });
-    expect(clientQuery.mock.calls[0][1]).toEqual(["Bring the form", "parent", "students", null, null, ["0012345678"], ADMIN.actorEmail]);
+    expect(clientQuery.mock.calls[0][1]).toEqual(["Bring the form", "parent", "students", null, null, ["0012345678"], ADMIN.actorEmail, null]);
     expect(clientQuery.mock.calls[1][0]).toMatch(/st\.student_id = ANY\(common\.target_student_ids\)/);
   });
 
@@ -239,6 +244,91 @@ describe("pushCommonActionItem", () => {
     expect(await pushCommonActionItem(ADMIN, 12)).toMatchObject({ status: 404 });
     expect(clientQuery).toHaveBeenCalledTimes(1);
     expect(await pushCommonActionItem(ADMIN, 0)).toMatchObject({ status: 404 });
+  });
+});
+
+// The push's SQL, from a first push (createCommonActionItem) and a Push again.
+async function pushSqls(): Promise<{ sql: string; params: unknown[] }[]> {
+  clientQuery.mockResolvedValueOnce(result([{ id: "12" }])).mockResolvedValueOnce(result([{ id: 1 }]));
+  await createCommonActionItem(ADMIN, { text: "JEE Form Filling (Reminder)", owner: "student", target: { kind: "all" } });
+  const first = clientQuery.mock.calls[1];
+  clientQuery.mockReset();
+  clientQuery.mockResolvedValueOnce(result([{ id: 12 }])).mockResolvedValueOnce(result([{ id: 2 }]));
+  await pushCommonActionItem(ADMIN, 12);
+  const again = clientQuery.mock.calls[1];
+  return [first, again].map(([sql, params]) => ({ sql, params }));
+}
+
+// Postgres decides each pushed row from these clauses; the e2e spec
+// (blended-learning-jee-reminder.spec.ts) runs them against a mix of
+// Students.
+describe("pushing the JEE reminder", () => {
+  it("adds it done, by the latest update, for a Student whose latest JEE form update is Filled, on a push and a Push again", async () => {
+    for (const { sql, params } of await pushSqls()) {
+      expect(params).toEqual([12, YEAR, ...JEE_PARAMS]);
+      expect(sql).toMatch(
+        /\(common_action_item_id, student_id, position, owner, text,\s+status, completed_by_jee_form_update_id, completed_at, completed_by_email\)/
+      );
+      // Done, by that update and its recorder, when there is a Filled latest update; open otherwise.
+      expect(sql).toMatch(
+        /CASE WHEN filled\.id IS NULL THEN 'open' ELSE 'done' END,\s+filled\.id,\s+CASE WHEN filled\.id IS NULL THEN NULL ELSE now\(\) END,\s+filled\.recorded_by_email/
+      );
+      // Only the Student's latest update for JEE Mains 2027 counts, and only when it is Filled...
+      expect(sql).toMatch(/WHERE u\.student_id = targeted\.student_id/);
+      expect(sql).toMatch(/u\.exam_id = \(SELECT exam\.id FROM exam WHERE exam\.name = \$4 ORDER BY exam\.id LIMIT 1\)\s+AND u\.exam_year = \$5/);
+      expect(sql).toMatch(/ORDER BY u\.id DESC\s+LIMIT 1\s+\) latest\s+WHERE latest\.status = 'filled'/);
+      // ...and only for the reminder, found by its key (a bound parameter), never its text.
+      expect(sql).toMatch(/LEFT JOIN LATERAL \([\s\S]*\) filled\s+ON common\.key = \$3\s/);
+      expect(sql).not.toMatch(/common\.text\)?\s*=|jee_form_reminder/);
+      expect(sql).toMatch(/ON CONFLICT \(common_action_item_id, student_id\) WHERE common_action_item_id IS NOT NULL DO NOTHING/);
+    }
+  });
+
+  it("leaves any other Common Action Item open for every Student: the Filled join is gated on the reminder's key", async () => {
+    clientQuery.mockResolvedValueOnce(result([{ id: "14" }])).mockResolvedValueOnce(result([{ id: 1 }, { id: 2 }]));
+    expect(
+      await createCommonActionItem(ADMIN, { text: "Bring the admit card", owner: "parent", target: { kind: "all" } })
+    ).toEqual({ ok: true, id: 14, added: 2 });
+    const [sql, params] = clientQuery.mock.calls[1];
+    expect(params).toEqual([14, YEAR, ...JEE_PARAMS]);
+    // Only the keyed reminder joins `filled`: for any other item (an
+    // un-keyed one with the reminder's text too) it is NULL and the row is
+    // added open, as before.
+    expect(sql).toMatch(/\) filled\s+ON common\.key = \$3/);
+    expect(sql).toMatch(/CASE WHEN filled\.id IS NULL THEN 'open'/);
+  });
+});
+
+describe("the JEE reminder's key", () => {
+  it("offers the key to an item created with the reminder's text (case and spacing aside), kept only if no active item holds it", async () => {
+    for (const text of ["JEE Form Filling (Reminder)", "  jee   form filling (REMINDER) "]) {
+      clientQuery.mockReset();
+      clientQuery.mockResolvedValueOnce(result([{ id: "15" }])).mockResolvedValueOnce(result([{ id: 1 }]));
+      expect(await createCommonActionItem(ADMIN, { text, owner: "student", target: { kind: "all" } })).toMatchObject({ ok: true });
+      const [sql, params] = clientQuery.mock.calls[0];
+      expect(params.at(-1)).toBe("jee_form_reminder");
+      // Set only when no active (not removed) Common Action Item holds it, so
+      // a removed reminder created again gets it back, and a second one doesn't.
+      expect(sql).toMatch(/\(text, owner, target_kind, target_grade, target_mentor_user_id, target_student_ids, created_by_email, key\)/);
+      expect(sql).toMatch(
+        /CASE WHEN \$8::varchar IS NOT NULL AND NOT EXISTS \(\s+SELECT 1 FROM blended_learning_common_action_items held\s+WHERE held\.key = \$8::varchar AND held\.removed_at IS NULL\s+\) THEN \$8::varchar END/
+      );
+    }
+  });
+
+  it("never takes a key from the request, nor offers one for other text", async () => {
+    clientQuery.mockResolvedValueOnce(result([{ id: "16" }])).mockResolvedValueOnce(result([{ id: 1 }]));
+    await createCommonActionItem(ADMIN, { text: "JEE Form Filling", owner: "student", target: { kind: "all" }, key: "jee_form_reminder" });
+    expect(clientQuery.mock.calls[0][1]).toEqual(["JEE Form Filling", "student", "all", null, null, null, ADMIN.actorEmail, null]);
+  });
+
+  it("is never set, changed or cleared by an edit (a rename keeps it)", async () => {
+    clientQuery.mockResolvedValueOnce(result([{ id: 12 }])).mockResolvedValueOnce(result([], 1)).mockResolvedValueOnce(result([], 0));
+    await updateCommonActionItem(ADMIN, 12, { text: "Fill the JEE Main form", owner: "student", key: null });
+    const [sql, params] = clientQuery.mock.calls[1];
+    expect(sql).toBe("UPDATE blended_learning_common_action_items SET text = $2, owner = $3, updated_at = now() WHERE id = $1");
+    expect(params).toEqual([12, "Fill the JEE Main form", "student"]);
+    for (const [text] of clientQuery.mock.calls) expect(text).not.toMatch(/\bkey\b/);
   });
 });
 

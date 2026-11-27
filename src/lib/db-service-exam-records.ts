@@ -124,6 +124,110 @@ export async function updateExamRecord(
   await requirePasswordStored(res, input, "updateExamRecord");
 }
 
+// --- Plaintext-free writes (Blended Learning JEE form) ----------------------
+//
+// The JEE form never sends, reads or stores a plaintext password. The legacy
+// plaintext `application_password` column is only ever cleared: a write that
+// sets a ciphertext also sends `application_password: null`, as the Exams tab
+// does, so a record never holds both. Each body is built from named fields
+// only (never a spread); the legacy key, when present, always goes out as the
+// literal null, whatever the caller passed; and a PATCH without a key leaves
+// that column as it is (the DB Service casts only the keys sent). A password
+// travels only as the KMS ciphertext the caller made
+// (`application_password_ciphertext`). The DB Service answers with the whole
+// record, legacy password included, so the response body is never read: only
+// the status is looked at, and on failure only the status is logged. The
+// caller confirms the write by reading back from Postgres that the ciphertext
+// is stored and the legacy column is null (an IS NULL test; its value is
+// never selected).
+
+export interface ExamRecordCreateWithoutPlaintext {
+  student_id: number;
+  exam_id: number;
+  exam_year: number;
+  application_number: string;
+  sessions_applied?: number[];
+  /** Only ever null: clears the legacy plaintext. Send it with a ciphertext. */
+  application_password?: null;
+  application_password_ciphertext?: string;
+}
+
+export interface ExamRecordPatchWithoutPlaintext {
+  application_number?: string;
+  exam_year?: number;
+  sessions_applied?: number[];
+  /** Only ever null: clears the legacy plaintext. Send it with a ciphertext. */
+  application_password?: null;
+  application_password_ciphertext?: string;
+}
+
+/** Thrown on a non-2xx; carries the status only, never the response body. */
+export class DbServiceExamRecordStatusError extends Error {
+  readonly status: number;
+  constructor(what: string, status: number) {
+    super(`${what} failed (${status})`);
+    this.name = "DbServiceExamRecordStatusError";
+    this.status = status;
+  }
+}
+
+async function requireOkWithoutReading(res: Response, what: string): Promise<void> {
+  await res.body?.cancel();
+  if (!res.ok) throw new DbServiceExamRecordStatusError(what, res.status);
+}
+
+const CREATE_KEYS = [
+  "student_id",
+  "exam_id",
+  "exam_year",
+  "application_number",
+  "sessions_applied",
+  "application_password",
+  "application_password_ciphertext",
+] as const;
+const PATCH_KEYS = [
+  "application_number",
+  "exam_year",
+  "sessions_applied",
+  "application_password",
+  "application_password_ciphertext",
+] as const;
+
+// The named keys that are set, in a fixed order; nothing else ever goes out.
+// The legacy plaintext key is only ever sent as null, so even a caller that
+// slipped a value in can't write one.
+function plaintextFreeBody<T extends object>(input: T, keys: readonly (keyof T)[]): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (input[key] === undefined) continue;
+    body[key as string] = key === "application_password" ? null : input[key];
+  }
+  return body;
+}
+
+export async function createExamRecordWithoutPlaintext(
+  input: ExamRecordCreateWithoutPlaintext,
+): Promise<void> {
+  const res = await fetch(`${dbServiceUrl()}/student-exam-record`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(plaintextFreeBody(input, CREATE_KEYS)),
+  });
+  await requireOkWithoutReading(res, "createExamRecordWithoutPlaintext");
+}
+
+export async function patchExamRecordWithoutPlaintext(
+  id: number,
+  input: ExamRecordPatchWithoutPlaintext,
+): Promise<void> {
+  const res = await fetch(`${dbServiceUrl()}/student-exam-record/${id}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(plaintextFreeBody(input, PATCH_KEYS)),
+  });
+  await requireOkWithoutReading(res, "patchExamRecordWithoutPlaintext");
+}
+
 export async function deleteExamRecord(id: number): Promise<void> {
   const res = await fetch(`${dbServiceUrl()}/student-exam-record/${id}`, {
     method: "DELETE",
