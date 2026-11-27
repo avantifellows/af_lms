@@ -16,7 +16,6 @@ const NO_CENTRE_SCHOOL = { code: "E2EATI3", udise: "29990000003", name: "JNV E2E
 const SCHOOLS = [SCHOOL, OTHER_SCHOOL, NO_CENTRE_SCHOOL];
 
 export const AI_TEST_INSIGHTS_SCHOOL = SCHOOL;
-export const AI_TEST_INSIGHTS_OTHER_SCHOOL = OTHER_SCHOOL;
 export const AI_TEST_INSIGHTS_NO_CENTRE_SCHOOL = NO_CENTRE_SCHOOL;
 
 const CENTRE_PREFIX = "E2E ATI ";
@@ -156,7 +155,7 @@ export const AI_TEST_INSIGHTS_CARDS = {
  */
 export const AI_TEST_INSIGHTS_NOT_LISTED_KEYS = ["medical", "blank", "dropout", "grade10", "nvs"] as const;
 
-export interface Persona {
+interface Persona {
   name: string;
   email: string;
 }

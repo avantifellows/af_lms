@@ -30,12 +30,12 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { query } from "@/lib/db";
 
 /** How long a presigned PDF URL lasts: 60 seconds, as the document downloads. */
-export const TEST_INSIGHT_PDF_URL_TTL_SECONDS = 60;
+const TEST_INSIGHT_PDF_URL_TTL_SECONDS = 60;
 
 /** The largest Test Insight text the LMS returns: 1 MB. */
-export const TEST_INSIGHT_TEXT_MAX_BYTES = 1024 * 1024;
+const TEST_INSIGHT_TEXT_MAX_BYTES = 1024 * 1024;
 
-export interface AiTestInsightsArtifactSettings {
+interface AiTestInsightsArtifactSettings {
   bucket: string;
   region: string;
   prefix: string;
@@ -53,7 +53,7 @@ function setting(name: string): string | null {
 }
 
 /** The reader's settings, or null when reading is not configured. */
-export function aiTestInsightsArtifactSettings(): AiTestInsightsArtifactSettings | null {
+function aiTestInsightsArtifactSettings(): AiTestInsightsArtifactSettings | null {
   const bucket = setting("AI_TEST_INSIGHTS_S3_BUCKET");
   const accessKeyId = setting("AI_TEST_INSIGHTS_S3_ACCESS_KEY_ID");
   const secretAccessKey = setting("AI_TEST_INSIGHTS_S3_SECRET_ACCESS_KEY");
@@ -98,7 +98,7 @@ function artifactClient(settings: AiTestInsightsArtifactSettings): S3Client {
  * Whether a key lies inside the Item's folder of this environment:
  * `{prefix}/{environment}/items/{item id}/`, with no `.` or `..` segment.
  */
-export function isKeyInItemFolder(settings: AiTestInsightsArtifactSettings, itemId: string, key: string): boolean {
+function isKeyInItemFolder(settings: AiTestInsightsArtifactSettings, itemId: string, key: string): boolean {
   const folder = `${settings.prefix}/${settings.environment}/items/${itemId}/`;
   if (!key.startsWith(folder)) return false;
   return key
@@ -108,14 +108,14 @@ export function isKeyInItemFolder(settings: AiTestInsightsArtifactSettings, item
 }
 
 /** The kinds of Item File the LMS reads. */
-export type InsightFileKind = "report" | "report_pdf";
+type InsightFileKind = "report" | "report_pdf";
 
 /**
  * The file of one kind of a completed request of the Student, found through
  * the request's `inference_item_id`; null when the request is not that
  * Student's, is not completed, or its Item has no such file.
  */
-export async function insightFile(
+async function insightFile(
   studentId: number,
   requestKey: string,
   fileKind: InsightFileKind,
