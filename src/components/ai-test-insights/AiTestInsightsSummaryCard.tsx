@@ -53,10 +53,11 @@
 // shows that request with the note "An AI Summary for these tests already
 // exists", and the ticked tests now match it, so "Generate again" is offered.
 // Viewers never see Generate or "Generate again".
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import TestInsightText from "@/components/ai-test-insights/TestInsightText";
 import { Button, Card, Modal } from "@/components/ui";
+import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
 import {
   aiTestInsightsRequestPdfUrl,
   aiTestInsightsRequestStatusUrl,
@@ -170,35 +171,14 @@ function NoSummary({
 
 type SummaryTextState = { status: "loading" } | { status: "failed" } | { status: "loaded"; markdown: string };
 
-/** Reads the AI Summary text once, and again on each Retry; an unmount or a newer read drops an older answer. */
-function useSummaryText(url: string) {
-  const [state, setState] = useState<SummaryTextState>({ status: "loading" });
-  const [attempt, setAttempt] = useState(0);
+/** The AI Summary text is read fresh each time, never from the browser's cache. */
+const SUMMARY_TEXT_FETCH: RequestInit = { cache: "no-store" };
 
-  useEffect(() => {
-    let current = true;
-    fetch(url, { cache: "no-store" })
-      .then(async (response): Promise<SummaryTextState> => {
-        const body = (await response.json().catch(() => null)) as Partial<AiTestInsightsSummaryResponse> | null;
-        return response.ok && typeof body?.markdown === "string"
-          ? { status: "loaded", markdown: body.markdown }
-          : { status: "failed" };
-      })
-      .catch((): SummaryTextState => ({ status: "failed" }))
-      .then((next) => {
-        if (current) setState(next);
-      });
-    return () => {
-      current = false;
-    };
-  }, [url, attempt]);
-
-  const retry = useCallback(() => {
-    setState({ status: "loading" });
-    setAttempt((n) => n + 1);
-  }, []);
-
-  return { state, retry };
+async function readSummaryText(response: Response): Promise<SummaryTextState> {
+  const body = (await response.json().catch(() => null)) as Partial<AiTestInsightsSummaryResponse> | null;
+  return response.ok && typeof body?.markdown === "string"
+    ? { status: "loaded", markdown: body.markdown }
+    : { status: "failed" };
 }
 
 /** The tests an AI Summary was made from, by name from the picker; an id the picker does not hold is "an earlier test". */
@@ -220,7 +200,12 @@ function CompletedSummary({
   tests: AiTestInsightsTestsState;
   requestsUrl: string;
 }) {
-  const { state, retry } = useSummaryText(aiTestInsightsRequestSummaryUrl(requestsUrl, request.requestKey));
+  // Read once, and again on each Retry; an unmount or a newer read drops an older answer.
+  const { state, retry } = useFetchWithRetry(
+    aiTestInsightsRequestSummaryUrl(requestsUrl, request.requestKey),
+    readSummaryText,
+    SUMMARY_TEXT_FETCH,
+  );
   return (
     <div className="mb-6 space-y-4 border-b border-border pb-6">
       {state.status === "loading" && (

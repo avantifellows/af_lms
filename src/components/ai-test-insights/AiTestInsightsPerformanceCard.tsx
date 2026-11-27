@@ -6,11 +6,10 @@
 // graph and per-test table, nothing else: no chapter sections, no
 // predicted-level header, no new chart. Every test the report lists shows,
 // Part tests and missed ones included. Its failures stay inside the card.
-import { useCallback, useEffect, useState } from "react";
-
 import { Button, Card } from "@/components/ui";
 import { ScoreGraph } from "@/components/performance/student-support/chips";
 import { TestHistory } from "@/components/performance/student-support/StudentReport";
+import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
 import type { StudentReportData } from "@/types/student-support";
 
 type LoadState =
@@ -30,35 +29,8 @@ async function readReport(response: Response): Promise<LoadState> {
   return { status: "failed" };
 }
 
-/** `url` null: there is nothing to ask for, so no test results. Asks once,
- *  and again on each Retry; an unmount or a newer ask drops an older answer. */
-function useStudentReport(url: string | null) {
-  const [state, setState] = useState<LoadState>(url ? { status: "loading" } : { status: "no_results" });
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    if (!url) return;
-    const controller = new AbortController();
-    let current = true;
-    fetch(url, { signal: controller.signal })
-      .then(readReport)
-      .catch((): LoadState => ({ status: "failed" }))
-      .then((next) => {
-        if (current) setState(next);
-      });
-    return () => {
-      current = false;
-      controller.abort();
-    };
-  }, [url, attempt]);
-
-  const retry = useCallback(() => {
-    setState({ status: "loading" });
-    setAttempt((n) => n + 1);
-  }, []);
-
-  return { state, retry };
-}
+/** A Program with no label has nothing to ask for, so no test results. */
+const NO_RESULTS: LoadState = { status: "no_results" };
 
 function CardBody({ state, retry }: { state: LoadState; retry: () => void }) {
   if (state.status === "loading") {
@@ -110,13 +82,14 @@ export default function AiTestInsightsPerformanceCard({
           program,
           student: uid,
         })}`;
-  const { state, retry } = useStudentReport(url);
+  // Asks once, and again on each Retry; an unmount or a newer ask drops an older answer.
+  const { state, retry } = useFetchWithRetry(url, readReport);
 
   return (
     <section aria-label="Performance">
       <Card elevation="sm" className="p-4 sm:p-6">
         <h2 className="mb-4 text-lg font-bold text-text-primary">Performance</h2>
-        <CardBody state={state} retry={retry} />
+        <CardBody state={url ? state : NO_RESULTS} retry={retry} />
       </Card>
     </section>
   );
