@@ -239,6 +239,10 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
   listed only by centres the user may not list; a write also answers 403 when access is not `edit`,
   before the 404 check. The page shows every refusal as the same not-found page. A user who may
   list a centre may open every listed Student of it (no mentor-mentee mapping).
+- **Test picker route** `GET /api/ai-test-insights/students/[studentId]/tests` (#559) runs the
+  same Student access, in the same order, before any warehouse read. Every viewer may read it; a
+  viewer (Program Manager, Program Admin, Admin, `read_only` Teacher) sees the picker read-only and
+  only a Teacher with `edit` can tick tests.
 
 ### NVS-Only Users
 

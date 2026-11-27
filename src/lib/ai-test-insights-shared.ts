@@ -38,6 +38,44 @@ export interface AiTestInsightsStudentCardData {
   lastInsightSessionDate: string | null;
 }
 
+/**
+ * The test formats an AI Summary can cover: Major, Full Syllabus and Mock
+ * tests. Not `MAJOR_TEST_FORMATS` (`@/lib/bigquery`), which also holds Part
+ * tests; Part and Chapter tests never appear in the test picker.
+ */
+export const AI_TEST_INSIGHTS_TEST_FORMATS = ["major_test", "full_syllabus_test", "mock_test"] as const;
+
+export type AiTestInsightsTestFormat = (typeof AI_TEST_INSIGHTS_TEST_FORMATS)[number];
+
+/** One test of the AI Summary card's test picker. */
+export interface AiTestInsightsTest {
+  /** The warehouse `test_id`, as a string. */
+  id: string;
+  name: string;
+  /** The Student's newest sitting of the test, `YYYY-MM-DD`. */
+  date: string;
+  format: AiTestInsightsTestFormat;
+}
+
+/** `GET /api/ai-test-insights/students/[studentId]/tests`: newest first. */
+export interface AiTestInsightsTestsResponse {
+  tests: AiTestInsightsTest[];
+}
+
+/**
+ * The Student page's read of the test picker route. The AI Summary card's
+ * picker and the Student card's newest test line share it: one read, not two.
+ */
+export type AiTestInsightsTestsState =
+  | { status: "loading" }
+  | { status: "failed" }
+  | { status: "loaded"; tests: AiTestInsightsTest[] };
+
+/** The test picker's route for a Student (`student.id`). */
+export function aiTestInsightsTestsUrl(studentId: number): string {
+  return `/api/ai-test-insights/students/${studentId}/tests`;
+}
+
 /** `GET /api/school/[udise]/ai-test-insights`. */
 export interface AiTestInsightsListResponse {
   students: AiTestInsightsStudent[];

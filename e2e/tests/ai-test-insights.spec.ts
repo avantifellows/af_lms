@@ -51,10 +51,11 @@ async function shownRows(page: Page): Promise<string[][]> {
   );
 }
 
-/** The Student card's heading and its fields as [label, value] pairs. */
+/** The Student card's heading and its fields as [label, value] pairs, once its newest test line has loaded. */
 async function studentCard(page: Page): Promise<{ name: string; fields: string[][] }> {
   const card = page.getByRole("region", { name: "Student" });
   await expect(card).toBeVisible();
+  await expect(card.locator("dt:text-is('Newest test') + dd")).not.toHaveText("Loading…");
   const name = (await card.getByRole("heading").textContent()) ?? "";
   const fields = await card.locator("dt").evaluateAll((terms) =>
     terms.map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
@@ -104,6 +105,24 @@ async function answerStudentReport(page: Page, status: number, json: unknown): P
   const asked: URL[] = [];
   await page.route("**/api/quiz-analytics/*/student-report?*", async (route) => {
     asked.push(new URL(route.request().url()));
+    await route.fulfill({ status, json });
+  });
+  return asked;
+}
+
+// The test picker's answer, written by hand. The warehouse is not available
+// in e2e, so the browser's picker request is answered with it.
+const PICKER_TESTS = [
+  { id: "T9", name: "Mock Test 1", date: "2026-11-02", format: "mock_test" },
+  { id: "T7", name: "Full Syllabus Test 1", date: "2026-10-20", format: "full_syllabus_test" },
+  { id: "T4", name: "Major Test 2", date: "2026-10-12", format: "major_test" },
+];
+
+/** Answers the browser's test picker request; returns the paths it asked for. */
+async function answerTestPicker(page: Page, status: number, json: unknown): Promise<string[]> {
+  const asked: string[] = [];
+  await page.route("**/api/ai-test-insights/students/*/tests", async (route) => {
+    asked.push(new URL(route.request().url()).pathname);
     await route.fulfill({ status, json });
   });
   return asked;
@@ -367,6 +386,87 @@ test.describe("AI Test Insights tab", () => {
       await performance.getByRole("button", { name: "Retry" }).click();
       await expect.poll(() => asked.length).toBe(2);
       await expect(performance.getByRole("alert")).toBeVisible();
+    });
+
+    test("lists the Student's tests in the AI Summary card with the newest ticked, and shows it as the newest test", async ({
+      page,
+    }) => {
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+      const asked = await answerTestPicker(page, 200, { tests: PICKER_TESTS });
+      await page.goto(studentUrl("asha"));
+
+      const summary = page.getByRole("region", { name: "AI Summary" });
+      await expect(summary.getByRole("listitem")).toHaveText([
+        "Mock Test 12 Nov 2026 · Mock test",
+        "Full Syllabus Test 120 Oct 2026 · Full Syllabus test",
+        "Major Test 212 Oct 2026 · Major test",
+      ]);
+      const mock = summary.getByRole("checkbox", { name: /Mock Test 1/ });
+      await expect(mock).toBeChecked();
+      await expect(summary.getByRole("checkbox", { name: /Full Syllabus Test 1/ })).not.toBeChecked();
+      await expect(summary.getByRole("checkbox", { name: /Major Test 2/ })).not.toBeChecked();
+      const card = await studentCard(page);
+      expect(card.fields.find(([label]) => label === "Newest test")).toEqual(["Newest test", "Mock Test 1 · 2 Nov 2026"]);
+
+      // The last ticked test stays ticked; once another is ticked it can go.
+      await expect(mock).toBeDisabled();
+      await summary.getByRole("checkbox", { name: /Major Test 2/ }).check();
+      await mock.uncheck();
+      await expect(mock).not.toBeChecked();
+      await expect(summary.getByRole("checkbox", { name: /Major Test 2/ })).toBeDisabled();
+
+      // One read feeds both the picker and the newest test line.
+      expect(asked).toEqual([`/api/ai-test-insights/students/${ids.studentIds.asha}/tests`]);
+    });
+
+    test("shows a Program Manager the test picker read-only", async ({ pmPage }) => {
+      await answerTestPicker(pmPage, 200, { tests: PICKER_TESTS });
+      await pmPage.goto(studentUrl("asha"));
+
+      const checkboxes = pmPage.getByRole("region", { name: "AI Summary" }).getByRole("checkbox");
+      await expect(checkboxes).toHaveCount(3);
+      for (const checkbox of await checkboxes.all()) await expect(checkbox).toBeDisabled();
+      await expect(checkboxes.first()).toBeChecked();
+    });
+
+    test("says when the Student has no submitted Major, Full Syllabus or Mock test this year", async ({ adminPage }) => {
+      await answerTestPicker(adminPage, 200, { tests: [] });
+      await adminPage.goto(studentUrl("asha"));
+
+      await expect(
+        adminPage
+          .getByRole("region", { name: "AI Summary" })
+          .getByText("This student has no submitted Major, Full Syllabus or Mock test this year."),
+      ).toBeVisible();
+      const card = await studentCard(adminPage);
+      expect(card.fields.find(([label]) => label === "Newest test")).toEqual(["Newest test", "—"]);
+    });
+
+    test('shows "Tests could not be loaded" when the warehouse is unavailable, and the rest of the page still works', async ({
+      adminPage,
+    }) => {
+      // The picker route is left to the app, whose warehouse e2e does not have.
+      await answerStudentReport(adminPage, 200, STUDENT_REPORT);
+      await adminPage.goto(studentUrl("asha"));
+
+      const summary = adminPage.getByRole("region", { name: "AI Summary" });
+      await expect(summary.getByRole("alert")).toContainText("Tests could not be loaded");
+      expect(await studentCard(adminPage)).toEqual(AI_TEST_INSIGHTS_CARDS.asha);
+      const performance = adminPage.getByRole("region", { name: "Performance" });
+      await expect(performance.getByRole("table").locator("tbody tr")).toHaveCount(3);
+
+      const retried = adminPage.waitForResponse((response) => response.url().endsWith("/tests"));
+      await summary.getByRole("button", { name: "Retry" }).click();
+      expect((await retried).status()).toBe(502);
+      await expect(summary.getByRole("alert")).toContainText("Tests could not be loaded");
+    });
+
+    test("answers 404 from the test picker route to a Teacher of another School", async ({ page }) => {
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher);
+
+      const response = await page.request.get(`/api/ai-test-insights/students/${ids.studentIds.asha}/tests`);
+
+      expect(response.status()).toBe(404);
     });
 
     test("shows the page to a Teacher, Program Manager, Program Admin and Admin", async ({

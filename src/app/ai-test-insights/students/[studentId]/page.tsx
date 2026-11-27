@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 
 import AiTestInsightsPerformanceCard from "@/components/ai-test-insights/AiTestInsightsPerformanceCard";
-import AiTestInsightsStudentCard from "@/components/ai-test-insights/AiTestInsightsStudentCard";
+import AiTestInsightsStudentSections from "@/components/ai-test-insights/AiTestInsightsStudentSections";
 import PageHeader from "@/components/PageHeader";
 import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
 import { readAiTestInsightsStudentCard } from "@/lib/ai-test-insights-student-card";
@@ -14,7 +14,9 @@ import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 // access gates it: no session goes to the sign-in page, and any refusal —
 // bad id, no feature, a Student missing, not listed or out of scope — is the
 // same not-found page, so a hidden Student cannot be told from a missing one.
-// The optional `centre` value only chooses the back link.
+// The optional `centre` value only chooses the back link. Three cards: the
+// Student card, the performance card and the AI Summary card; the Student
+// card's newest test line and the AI Summary card's test picker share one read.
 
 interface PageProps {
   params: Promise<{ studentId: string }>;
@@ -51,13 +53,14 @@ export default async function AiTestInsightsStudentPage({ params, searchParams }
         >
           <span aria-hidden="true">←</span> Back to AI Test Insights
         </Link>
-        <AiTestInsightsStudentCard student={card} />
-        <AiTestInsightsPerformanceCard
-          schoolUdise={student.school.udise || student.school.code}
-          grade={student.grade}
-          program={PROGRAM_ID_TO_LABEL[student.programId] ?? null}
-          uid={String(student.userId)}
-        />
+        <AiTestInsightsStudentSections student={card} studentId={student.studentId} canEdit={student.canEdit}>
+          <AiTestInsightsPerformanceCard
+            schoolUdise={student.school.udise || student.school.code}
+            grade={student.grade}
+            program={PROGRAM_ID_TO_LABEL[student.programId] ?? null}
+            uid={String(student.userId)}
+          />
+        </AiTestInsightsStudentSections>
       </main>
     </div>
   );

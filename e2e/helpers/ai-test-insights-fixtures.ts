@@ -125,6 +125,9 @@ export const AI_TEST_INSIGHTS_NODAL_CENTRE_LIST = [ROW.esha, ROW.divya];
  * Student's current batches in the Program of the centre the page is for:
  * Esha is on both centres, so the School page (lowest centre id, CoE) and the
  * Nodal Centre page show different batches. A missing value is a dash.
+ * Newest test comes from the test picker's read of the warehouse, which e2e
+ * does not have: left unanswered, it reads "unavailable". Specs that answer
+ * the picker route in the browser check the line themselves.
  */
 const CARD_FIELDS = (fields: string[]) =>
   [
@@ -136,7 +139,8 @@ const CARD_FIELDS = (fields: string[]) =>
     "Stream",
     "Insight Sessions completed",
     "Last Insight Session",
-  ].map((label, index) => [label, fields[index]]);
+    "Newest test",
+  ].map((label, index) => [label, [...fields, "unavailable"][index]]);
 export const AI_TEST_INSIGHTS_CARDS = {
   asha: { name: "Asha Atiq", fields: CARD_FIELDS(["E2E-ATI-ASHA", "11", "E2E-ATI-COE", "Female", "OBC", "Engineering", "3", "14 Nov 2026"]) },
   eshaFromCoe: { name: "Esha Ekka", fields: CARD_FIELDS(["E2E-ATI-ESHA", "11", "E2E-ATI-COE", "—", "—", "engineering", "0", "—"]) },

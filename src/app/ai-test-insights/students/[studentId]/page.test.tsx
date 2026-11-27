@@ -45,6 +45,10 @@ const CARD = {
   lastInsightSessionDate: "2026-10-01",
 };
 
+/** The URLs the page's client cards asked for. */
+const askedUrls = () =>
+  vi.mocked(fetch).mock.calls.map(([input]) => new URL(String(input), "http://localhost"));
+
 async function renderPage(studentId: string, search: Record<string, string | string[]> = {}) {
   const page = await AiTestInsightsStudentPage({
     params: Promise.resolve({ studentId }),
@@ -85,9 +89,9 @@ describe("AI Test Insights Student page", () => {
 
     const performance = screen.getByRole("region", { name: "Performance" });
     expect(within(performance).getByText("Loading test results…")).toBeInTheDocument();
-    const fetchMock = vi.mocked(fetch);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
+    const reports = askedUrls().filter((url) => url.pathname.endsWith("/student-report"));
+    expect(reports).toHaveLength(1);
+    const [url] = reports;
     expect(url.pathname).toBe("/api/quiz-analytics/29000000001/student-report");
     expect(Object.fromEntries(url.searchParams)).toEqual({ grade: "11", program: "JNV Nodal", student: "5005" });
   });
@@ -101,8 +105,7 @@ describe("AI Test Insights Student page", () => {
 
     await renderPage("1005");
 
-    const url = new URL(String(vi.mocked(fetch).mock.calls[0][0]), "http://localhost");
-    expect(url.pathname).toBe("/api/quiz-analytics/JNV001/student-report");
+    expect(askedUrls().map((url) => url.pathname)).toContain("/api/quiz-analytics/JNV001/student-report");
   });
 
   it("keeps the Student card when the Student Report fails", async () => {
@@ -117,6 +120,63 @@ describe("AI Test Insights Student page", () => {
     expect(await within(performance).findByRole("alert")).toHaveTextContent("Test results could not be loaded");
     const card = screen.getByRole("region", { name: "Student" });
     expect(within(card).getByRole("heading", { name: "Esha Ekka" })).toBeInTheDocument();
+  });
+
+  it("puts the AI Summary card after the performance card and reads the Student's tests for it once", async () => {
+    await renderPage("1005");
+
+    const regions = screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"));
+    expect(regions).toEqual(["Student", "Performance", "AI Summary"]);
+    const testReads = askedUrls().filter((url) => url.pathname.startsWith("/api/ai-test-insights/"));
+    expect(testReads.map((url) => url.pathname)).toEqual(["/api/ai-test-insights/students/1005/tests"]);
+  });
+
+  it("shows a viewer the test picker read-only", async () => {
+    mockResolveAccess.mockResolvedValue({
+      authorized: true,
+      student: { ...CONTEXT, canEdit: false },
+      centreNamedByPage: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string) =>
+        String(input).endsWith("/tests")
+          ? Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () =>
+                Promise.resolve({ tests: [{ id: "T9", name: "Mock Test 1", date: "2026-11-02", format: "mock_test" }] }),
+            })
+          : new Promise(() => {}),
+      ),
+    );
+
+    await renderPage("1005");
+
+    const summary = screen.getByRole("region", { name: "AI Summary" });
+    const checkbox = await within(summary).findByRole("checkbox", { name: /Mock Test 1/ });
+    expect(checkbox).toBeChecked();
+    expect(checkbox).toBeDisabled();
+  });
+
+  it("keeps the rest of the page when the tests cannot be loaded", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string) =>
+        String(input).endsWith("/tests")
+          ? Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ error: "Tests could not be loaded" }) })
+          : new Promise(() => {}),
+      ),
+    );
+
+    await renderPage("1005");
+
+    const summary = screen.getByRole("region", { name: "AI Summary" });
+    expect(await within(summary).findByRole("alert")).toHaveTextContent("Tests could not be loaded");
+    const card = screen.getByRole("region", { name: "Student" });
+    expect(within(card).getByRole("heading", { name: "Esha Ekka" })).toBeInTheDocument();
+    expect(within(card).getByText("unavailable")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Performance" })).getByText("Loading test results…")).toBeInTheDocument();
   });
 
   it("links back to the School page's AI Test Insights tab when no valid centre was named", async () => {

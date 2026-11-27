@@ -1007,3 +1007,14 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `student=<user.id>` (the warehouse's `enrollment_user_id`), and shows only the score graph and
   the per-test table. It lists every test the report lists; limiting to Major, Full Syllabus and
   Mock is the test picker's job.
+- **Test picker (#559):** `readAiTestInsightsTests(userId)` in `src/lib/ai-test-insights-tests.ts`
+  (server-only, BigQuery, parameterised, no cache) reads `fact_student_test_results_overall` with
+  `enrollment_user_id = @userId` (the Student's `user.id` from Student access), `section =
+  'overall'`, `test_format IN UNNEST(@formats)` (`AI_TEST_INSIGHTS_TEST_FORMATS`: Major, Full
+  Syllabus, Mock — never Part or Chapter), `academic_year = CURRENT_ACADEMIC_YEAR`, `start_date` on
+  or after that year's 1 April (`academicYearStart`), `test_id IS NOT NULL` and `SUBMITTED_ONLY`
+  (`has_quiz_ended IS NOT FALSE`: unknown counts as submitted). It groups by
+  `CAST(test_id AS STRING)` with the newest sitting date and orders by date then id, both
+  descending; the JS repeats the null-id drop, one-row-per-test and order so the result never
+  depends on the warehouse's row order. Served by `GET /api/ai-test-insights/students/[studentId]/tests`;
+  the Student page reads it once for the picker and the Student card's Newest test line.

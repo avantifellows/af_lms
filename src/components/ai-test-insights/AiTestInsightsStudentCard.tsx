@@ -1,12 +1,31 @@
 // The Student card on the AI Test Insights Student page (#550): who the
-// Student is and how many Insight Sessions they have had. A missing value
-// shows a dash.
+// Student is, how many Insight Sessions they have had, and their newest test.
+// A missing value shows a dash.
 import { Card } from "@/components/ui";
-import { formatInsightSessionDate, type AiTestInsightsStudentCardData } from "@/lib/ai-test-insights-shared";
+import {
+  formatInsightSessionDate,
+  type AiTestInsightsStudentCardData,
+  type AiTestInsightsTestsState,
+} from "@/lib/ai-test-insights-shared";
 
 const DASH = "—";
 
-export default function AiTestInsightsStudentCard({ student }: { student: AiTestInsightsStudentCardData }) {
+/** The newest test: the test picker's first row, from the same read as the picker. */
+function newestTest(tests: AiTestInsightsTestsState): string {
+  if (tests.status === "loading") return "Loading…";
+  if (tests.status === "failed") return "unavailable";
+  const [newest] = tests.tests;
+  return newest ? `${newest.name} · ${formatInsightSessionDate(newest.date)}` : DASH;
+}
+
+export default function AiTestInsightsStudentCard({
+  student,
+  tests,
+}: {
+  student: AiTestInsightsStudentCardData;
+  /** The test picker's read. */
+  tests: AiTestInsightsTestsState;
+}) {
   const fields: Array<[string, string]> = [
     ["Student ID", student.studentCode || DASH],
     ["Grade", String(student.grade)],
@@ -16,6 +35,7 @@ export default function AiTestInsightsStudentCard({ student }: { student: AiTest
     ["Stream", student.stream || DASH],
     ["Insight Sessions completed", String(student.insightSessionsCompleted)],
     ["Last Insight Session", formatInsightSessionDate(student.lastInsightSessionDate) || DASH],
+    ["Newest test", newestTest(tests)],
   ];
 
   return (
