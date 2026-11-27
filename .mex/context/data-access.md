@@ -1060,3 +1060,21 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `{ request }`. E2E `backdateInsightRequestUpdate` moves `updated_at` back; `readInsightRequests`
   also returns `startedAt`. The fake generator claims (`WHERE state = 'queued'`) and ends
   (`WHERE state IN ('queued', 'running')`) rows as AI Mentorship Guide does, in UTC with `updated_at`.
+- **AI Summary text and the artifact reader (#564):** `GET .../requests/[requestKey]/summary` gates
+  Student access first (a read, so viewers read it), then `requestByKey`: 404 unless the request is that
+  Student's and `completed`. `readTestInsightText` in `src/lib/ai-test-insights-artifacts.ts`
+  (server-only) finds the file with one `$n` read, `ai_test_insight_requests r JOIN
+  acad_mentorship_inference_item_files f ON f.item_id = r.inference_item_id WHERE r.student_id = $1 AND
+  r.request_key = $2 AND f.file_kind = $3 AND r.state = 'completed' ORDER BY f.id DESC LIMIT 1`
+  (`report` for the text; `report_pdf` is the PDF's kind) — no row is 404. The key must start with
+  `{AI_TEST_INSIGHTS_S3_PREFIX}/{APP_ENV}/items/{item id}/` and hold no `.` or `..` segment, or the route
+  answers 502 without reading it; the reader's own S3 client (`AI_TEST_INSIGHTS_S3_*` read-only key,
+  path-style only with the local endpoint override) then `GetObject`s it, 502 on a store error, an empty
+  body or more than 1 MB (by `ContentLength`, then by the bytes read). Not configured → 503
+  `not_configured`. Answers `{ markdown }` (`AiTestInsightsSummaryResponse`) with `no-store`; it writes
+  nothing and never wakes or enqueues. Logs: request key, `student.id`, reason, error name — never the
+  text, a key or a name. Route tests mock S3 with `aws-sdk-client-mock`. In e2e the fake generator's
+  complete writes the Session, Item and two Item File rows; `readInsightRequestItem` reads them back, and
+  `removeInsightRequestsMadeBySpecs` / `removeAiTestInsightsFixture` remove the fake's Items and Sessions
+  (marked `config_snapshot_json = '{"fake_ai_mentorship_guide":true}'`; Item Files cascade). Persona Users
+  now carry the persona's name as `first_name`, so the card shows "Asked for by E2E ATI Teacher".

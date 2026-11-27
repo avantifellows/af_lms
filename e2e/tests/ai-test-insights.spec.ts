@@ -15,6 +15,7 @@ import {
   backdateInsightRequestUpdate,
   endInsightRequestWithoutSummary,
   markInsightRequestRunning,
+  readInsightRequestItem,
   readInsightRequests,
   removeAiTestInsightsFixture,
   removeInsightRequestsMadeBySpecs,
@@ -23,6 +24,7 @@ import {
 } from "../helpers/ai-test-insights-fixtures";
 import {
   endFakeAiMentorshipGuideRequest,
+  FAKE_TEST_INSIGHT,
   fakeAiMentorshipGuideCalls,
   resetFakeAiMentorshipGuide,
   steerFakeAiMentorshipGuide,
@@ -855,6 +857,118 @@ test.describe("AI Test Insights tab", () => {
           }
         });
       });
+
+      // A finished request (#564): the card reads the AI Summary text from
+      // the fake's object store through the summary route and shows it
+      // formatted, with the tests it was made from, who asked and when.
+      test.describe("AI Summary", () => {
+        // Up to two 10-second polls.
+        const POLLED = { timeout: 25_000 };
+        // The fixed Test Insight's headings and table, written by hand
+        // (fake-ai-test-insight.json).
+        const TABLE_ROWS = [
+          "Subject Mock Test 1 Major Test 2",
+          "Physics 62 48",
+          "Chemistry 51 50",
+          "Mathematics 70 66",
+        ];
+
+        const enqueueOrWakeCalls = async () => (await fakeAiMentorshipGuideCalls()).length;
+        const summaryRoute = (requestKey: string) =>
+          `/api/ai-test-insights/students/${ids.studentIds.esha}/requests/${requestKey}/summary`;
+
+        /** Checks the card shows the fixed Test Insight as formatted text. */
+        async function expectFixedText(summary: ReturnType<Page["getByRole"]>, options?: { timeout: number }) {
+          const text = summary.getByRole("article", { name: "AI Summary text" });
+          await expect(text.getByRole("heading", { name: "Where the student stands" })).toBeVisible(options);
+          await expect(text.getByRole("heading", { name: "Next steps" })).toBeVisible();
+          await expect(text.getByRole("listitem").first()).toHaveText("Physics rose from 48 to 62 across the two tests.");
+          const rows = await text.getByRole("table").getByRole("row").allInnerTexts();
+          expect(rows.map((row) => row.split(/\s+/).join(" ").trim())).toEqual(TABLE_ROWS);
+        }
+
+        test("shows the finished AI Summary by itself, and again after a reload without waking the generator", async ({
+          page,
+        }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          const summary = await generateForEsha(page);
+
+          // The fake completes it; the page shows it with no reload.
+          await expectFixedText(summary, POLLED);
+          await expect(summary.getByText("Made from: Mock Test 1", { exact: true })).toBeVisible();
+          await expect(summary.getByRole("button", { name: "Generate" })).toBeVisible();
+
+          // The fake wrote what AI Mentorship Guide writes.
+          const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(request).toMatchObject({ state: "completed", outcomeCode: null, selectedTestIds: ["T9"] });
+          const item = await readInsightRequestItem(pool, request.requestKey);
+          expect(item).not.toBeNull();
+          const folder = `acad-mentorship/staging/items/${item!.itemId}`;
+          expect(item).toMatchObject({ studentId: ids.studentIds.esha, status: "completed", sessionStatus: "completed" });
+          expect(item!.files).toEqual([
+            {
+              fileKind: "report",
+              logicalPath: "output/final-report.md",
+              s3Key: `${folder}/output/final-report.md`,
+              mimeType: "text/markdown",
+              byteSize: Buffer.byteLength(FAKE_TEST_INSIGHT.markdown),
+            },
+            {
+              fileKind: "report_pdf",
+              logicalPath: "output/report.pdf",
+              s3Key: `${folder}/output/report.pdf`,
+              mimeType: "application/pdf",
+              byteSize: Buffer.byteLength(FAKE_TEST_INSIGHT.pdf),
+            },
+          ]);
+          const response = await page.request.get(summaryRoute(request.requestKey));
+          expect(response.status()).toBe(200);
+          expect(await response.json()).toEqual({ markdown: FAKE_TEST_INSIGHT.markdown });
+
+          // Who asked and when: the request's time, set to a known moment
+          // (05:30 UTC is 11:00 in India).
+          await pool.query(
+            `UPDATE ai_test_insight_requests SET requested_at = '2026-11-27 05:30:00' WHERE request_key = $1`,
+            [request.requestKey],
+          );
+          const callsBefore = await enqueueOrWakeCalls();
+          await page.reload();
+          await expectFixedText(summary);
+          await expect(summary.getByText("Made from: Mock Test 1", { exact: true })).toBeVisible();
+          await expect(
+            summary.getByText("Asked for by E2E ATI Teacher on 27 Nov 2026, 11:00", { exact: true }),
+          ).toBeVisible();
+          expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+        });
+
+        test("shows a Program Manager, Program Admin and Admin the AI Summary, with no Generate", async ({
+          browser,
+          pmPage,
+          programAdminPage,
+          adminPage,
+        }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          // The Teacher asks in a browser of their own: adminPage is the test's `page`.
+          const teacherContext = await browser.newContext();
+          const teacherSummary = await generateForEsha(await teacherContext.newPage());
+          await expectFixedText(teacherSummary, POLLED);
+          await teacherContext.close();
+          const callsBefore = await enqueueOrWakeCalls();
+
+          for (const viewer of [pmPage, programAdminPage, adminPage]) {
+            await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+            await viewer.goto(studentUrl("esha"));
+            const summary = viewer.getByRole("region", { name: "AI Summary" });
+            await expectFixedText(summary);
+            await expect(summary.getByText("Made from: Mock Test 1", { exact: true })).toBeVisible();
+            await expect(summary.getByText(/^Asked for by E2E ATI Teacher on /)).toBeVisible();
+            await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+          }
+          expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+        });
+      });
     });
 
     test("answers 404 from the test picker route to a Teacher of another School", async ({ page }) => {
@@ -878,12 +992,16 @@ test.describe("AI Test Insights tab", () => {
       }
     });
 
-    test("is not found for a Teacher of another School, either way round", async ({ page }) => {
+    test("is not found for a Teacher of another School, either way round", async ({ page, browser }) => {
       await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher);
       await expectNotFound(page, studentUrl("asha"));
 
-      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
-      await expectNotFound(page, studentUrl("other"));
+      // The second Teacher signs in in a browser of their own: the first
+      // page's session refresh can re-set its cookie after a switch.
+      const teacherContext = await browser.newContext();
+      const teacherPage = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
+      await expectNotFound(teacherPage, studentUrl("other"));
+      await teacherContext.close();
     });
 
     test("keeps a seat-confined Teacher to Students of their own centre", async ({ page }) => {

@@ -150,10 +150,15 @@ export interface AiTestInsightsRequestStatusResponse {
   request: InsightRequestView;
 }
 
+/** `GET .../requests/[requestKey]/summary`: the Test Insight text of a completed request. */
+export interface AiTestInsightsSummaryResponse {
+  markdown: string;
+}
+
 /** The 409 code of a login whose permission links no User and no User has its email. */
 export const NO_LINKED_USER_CODE = "no_linked_user";
 
-/** The 503 code of Generate in an environment without the delivery settings. */
+/** The 503 code of Generate without the delivery settings, and of the summary route without the reader's settings. */
 export const NOT_CONFIGURED_CODE = "not_configured";
 
 /** The create route for a Student (`student.id`); a centre the page named carries over. */
@@ -169,4 +174,33 @@ export function aiTestInsightsRequestsUrl(studentId: number, centreId?: number |
 export function aiTestInsightsRequestStatusUrl(requestsUrl: string, requestKey: string): string {
   const [path, search] = requestsUrl.split("?", 2);
   return `${path}/${encodeURIComponent(requestKey)}${search ? `?${search}` : ""}`;
+}
+
+/**
+ * The summary route of one request (its AI Summary text), from the Student's
+ * create route; a centre the page named carries over.
+ */
+export function aiTestInsightsRequestSummaryUrl(requestsUrl: string, requestKey: string): string {
+  const [path, search] = aiTestInsightsRequestStatusUrl(requestsUrl, requestKey).split("?", 2);
+  return `${path}/summary${search ? `?${search}` : ""}`;
+}
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A UTC moment (`2026-11-27T05:30:00Z`) in India time: `27 Nov 2026, 11:00`. */
+export function formatInsightRequestTime(iso: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(iso))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${Number(parts.day)} ${SHORT_MONTHS[Number(parts.month) - 1]} ${parts.year}, ${parts.hour}:${parts.minute}`;
 }

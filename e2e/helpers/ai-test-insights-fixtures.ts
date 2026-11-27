@@ -102,6 +102,8 @@ const INSIGHT_REQUESTS: Record<string, RequestFixture[]> = {
 };
 const REQUEST_KEY_PREFIX = "e2e-ati-";
 const INFERENCE_SESSION_MARKER = "e2e-ati-fixture";
+/** The `config_snapshot_json` of every Session the fake generator creates (fake-ai-mentorship-guide.cjs). */
+const FAKE_SESSION_MARKER = JSON.stringify({ fake_ai_mentorship_guide: true });
 
 /**
  * The rows the tab must show, in its order (Grade, then name), as [name,
@@ -319,7 +321,8 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
 
   const personaUserIds: Record<string, number> = {};
   for (const p of Object.values(AI_TEST_INSIGHTS_PERSONAS) as PersonaFixture[]) {
-    const userId = await insertUser(pool, p.email, p.role, null, null);
+    // The persona's name is its User's, which the AI Summary shows as who asked for it.
+    const userId = await insertUser(pool, p.email, p.role, p.name, null);
     personaUserIds[p.email] = userId;
     await pool.query(
       `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only, user_id, revoked_at)
@@ -393,6 +396,50 @@ export async function readInsightRequests(pool: Pool, studentId: number): Promis
     startedAt: row.started_at === null ? null : Number(row.started_at),
     finishedAt: row.finished_at === null ? null : Number(row.finished_at),
   }));
+}
+
+/**
+ * The Item a request is linked to, with its Student and Session status, and
+ * that Item's files, oldest first; null when the request has no Item.
+ */
+export async function readInsightRequestItem(
+  pool: Pool,
+  requestKey: string,
+): Promise<{
+  itemId: number;
+  studentId: number;
+  status: string;
+  sessionStatus: string;
+  files: Array<{ fileKind: string; logicalPath: string; s3Key: string; mimeType: string; byteSize: number }>;
+} | null> {
+  const items = await pool.query(
+    `SELECT i.id, i.student_id, i.status, s.status AS session_status
+     FROM ai_test_insight_requests r
+     JOIN acad_mentorship_inference_items i ON i.id = r.inference_item_id
+     JOIN acad_mentorship_inference_sessions s ON s.id = i.session_id
+     WHERE r.request_key = $1`,
+    [requestKey],
+  );
+  const item = items.rows[0];
+  if (!item) return null;
+  const files = await pool.query(
+    `SELECT file_kind, logical_path, s3_key, mime_type, byte_size
+     FROM acad_mentorship_inference_item_files WHERE item_id = $1 ORDER BY id`,
+    [item.id],
+  );
+  return {
+    itemId: Number(item.id),
+    studentId: Number(item.student_id),
+    status: item.status,
+    sessionStatus: item.session_status,
+    files: files.rows.map((row) => ({
+      fileKind: row.file_kind,
+      logicalPath: row.logical_path,
+      s3Key: row.s3_key,
+      mimeType: row.mime_type,
+      byteSize: Number(row.byte_size),
+    })),
+  };
 }
 
 /**
@@ -524,6 +571,25 @@ export async function removeInsightRequestsMadeBySpecs(pool: Pool, studentId: nu
     `DELETE FROM ai_test_insight_requests WHERE student_id = $1 AND request_key NOT LIKE $2`,
     [studentId, `${REQUEST_KEY_PREFIX}%`],
   );
+  await removeFakeGeneratorItems(pool, [studentId]);
+}
+
+/**
+ * Removes the Sessions, Items and Item Files the fake generator wrote when it
+ * completed a request of these Students (its Sessions carry
+ * {@link FAKE_SESSION_MARKER}). Item Files go with their Item.
+ */
+async function removeFakeGeneratorItems(pool: Pool, studentIds: number[]): Promise<void> {
+  const removed = await pool.query<{ session_id: string }>(
+    `DELETE FROM acad_mentorship_inference_items
+     WHERE student_id = ANY($1::bigint[])
+       AND session_id IN (SELECT id FROM acad_mentorship_inference_sessions WHERE config_snapshot_json = $2)
+     RETURNING session_id`,
+    [studentIds, FAKE_SESSION_MARKER],
+  );
+  await pool.query(`DELETE FROM acad_mentorship_inference_sessions WHERE id = ANY($1::bigint[])`, [
+    removed.rows.map((row) => Number(row.session_id)),
+  ]);
 }
 
 /** Remove everything {@link seedAiTestInsightsFixture} added. */
@@ -546,6 +612,8 @@ export async function removeAiTestInsightsFixture(pool: Pool): Promise<void> {
     [INFERENCE_SESSION_MARKER],
   );
   await pool.query(`DELETE FROM acad_mentorship_inference_sessions WHERE config_snapshot_json = $1`, [INFERENCE_SESSION_MARKER]);
+  const students = await pool.query<{ id: string }>(`SELECT id FROM student WHERE user_id = ANY($1)`, [userIds]);
+  await removeFakeGeneratorItems(pool, students.rows.map((row) => Number(row.id)));
   await pool.query(`DELETE FROM user_permission WHERE email = ANY($1)`, [PERSONA_EMAILS]);
   if (userIds.length > 0) {
     await pool.query(`DELETE FROM centre_positions WHERE user_id = ANY($1)`, [userIds]);

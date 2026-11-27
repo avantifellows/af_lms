@@ -212,7 +212,8 @@ describe("AiTestInsightsSummaryCard", () => {
       expect(generate()).not.toBeInTheDocument();
     });
 
-    it.each(["completed", "no_data", "failed"] as const)(
+    // A completed request also keeps them, under its AI Summary (see "AI Summary" below).
+    it.each(["no_data", "failed"] as const)(
       "shows the picker and Generate after a %s request, as if there were none",
       (state) => {
         render(
@@ -223,7 +224,7 @@ describe("AiTestInsightsSummaryCard", () => {
             requestsUrl={URL}
             initialRequest={request({
               state,
-              outcomeCode: state === "completed" ? null : "pipeline_error",
+              outcomeCode: "pipeline_error",
               finishedAt: "2026-11-27T05:34:00Z",
             })}
           />,
@@ -536,6 +537,9 @@ describe("AiTestInsightsSummaryCard polling", () => {
   }
 
   const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+  /** The status polls among the calls; a completed request also reads its text from the summary route. */
+  const statusPolls = (fetchMock: ReturnType<typeof answerPolls>) =>
+    fetchMock.mock.calls.filter(([url]) => url === STATUS_URL);
 
   function renderWith(initialRequest: InsightRequestView, props: { canEdit?: boolean; requestsUrl?: string } = {}) {
     return render(
@@ -607,14 +611,14 @@ describe("AiTestInsightsSummaryCard polling", () => {
     renderWith(request({ state: "running" }));
 
     await tick(10_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(statusPolls(fetchMock)).toHaveLength(1);
     expect(within(card()).queryByText(WRITING)).not.toBeInTheDocument();
     if (message) {
       expect(within(card()).getByText(message)).toBeInTheDocument();
       expect(within(card()).getByRole("button", { name: "Try again" })).toBeEnabled();
     }
     await tick(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(statusPolls(fetchMock)).toHaveLength(1);
   });
 
   it.each(["completed", "no_data", "failed"] as const)("does not poll a request that is already %s", async (state) => {
@@ -623,7 +627,7 @@ describe("AiTestInsightsSummaryCard polling", () => {
     renderWith(request({ state, outcomeCode: state === "completed" ? null : "interrupted", finishedAt: "2026-11-27T05:34:00Z" }));
 
     await tick(60_000);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(statusPolls(fetchMock)).toHaveLength(0);
   });
 
   it.each([
@@ -671,5 +675,171 @@ describe("AiTestInsightsSummaryCard polling", () => {
     await tick(10_000);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([URL, "/api/ai-test-insights/students/1001/requests/key-new"]);
     expect(within(card()).getByText(WRITING)).toBeInTheDocument();
+  });
+});
+
+// A finished request (#564): the card reads the AI Summary text from the
+// summary route and shows it, with the tests it was made from, who asked for
+// it and when. The picker and Generate stay under it.
+describe("AiTestInsightsSummaryCard AI Summary", () => {
+  const SUMMARY_URL = "/api/ai-test-insights/students/1001/requests/key-1/summary";
+  const MARKDOWN = "## Where Asha stands\n\n- Physics is improving\n\n| Subject | Score |\n| --- | --- |\n| Physics | 62 |\n";
+
+  const completed = (overrides: Partial<InsightRequestView> = {}): InsightRequestView => ({
+    requestKey: "key-1",
+    state: "completed",
+    outcomeCode: null,
+    selectedTestIds: ["T9", "T4"],
+    requestedAt: "2026-11-27T05:30:00Z",
+    requestedByName: "Asha Teacher",
+    finishedAt: "2026-11-27T05:34:10Z",
+    ...overrides,
+  });
+
+  /** Answers each summary read with the next of these; a number is a failed answer with that status, `null` a network error. */
+  function answerSummary(...answers: Array<string | number | null>) {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>(() => {
+      const next = answers.length > 1 ? answers.shift() : answers[0];
+      if (next === null || next === undefined) return Promise.reject(new TypeError("fetch failed"));
+      if (typeof next === "number") return Promise.resolve({ ok: false, status: next, json: () => Promise.resolve({}) });
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ markdown: next }) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function renderWith(
+    initialRequest: InsightRequestView,
+    props: { canEdit?: boolean; requestsUrl?: string; tests?: AiTestInsightsTest[] } = {},
+  ) {
+    return render(
+      <AiTestInsightsSummaryCard
+        tests={{ status: "loaded", tests: props.tests ?? TESTS }}
+        canEdit={props.canEdit ?? true}
+        onRetry={() => {}}
+        requestsUrl={props.requestsUrl ?? URL}
+        initialRequest={initialRequest}
+      />,
+    );
+  }
+
+  const summaryText = () => within(card()).findByRole("article", { name: "AI Summary text" });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the text of a completed request from its summary route and shows it formatted", async () => {
+    const fetchMock = answerSummary(MARKDOWN);
+    renderWith(completed());
+
+    const text = await summaryText();
+    expect(within(text).getByRole("heading", { name: "Where Asha stands" })).toBeInTheDocument();
+    expect(within(text).getByRole("listitem")).toHaveTextContent("Physics is improving");
+    expect(within(text).getByRole("table")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([SUMMARY_URL]);
+  });
+
+  it("carries the page's centre to the summary route", async () => {
+    const fetchMock = answerSummary(MARKDOWN);
+    renderWith(completed(), { requestsUrl: `${URL}?centre=302` });
+
+    await summaryText();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([`${SUMMARY_URL}?centre=302`]);
+  });
+
+  it("names the tests it was made from, from the picker, newest first", async () => {
+    answerSummary(MARKDOWN);
+    renderWith(completed());
+
+    await summaryText();
+    expect(within(card()).getByText("Made from: Mock Test 1, Major Test 2")).toBeInTheDocument();
+  });
+
+  it('reads "an earlier test" for a test the picker does not list', async () => {
+    answerSummary(MARKDOWN);
+    renderWith(completed({ selectedTestIds: ["T9", "T1"] }));
+
+    await summaryText();
+    expect(within(card()).getByText("Made from: Mock Test 1, an earlier test")).toBeInTheDocument();
+  });
+
+  it("says who asked for it and when, in India time", async () => {
+    answerSummary(MARKDOWN);
+    renderWith(completed());
+
+    await summaryText();
+    expect(within(card()).getByText("Asked for by Asha Teacher on 27 Nov 2026, 11:00")).toBeInTheDocument();
+  });
+
+  it("keeps the picker and Generate under it, with the newest test ticked", async () => {
+    answerSummary(MARKDOWN);
+    renderWith(completed());
+
+    await summaryText();
+    expect(ticked()).toEqual(["T9"]);
+    expect(box(/Major Test 2/)).toBeEnabled();
+    expect(within(card()).getByRole("button", { name: "Generate" })).toBeEnabled();
+  });
+
+  it("shows a viewer the text, with no Generate", async () => {
+    answerSummary(MARKDOWN);
+    renderWith(completed(), { canEdit: false });
+
+    expect(await summaryText()).toHaveTextContent("Where Asha stands");
+    expect(within(card()).queryByRole("button", { name: "Generate" })).not.toBeInTheDocument();
+  });
+
+  it("makes no call but the summary read: no status poll, no wake, no enqueue", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:40:00Z") });
+    const fetchMock = answerSummary(MARKDOWN);
+    renderWith(completed());
+
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([SUMMARY_URL]);
+  });
+
+  it.each([
+    ["a 502", 502],
+    ["a network error", null],
+  ] as const)("says the text could not be loaded after %s, and Retry reads it again", async (_label, failure) => {
+    const user = userEvent.setup();
+    const fetchMock = answerSummary(failure, MARKDOWN);
+    renderWith(completed());
+
+    const alert = await within(card()).findByRole("alert");
+    expect(alert).toHaveTextContent("The AI Summary could not be loaded");
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(await summaryText()).toHaveTextContent("Where Asha stands");
+    expect(within(card()).queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([SUMMARY_URL, SUMMARY_URL]);
+  });
+
+  it("says it is loading the text", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    renderWith(completed());
+
+    expect(within(card()).getByText("Loading the AI Summary…")).toBeInTheDocument();
+  });
+
+  it("shows the text of a request that completes while the card follows it", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>((url) =>
+      Promise.resolve(
+        url === SUMMARY_URL
+          ? { ok: true, status: 200, json: () => Promise.resolve({ markdown: MARKDOWN }) }
+          : { ok: true, status: 200, json: () => Promise.resolve({ request: completed() }) },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderWith(completed({ state: "running", finishedAt: null }));
+
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(within(card()).getByRole("article", { name: "AI Summary text" })).toHaveTextContent("Where Asha stands");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/ai-test-insights/students/1001/requests/key-1",
+      SUMMARY_URL,
+    ]);
   });
 });

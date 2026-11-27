@@ -32,17 +32,28 @@
 // reload, and stops on any final state. A failed poll keeps the last state
 // shown and the next tick tries again. A Teacher's poll may also re-deliver a
 // request the generator missed; the route decides that, not the card.
-import { useEffect, useState, useSyncExternalStore } from "react";
+//
+// A `completed` request (#564) shows its AI Summary: the text, read once from
+// the summary route and rendered as formatted Markdown, the tests it was made
+// from (named from the picker list; an id the list does not hold reads "an
+// earlier test"), who asked for it and when. A failed text read shows an
+// error with Retry. Reading it makes no status poll, so no wake or enqueue
+// call. Viewers read it too. The picker and Generate stay under it.
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
+import TestInsightText from "@/components/ai-test-insights/TestInsightText";
 import { Button, Card } from "@/components/ui";
 import {
   aiTestInsightsRequestStatusUrl,
+  aiTestInsightsRequestSummaryUrl,
+  formatInsightRequestTime,
   formatInsightSessionDate,
   isInsightRequestInProgress,
   NO_LINKED_USER_CODE,
   NOT_CONFIGURED_CODE,
   type AiTestInsightsCreateRequestResponse,
   type AiTestInsightsRequestStatusResponse,
+  type AiTestInsightsSummaryResponse,
   type AiTestInsightsTest,
   type AiTestInsightsTestFormat,
   type AiTestInsightsTestsState,
@@ -134,6 +145,83 @@ function NoSummary({
           Try again
         </Button>
       )}
+    </div>
+  );
+}
+
+type SummaryTextState = { status: "loading" } | { status: "failed" } | { status: "loaded"; markdown: string };
+
+/** Reads the AI Summary text once, and again on each Retry; an unmount or a newer read drops an older answer. */
+function useSummaryText(url: string) {
+  const [state, setState] = useState<SummaryTextState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    fetch(url, { cache: "no-store" })
+      .then(async (response): Promise<SummaryTextState> => {
+        const body = (await response.json().catch(() => null)) as Partial<AiTestInsightsSummaryResponse> | null;
+        return response.ok && typeof body?.markdown === "string"
+          ? { status: "loaded", markdown: body.markdown }
+          : { status: "failed" };
+      })
+      .catch((): SummaryTextState => ({ status: "failed" }))
+      .then((next) => {
+        if (current) setState(next);
+      });
+    return () => {
+      current = false;
+    };
+  }, [url, attempt]);
+
+  const retry = useCallback(() => {
+    setState({ status: "loading" });
+    setAttempt((n) => n + 1);
+  }, []);
+
+  return { state, retry };
+}
+
+/** The tests an AI Summary was made from, by name from the picker; an id the picker does not hold is "an earlier test". */
+function madeFrom(selectedTestIds: string[], tests: AiTestInsightsTestsState): string {
+  if (tests.status !== "loaded") {
+    return selectedTestIds.length === 1 ? "1 test" : `${selectedTestIds.length} tests`;
+  }
+  const names = new Map(tests.tests.map((test) => [test.id, test.name]));
+  return selectedTestIds.map((id) => names.get(id) ?? "an earlier test").join(", ");
+}
+
+/** A `completed` request: its AI Summary text, the tests it was made from, who asked for it and when. */
+function CompletedSummary({
+  request,
+  tests,
+  requestsUrl,
+}: {
+  request: InsightRequestView;
+  tests: AiTestInsightsTestsState;
+  requestsUrl: string;
+}) {
+  const { state, retry } = useSummaryText(aiTestInsightsRequestSummaryUrl(requestsUrl, request.requestKey));
+  return (
+    <div className="mb-6 space-y-4 border-b border-border pb-6">
+      {state.status === "loading" && (
+        <p className="py-6 text-center text-sm text-text-muted">Loading the AI Summary…</p>
+      )}
+      {state.status === "failed" && (
+        <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-danger bg-danger-bg p-4">
+          <p className="text-sm text-text-primary">The AI Summary could not be loaded</p>
+          <Button variant="secondary" onClick={retry}>
+            Retry
+          </Button>
+        </div>
+      )}
+      {state.status === "loaded" && <TestInsightText markdown={state.markdown} />}
+      <div className="space-y-1 text-xs text-text-muted">
+        <p>Made from: {madeFrom(request.selectedTestIds, tests)}</p>
+        <p>
+          Asked for by {request.requestedByName} on {formatInsightRequestTime(request.requestedAt)}
+        </p>
+      </div>
     </div>
   );
 }
@@ -423,6 +511,9 @@ export default function AiTestInsightsSummaryCard({
         <h2 className="mb-4 text-lg font-bold text-text-primary">AI Summary</h2>
         {request && (request.state === "queued" || request.state === "running") && (
           <InProgress request={{ ...request, state: request.state }} />
+        )}
+        {request?.state === "completed" && (
+          <CompletedSummary key={request.requestKey} request={request} tests={tests} requestsUrl={requestsUrl} />
         )}
         {request && (request.state === "no_data" || request.state === "failed") && (
           <NoSummary

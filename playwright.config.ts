@@ -111,7 +111,10 @@ export default defineConfig({
         HOLISTIC_DICTATION_OPENROUTER_API_KEY: " ",
         // AI Test Insights delivers every Generate to the fake generator
         // started below, never to AI Mentorship Guide: the enqueue URL, secret
-        // and wake URL all point at it. APP_ENV is set here (to "staging", which
+        // and wake URL all point at it, and so do the artifact reader's
+        // settings (bucket, region, prefix, read-only key and the endpoint
+        // override): the text is read from the fake's object store on
+        // 127.0.0.1, never from S3. APP_ENV is set here (to "staging", which
         // generation needs) so a value in .env.local is never used. The other
         // readers of APP_ENV are unchanged by it: the Blended Learning wake is
         // off above, Holistic Profile regeneration also needs its ETL URL and
@@ -122,8 +125,10 @@ export default defineConfig({
     },
     {
       // The fake generator: one Node process on 127.0.0.1. Its database side
-      // claims and ends request rows in the e2e database, like AI Mentorship
-      // Guide; it refuses any host but localhost.
+      // claims, completes and ends request rows in the e2e database, like AI
+      // Mentorship Guide, and serves the files it "uploaded". It runs in
+      // steered mode, which specs drive; it refuses any database host but
+      // localhost.
       command: `node "${FAKE_AI_MENTORSHIP_GUIDE_SCRIPT}"`,
       url: `${FAKE_AI_MENTORSHIP_GUIDE_ORIGIN}/__fake/health`,
       reuseExistingServer: false,
