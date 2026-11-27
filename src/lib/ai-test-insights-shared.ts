@@ -2,6 +2,7 @@
 // browser. Client-safe: keep server-only imports (`@/lib/db`,
 // `@/lib/permissions`) out of this module.
 import { PROGRAM_IDS } from "@/lib/constants";
+import { TestFormatOptions } from "@/lib/quiz-session-options";
 
 /** How much attention a Student has had, across all academic years. */
 export interface AiTestInsightsCounts {
@@ -46,6 +47,18 @@ export interface AiTestInsightsStudentCardData {
 export const AI_TEST_INSIGHTS_TEST_FORMATS = ["major_test", "full_syllabus_test", "mock_test"] as const;
 
 export type AiTestInsightsTestFormat = (typeof AI_TEST_INSIGHTS_TEST_FORMATS)[number];
+
+/**
+ * How the test picker names each format: the labels the LMS already uses for
+ * test formats (`TestFormatOptions`), so the wording never drifts.
+ */
+export const AI_TEST_INSIGHTS_TEST_FORMAT_LABELS = Object.fromEntries(
+  AI_TEST_INSIGHTS_TEST_FORMATS.map((format) => {
+    const option = TestFormatOptions.find((candidate) => candidate.value === format);
+    if (!option) throw new Error(`No label for the test format ${format}`);
+    return [format, option.label];
+  }),
+) as Record<AiTestInsightsTestFormat, string>;
 
 /** One test of the AI Summary card's test picker. */
 export interface AiTestInsightsTest {

@@ -65,6 +65,7 @@ import { Button, Card, Modal } from "@/components/ui";
 import { RetryAlert } from "@/components/ui/RetryAlert";
 import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
 import {
+  AI_TEST_INSIGHTS_TEST_FORMAT_LABELS,
   aiTestInsightsRequestPdfUrl,
   aiTestInsightsRequestStatusUrl,
   aiTestInsightsRequestSummaryUrl,
@@ -77,17 +78,10 @@ import {
   type AiTestInsightsRequestStatusResponse,
   type AiTestInsightsSummaryResponse,
   type AiTestInsightsTest,
-  type AiTestInsightsTestFormat,
   type AiTestInsightsTestsState,
   type InsightRequestView,
 } from "@/lib/ai-test-insights-shared";
 import { outcomeMessage } from "@/lib/ai-test-insights-outcomes";
-
-const FORMAT_LABELS: Record<AiTestInsightsTestFormat, string> = {
-  major_test: "Major test",
-  full_syllabus_test: "Full Syllabus test",
-  mock_test: "Mock test",
-};
 
 const LAST_TICK_HINT_ID = "ai-test-insights-last-tick-hint";
 
@@ -338,7 +332,7 @@ function TestPicker({
                 <span className="min-w-0">
                   <span className="block break-words text-sm font-medium text-text-primary">{test.name}</span>
                   <span className="block text-xs text-text-muted">
-                    {formatInsightSessionDate(test.date)} · {FORMAT_LABELS[test.format]}
+                    {formatInsightSessionDate(test.date)} · {AI_TEST_INSIGHTS_TEST_FORMAT_LABELS[test.format]}
                   </span>
                 </span>
               </label>

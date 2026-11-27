@@ -415,9 +415,9 @@ test.describe("AI Test Insights tab", () => {
 
       const summary = page.getByRole("region", { name: "AI Summary" });
       await expect(summary.getByRole("listitem")).toHaveText([
-        "Mock Test 12 Nov 2026 · Mock test",
-        "Full Syllabus Test 120 Oct 2026 · Full Syllabus test",
-        "Major Test 212 Oct 2026 · Major test",
+        "Mock Test 12 Nov 2026 · Mock Test",
+        "Full Syllabus Test 120 Oct 2026 · Full Syllabus Test",
+        "Major Test 212 Oct 2026 · Major Test",
       ]);
       const mock = summary.getByRole("checkbox", { name: /Mock Test 1/ });
       await expect(mock).toBeChecked();

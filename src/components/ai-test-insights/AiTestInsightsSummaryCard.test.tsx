@@ -29,9 +29,9 @@ describe("AiTestInsightsSummaryCard", () => {
 
     const rows = within(card()).getAllByRole("listitem").map((item) => item.textContent);
     expect(rows).toEqual([
-      "Mock Test 12 Nov 2026 · Mock test",
-      "Full Syllabus Test 120 Oct 2026 · Full Syllabus test",
-      "Major Test 212 Oct 2026 · Major test",
+      "Mock Test 12 Nov 2026 · Mock Test",
+      "Full Syllabus Test 120 Oct 2026 · Full Syllabus Test",
+      "Major Test 212 Oct 2026 · Major Test",
     ]);
     expect(ticked()).toEqual(["T9"]);
   });
