@@ -7,17 +7,24 @@
 // as children. A failed read stays inside these two cards.
 //
 // Below the AI Summary card, a Teacher (feature access `edit`) gets the
-// Session Notes section (#574), which reads the history route with the page's
+// Session Notes section (#574), from the sessions route read with the page's
 // `centre`; a viewer gets no Session Notes section. The AI Summary card
 // reports the request it shows, and Session Notes links it at submit (#575).
 // After a submit the page is refreshed from the server, so the Student card
 // shows the new count and last Insight Session date with no manual reload.
+//
+// History (#576) follows, for everyone who can open the page (a viewer has
+// no form, so it follows the AI Summary card). Session Notes and History
+// share one read of the sessions route, read again after a submit, after
+// "Reload notes", and when the AI Summary card's request becomes `completed`.
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 
+import AiTestInsightsHistory from "@/components/ai-test-insights/AiTestInsightsHistory";
 import AiTestInsightsSessionNotes from "@/components/ai-test-insights/AiTestInsightsSessionNotes";
 import AiTestInsightsStudentCard from "@/components/ai-test-insights/AiTestInsightsStudentCard";
 import AiTestInsightsSummaryCard from "@/components/ai-test-insights/AiTestInsightsSummaryCard";
+import { useAiTestInsightsSessions } from "@/hooks/use-ai-test-insights-sessions";
 import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
 import { aiTestInsightsSessionDraftUrl, aiTestInsightsSessionsUrl } from "@/lib/ai-test-insights-session-notes-rules";
 import {
@@ -60,6 +67,23 @@ export default function AiTestInsightsStudentSections({
   // The request the AI Summary card shows: the page's latest until the card reports.
   const [shownRequest, setShownRequest] = useState<InsightRequestView | null>(latestRequest);
   const router = useRouter();
+  const sessionsUrl = aiTestInsightsSessionsUrl(studentId, centreId);
+  const sessions = useAiTestInsightsSessions(sessionsUrl);
+  const { reload: reloadSessions } = sessions;
+
+  // A request that becomes `completed` in the card joins History, so History is read again.
+  const reportedRequest = useRef(latestRequest);
+  const onRequestChange = useCallback(
+    (request: InsightRequestView | null) => {
+      const before = reportedRequest.current;
+      reportedRequest.current = request;
+      setShownRequest(request);
+      const newlyCompleted =
+        request?.state === "completed" && !(before?.state === "completed" && before.requestKey === request.requestKey);
+      if (newlyCompleted) reloadSessions();
+    },
+    [reloadSessions],
+  );
 
   return (
     <>
@@ -71,16 +95,21 @@ export default function AiTestInsightsStudentSections({
         onRetry={retry}
         requestsUrl={aiTestInsightsRequestsUrl(studentId, centreId)}
         initialRequest={latestRequest}
-        onRequestChange={setShownRequest}
+        onRequestChange={onRequestChange}
       />
       {canEdit && (
         <AiTestInsightsSessionNotes
-          sessionsUrl={aiTestInsightsSessionsUrl(studentId, centreId)}
+          sessions={sessions}
+          sessionsUrl={sessionsUrl}
           draftUrl={aiTestInsightsSessionDraftUrl(studentId, centreId)}
           openRequest={shownRequest}
-          onSubmitted={() => router.refresh()}
+          onSubmitted={() => {
+            router.refresh();
+            reloadSessions();
+          }}
         />
       )}
+      <AiTestInsightsHistory sessions={sessions} tests={state} />
     </>
   );
 }

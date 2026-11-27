@@ -4,12 +4,8 @@
 //
 // Two rules: `draft` (#574) for any draft save, and `final` (#575) for a
 // submit, which also needs the two required fields and a date not after today.
-import {
-  aiTestInsightsStudentApiUrl,
-  formatInsightSessionDate,
-  insightRequestDateInIndia,
-  type InsightRequestView,
-} from "@/lib/ai-test-insights-shared";
+import { aiSummaryTitle, aiTestInsightsStudentApiUrl, type InsightRequestView } from "@/lib/ai-test-insights-shared";
+import type { TimelineEntry } from "@/lib/ai-test-insights-timeline";
 import { isDateString } from "@/lib/curriculum-date-helpers";
 
 /** The most characters any one text field of Session Notes may hold. */
@@ -50,8 +46,8 @@ export type SessionNotesValidation =
 
 const LIMIT_TEXT = SESSION_NOTES_MAX_LENGTH.toLocaleString("en-IN");
 
-/** A label without "(optional)", for messages. */
-const fieldName = (field: SessionNotesField) => SESSION_NOTES_LABELS[field].replace(/ \(optional\)$/, "");
+/** A field's label without "(optional)", for messages and the History timeline. */
+export const sessionNotesFieldName = (field: SessionNotesField) => SESSION_NOTES_LABELS[field].replace(/ \(optional\)$/, "");
 
 const refuse = (field: SessionNotesField, error: string): SessionNotesValidation => ({ ok: false, field, error });
 
@@ -84,12 +80,12 @@ export function validateSessionNotes(input: unknown, rule: SessionNotesRule, tod
   if (!checked.ok || rule === "draft") return checked;
 
   const { sessionDate } = checked.notes;
-  if (sessionDate === null) return refuse("sessionDate", `${fieldName("sessionDate")} is required.`);
+  if (sessionDate === null) return refuse("sessionDate", `${sessionNotesFieldName("sessionDate")} is required.`);
   if (today === undefined || sessionDate > today) {
-    return refuse("sessionDate", `${fieldName("sessionDate")} can't be after today.`);
+    return refuse("sessionDate", `${sessionNotesFieldName("sessionDate")} can't be after today.`);
   }
   for (const field of SESSION_NOTES_REQUIRED_FIELDS) {
-    if (isBlankNote(checked.notes[field])) return refuse(field, `${fieldName(field)} is required.`);
+    if (isBlankNote(checked.notes[field])) return refuse(field, `${sessionNotesFieldName(field)} is required.`);
   }
   return checked;
 }
@@ -105,15 +101,15 @@ function validateDraftRule(input: unknown): SessionNotesValidation {
 
   const sessionDate = raw.sessionDate;
   if (sessionDate !== null && (typeof sessionDate !== "string" || !isDateString(sessionDate))) {
-    return refuse("sessionDate", `${fieldName("sessionDate")} is not a real date.`);
+    return refuse("sessionDate", `${sessionNotesFieldName("sessionDate")} is not a real date.`);
   }
 
   const notes: SessionNotesFields = { sessionDate, areasOfConcern: null, immediateActions: null, otherNotes: null };
   for (const field of SESSION_NOTES_TEXT_FIELDS) {
     const value = raw[field];
-    if (value !== null && typeof value !== "string") return refuse(field, `${fieldName(field)} must be text.`);
+    if (value !== null && typeof value !== "string") return refuse(field, `${sessionNotesFieldName(field)} must be text.`);
     if (sessionNotesLength(value) > SESSION_NOTES_MAX_LENGTH) {
-      return refuse(field, `${fieldName(field)} is over the ${LIMIT_TEXT}-character limit.`);
+      return refuse(field, `${sessionNotesFieldName(field)} is over the ${LIMIT_TEXT}-character limit.`);
     }
     notes[field] = value;
   }
@@ -133,7 +129,7 @@ export function sessionNotesLinkText(request: InsightRequestView | null): string
   if (openInsightRequestKey(request) === null || !request) {
     return "No AI Summary is open, so these notes won't be linked to one.";
   }
-  return `Linked to the AI Summary of ${formatInsightSessionDate(insightRequestDateInIndia(request.requestedAt))}`;
+  return `Linked to the ${aiSummaryTitle(request)}`;
 }
 
 /** The line under the form saying who reads submitted notes. */
@@ -157,8 +153,8 @@ export type SessionNotesAccess = "write" | "no_linked_user" | "read";
 
 /** `GET /api/ai-test-insights/students/[studentId]/sessions`. */
 export interface AiTestInsightsSessionsResponse {
-  /** The Student's history; always empty until the timeline (#576). */
-  timeline: never[];
+  /** The Student's History timeline, newest first (#576). */
+  timeline: TimelineEntry[];
   /** The caller's own draft, or null. */
   draft: SessionNotesDraft | null;
   notesAccess: SessionNotesAccess;

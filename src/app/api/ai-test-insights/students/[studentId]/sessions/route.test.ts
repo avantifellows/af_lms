@@ -6,7 +6,8 @@ import { NextRequest } from "next/server";
 // real Session Notes module. The session and the Postgres boundary are
 // stubbed: Postgres answers the permission row, centre seats, the
 // listed-Student rows of one Student, the actor's User by email, and the
-// drafts in `drafts`, filtered by Student and author as the SQL says.
+// drafts in `drafts`, filtered by Student and author as the SQL says. The
+// History timeline's reads find nothing here (route.timeline.test.ts).
 const { mockQuery, mockGetServerSession } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockGetServerSession: vi.fn(),
@@ -101,7 +102,7 @@ beforeEach(() => {
     if (sql.includes("FROM centre_positions")) return [];
     if (sql.includes("centre_students")) return LISTED[String(params[0])] ?? [];
     if (sql.includes('FROM "user"') && sql.includes("LOWER(email)")) return usersByEmail;
-    if (sql.includes("FROM ai_test_insight_sessions")) {
+    if (sql.includes("FROM ai_test_insight_sessions") && sql.includes("state = 'draft'")) {
       expect(sql).toMatch(/student_id = \$1 AND author_user_id = \$2 AND state = 'draft'/);
       return drafts.filter((d) => d.student_id === params[0] && d.author_user_id === params[1] && d.state === "draft");
     }
@@ -115,7 +116,10 @@ async function get(studentId: string, search = "") {
   });
 }
 
-const draftReads = () => mockQuery.mock.calls.filter(([sql]) => String(sql).includes("ai_test_insight_sessions"));
+const draftReads = () =>
+  mockQuery.mock.calls.filter(
+    ([sql]) => String(sql).includes("ai_test_insight_sessions") && String(sql).includes("state = 'draft'"),
+  );
 
 describe("GET /api/ai-test-insights/students/[studentId]/sessions", () => {
   it("answers a Teacher with their own draft, write access and an empty timeline, never cached", async () => {

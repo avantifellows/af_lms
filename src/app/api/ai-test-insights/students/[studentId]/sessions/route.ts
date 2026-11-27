@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { actorUserId } from "@/lib/actor-user";
+import { readTimeline } from "@/lib/ai-test-insights-history";
 import { NO_STORE } from "@/lib/ai-test-insights-request-routes";
 import { readOwnDraft, saveSessionNotes } from "@/lib/ai-test-insights-session-notes";
 import {
@@ -27,18 +28,23 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 // (access `edit`, no User) or `read`. `draft` is the caller's own draft, or
 // null: a draft is never returned to anyone but its author, and a viewer
 // writes none, so it is read for a Teacher with a User only. `timeline` is
-// empty until the history timeline (#576).
+// the Student's History (#576): every submitted Insight Session and every
+// `completed` Test Insight no session records, newest first, across all
+// years, Teachers, Schools and Programs. `isAuthor` is true only on the
+// caller's own sessions, and only for a caller who may write notes.
 export const GET = withAiTestInsightsStudent(
   { log: "AI Test Insights sessions read failed", message: "Session Notes could not be loaded", headers: NO_STORE },
   async ({ student, actor }) => {
     let notesAccess: SessionNotesAccess = "read";
     let draft: SessionNotesDraft | null = null;
+    let author: number | null = null;
     if (student.canEdit) {
-      const author = await actorUserId(actor.email, actor.linkedUserId);
+      author = await actorUserId(actor.email, actor.linkedUserId);
       notesAccess = author === null ? "no_linked_user" : "write";
       if (author !== null) draft = await readOwnDraft(student.studentId, author);
     }
-    const response: AiTestInsightsSessionsResponse = { timeline: [], draft, notesAccess };
+    const timeline = await readTimeline(student.studentId, author);
+    const response: AiTestInsightsSessionsResponse = { timeline, draft, notesAccess };
     return NextResponse.json(response, { headers: NO_STORE });
   },
 );

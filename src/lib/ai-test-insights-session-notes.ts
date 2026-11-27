@@ -10,6 +10,7 @@
 // and a revision check on every update.
 //
 // Modes: `draft` (#574) and `submit` (#575); edit (#578) adds its own here.
+// It also lists a Student's submitted sessions for the History timeline (#576).
 // A submit checks its open request key against `ai_test_insight_requests`
 // in its own SQL.
 import type { AiTestInsightsStudentContext } from "@/lib/ai-test-insights-access";
@@ -85,6 +86,85 @@ export async function readSubmittedSessionCounts(
     studentId: Number(row.student_id),
     completed: Number(row.sessions_completed),
     lastSessionDate: row.last_session_date,
+  }));
+}
+
+/** A `submitted` Insight Session as the History timeline reads it. */
+export interface SubmittedInsightSession {
+  sessionId: number;
+  revision: number;
+  /** `YYYY-MM-DD`. */
+  sessionDate: string;
+  authorUserId: number;
+  /** The author's name, by the same rule as an Insight Request's "Asked for by". */
+  authorName: string;
+  areasOfConcern: string;
+  immediateActions: string;
+  otherNotes: string | null;
+  /** The `ai_test_insight_requests.id` of the Test Insight the session records, or null. */
+  insightRequestId: number | null;
+  /** UTC ISO 8601. */
+  submittedAt: string;
+  /** UTC ISO 8601: the newest `submitted_edited` audit row; null when never edited. */
+  lastEditedAt: string | null;
+}
+
+type SubmittedSessionRow = {
+  id: string | number;
+  revision: number;
+  session_date: string;
+  author_user_id: string | number;
+  author_name: string | null;
+  areas_of_concern: string;
+  immediate_actions: string;
+  other_notes: string | null;
+  insight_request_id: string | number | null;
+  submitted_at: string;
+  last_edited_at: string | null;
+};
+
+/** A stored UTC timestamp as ISO 8601 with a `Z`, as the Insight Request module writes its times. */
+const isoUtc = (column: string) => `to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
+
+/**
+ * Every `submitted` Insight Session of a Student, by any Teacher, in any
+ * academic year and under any School or Program: the History timeline's
+ * sessions (#576), in no order (the timeline orders them). Drafts never come
+ * back. The author's name is the rule "Asked for by" uses (first and last
+ * name, else email).
+ */
+export async function listSubmittedSessions(studentId: number): Promise<SubmittedInsightSession[]> {
+  const rows = await query<SubmittedSessionRow>(
+    `SELECT s.id,
+            s.revision,
+            to_char(s.session_date, 'YYYY-MM-DD') AS session_date,
+            s.author_user_id,
+            COALESCE(NULLIF(BTRIM(CONCAT_WS(' ', BTRIM(u.first_name), BTRIM(u.last_name))), ''), u.email) AS author_name,
+            s.areas_of_concern,
+            s.immediate_actions,
+            s.other_notes,
+            s.insight_request_id,
+            ${isoUtc("s.submitted_at")} AS submitted_at,
+            (SELECT ${isoUtc("MAX(a.occurred_at)")}
+             FROM ai_test_insight_session_note_audits a
+             WHERE a.session_id = s.id AND a.action = 'submitted_edited') AS last_edited_at
+     FROM ai_test_insight_sessions s
+     JOIN "user" u ON u.id = s.author_user_id
+     WHERE s.student_id = $1 AND s.state = 'submitted'`,
+    [studentId],
+  );
+  return rows.map((row) => ({
+    sessionId: Number(row.id),
+    revision: Number(row.revision),
+    sessionDate: row.session_date,
+    authorUserId: Number(row.author_user_id),
+    authorName: row.author_name ?? "",
+    areasOfConcern: row.areas_of_concern,
+    immediateActions: row.immediate_actions,
+    otherNotes: row.other_notes,
+    insightRequestId: row.insight_request_id === null ? null : Number(row.insight_request_id),
+    submittedAt: row.submitted_at,
+    lastEditedAt: row.last_edited_at,
   }));
 }
 

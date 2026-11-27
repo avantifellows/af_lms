@@ -2,8 +2,11 @@
 
 // The Session Notes section of the AI Test Insights Student page (#551,
 // physical centres only). Slice #574: the Teacher's private draft. The
-// section reads the history route once (and again on Retry or "Reload
-// notes"); the form shows only once the draft is known. A Teacher with
+// section shows the page's one read of the sessions route (#576: History
+// shares it), which it reads again on Retry or "Reload notes"; the form shows
+// only once the draft is known. Once the form holds its draft, a later read
+// (for History) never replaces it, even one that fails: only "Reload notes"
+// starts the form again from the next read. A Teacher with
 // `notesAccess = write` gets the form with their own draft, or a blank one
 // dated today in India; `no_linked_user` gets part 1's message instead; read
 // access gets no section at all. A failed read stays inside this section.
@@ -33,7 +36,7 @@ import { Button, Card } from "@/components/ui";
 import { RetryAlert } from "@/components/ui/RetryAlert";
 import { baseInputClasses } from "@/components/ui/styles";
 import { useDraftAutosave, useDraftAutosaveRefs } from "@/hooks/use-draft-autosave";
-import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
+import type { SessionsRead } from "@/hooks/use-ai-test-insights-sessions";
 import {
   openInsightRequestKey,
   SESSION_NOTES_LABELS,
@@ -59,16 +62,7 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 const AUTOSAVE_DELAY_MS = 1000;
 const STALE_MESSAGE = "These notes were changed in another tab.";
 const SUBMIT_FAILED_MESSAGE = "These notes could not be submitted. Please try again.";
-const READ_INIT: RequestInit = { cache: "no-store" };
 const formatCount = (count: number) => count.toLocaleString("en-IN");
-
-type SessionsState = { status: "loaded"; sessions: AiTestInsightsSessionsResponse } | { status: "failed" };
-
-async function readSessions(response: Response): Promise<SessionsState> {
-  const body = (await response.json().catch(() => null)) as AiTestInsightsSessionsResponse | null;
-  if (response.ok && body && typeof body.notesAccess === "string") return { status: "loaded", sessions: body };
-  return { status: "failed" };
-}
 
 /** The form's fields as typed; an empty date input is "". */
 type FormValues = Record<SessionNotesField, string>;
@@ -353,44 +347,52 @@ function SessionNotesForm({
 }
 
 export default function AiTestInsightsSessionNotes({
+  sessions,
   sessionsUrl,
   draftUrl,
   openRequest,
   onSubmitted,
 }: {
-  /** The Student's history route, with the page's `centre`; a submit posts to it. */
+  /** The page's read of the sessions route. */
+  sessions: SessionsRead;
+  /** The Student's sessions route, with the page's `centre`; a submit posts to it. */
   sessionsUrl: string;
   /** The Student's draft save route, with the page's `centre`. */
   draftUrl: string;
   /** The request the AI Summary card shows; a submit links it when it is `completed`. */
   openRequest: InsightRequestView | null;
-  /** A submit made an Insight Session (the page refreshes the Student card's counts). */
+  /** A submit made an Insight Session (the page refreshes the Student card's counts and reads History again). */
   onSubmitted?: () => void;
 }) {
-  const { state, retry } = useFetchWithRetry(sessionsUrl, readSessions, READ_INIT);
+  const { state, reload } = sessions;
+  // The read the form started from; null until a read answers, and again after "Reload notes".
+  const [formFrom, setFormFrom] = useState<AiTestInsightsSessionsResponse | null>(null);
+  if (formFrom === null && state.status === "loaded") setFormFrom(state.sessions);
+  const shown = formFrom ?? (state.status === "loaded" ? state.sessions : null);
   // Submits so far: each one shows a fresh blank form; a reload shows the draft the route reads.
   const [submits, setSubmits] = useState(0);
-  if (state.status === "loaded" && state.sessions.notesAccess === "read") return null;
+  if (shown?.notesAccess === "read") return null;
 
   return (
     <section aria-label="Session Notes">
       <Card elevation="sm" className="p-4 sm:p-6">
         <h2 className="mb-4 text-lg font-bold text-text-primary">Session Notes</h2>
-        {state.status === "loading" && <p className="text-sm text-text-secondary">Loading Session Notes…</p>}
-        {state.status === "failed" && <RetryAlert onRetry={retry}>Session Notes could not be loaded.</RetryAlert>}
-        {state.status === "loaded" && state.sessions.notesAccess === "no_linked_user" && (
-          <p className="text-sm text-text-primary">{NO_LINKED_USER_MESSAGE}</p>
+        {!shown && state.status === "loading" && <p className="text-sm text-text-secondary">Loading Session Notes…</p>}
+        {!shown && state.status === "failed" && (
+          <RetryAlert onRetry={reload}>Session Notes could not be loaded.</RetryAlert>
         )}
-        {state.status === "loaded" && state.sessions.notesAccess === "write" && (
+        {shown?.notesAccess === "no_linked_user" && <p className="text-sm text-text-primary">{NO_LINKED_USER_MESSAGE}</p>}
+        {shown?.notesAccess === "write" && (
           <SessionNotesForm
             key={submits}
-            draft={submits > 0 ? null : state.sessions.draft}
+            draft={submits > 0 ? null : shown.draft}
             draftUrl={draftUrl}
             sessionsUrl={sessionsUrl}
             openRequest={openRequest}
             onReload={() => {
               setSubmits(0);
-              retry();
+              setFormFrom(null);
+              reload();
             }}
             onSubmitted={() => {
               setSubmits((count) => count + 1);

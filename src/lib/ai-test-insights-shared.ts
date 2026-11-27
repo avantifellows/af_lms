@@ -156,6 +156,24 @@ export interface InsightRequestView {
   finishedAt: string | null;
 }
 
+/**
+ * The tests an AI Summary was made from, by name from the test picker's read;
+ * an id the picker does not hold reads "an earlier test". Until the picker
+ * has answered, how many tests.
+ */
+export function insightTestNames(selectedTestIds: string[], tests: AiTestInsightsTestsState): string {
+  if (tests.status !== "loaded") {
+    return selectedTestIds.length === 1 ? "1 test" : `${selectedTestIds.length} tests`;
+  }
+  const names = new Map(tests.tests.map((test) => [test.id, test.name]));
+  return selectedTestIds.map((id) => names.get(id) ?? "an earlier test").join(", ");
+}
+
+/** A Test Insight's name, dated by its request day in India: `AI Summary of 27 Nov 2026`. */
+export function aiSummaryTitle(request: InsightRequestView): string {
+  return `AI Summary of ${formatInsightSessionDate(insightRequestDateInIndia(request.requestedAt))}`;
+}
+
 /** A `queued` or `running` request holds the Student's one running slot. */
 export function isInsightRequestInProgress(request: InsightRequestView | null): boolean {
   return request?.state === "queued" || request?.state === "running";

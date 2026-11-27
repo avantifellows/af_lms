@@ -64,6 +64,7 @@
 // Insight is open. Reporting changes nothing the card shows.
 import { useEffect, useState, useSyncExternalStore, type MouseEvent } from "react";
 
+import TestInsightMadeBy from "@/components/ai-test-insights/TestInsightMadeBy";
 import TestInsightText from "@/components/ai-test-insights/TestInsightText";
 import { Button, Card, Modal } from "@/components/ui";
 import { RetryAlert } from "@/components/ui/RetryAlert";
@@ -73,7 +74,6 @@ import {
   aiTestInsightsRequestPdfUrl,
   aiTestInsightsRequestStatusUrl,
   aiTestInsightsRequestSummaryUrl,
-  formatInsightRequestTime,
   formatInsightSessionDate,
   isInsightRequestInProgress,
   NO_LINKED_USER_CODE,
@@ -186,15 +186,6 @@ async function readSummaryText(response: Response): Promise<SummaryTextState> {
     : { status: "failed" };
 }
 
-/** The tests an AI Summary was made from, by name from the picker; an id the picker does not hold is "an earlier test". */
-function madeFrom(selectedTestIds: string[], tests: AiTestInsightsTestsState): string {
-  if (tests.status !== "loaded") {
-    return selectedTestIds.length === 1 ? "1 test" : `${selectedTestIds.length} tests`;
-  }
-  const names = new Map(tests.tests.map((test) => [test.id, test.name]));
-  return selectedTestIds.map((id) => names.get(id) ?? "an earlier test").join(", ");
-}
-
 const PDF_NOT_CONFIGURED_MESSAGE =
   "The PDF can't be downloaded here: AI Summary reading is not set up in this environment.";
 const PDF_NOT_FOUND_MESSAGE = "The PDF of this AI Summary could not be found.";
@@ -288,12 +279,7 @@ function CompletedSummary({
       {state.status === "failed" && <RetryAlert onRetry={retry}>The AI Summary could not be loaded</RetryAlert>}
       {state.status === "loaded" && <TestInsightText markdown={state.markdown} />}
       <DownloadPdf url={aiTestInsightsRequestPdfUrl(requestsUrl, request.requestKey)} />
-      <div className="space-y-1 text-xs text-text-muted">
-        <p>Made from: {madeFrom(request.selectedTestIds, tests)}</p>
-        <p>
-          Asked for by {request.requestedByName} on {formatInsightRequestTime(request.requestedAt)}
-        </p>
-      </div>
+      <TestInsightMadeBy request={request} tests={tests} />
     </div>
   );
 }

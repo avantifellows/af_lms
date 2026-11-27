@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AiTestInsightsSessionNotes from "./AiTestInsightsSessionNotes";
+import { useAiTestInsightsSessions } from "@/hooks/use-ai-test-insights-sessions";
 import type { InsightRequestView } from "@/lib/ai-test-insights-shared";
 
 // The Session Notes section of the AI Test Insights Student page (#574): the
@@ -9,7 +10,8 @@ import type { InsightRequestView } from "@/lib/ai-test-insights-shared";
 // and its Submit (#575). fetch is stubbed: the history route answers from
 // `reads`, in turn (the last repeats), each draft save from `saves`, in turn,
 // or 200 with the next revision once `saves` runs out, and each submit from
-// `submits`, in turn, or 201 once `submits` runs out.
+// `submits`, in turn, or 201 once `submits` runs out. The section gets the
+// page's read of the history route through the same hook the page uses.
 const SESSIONS_URL = "/api/ai-test-insights/students/1005/sessions?centre=302";
 const DRAFT_URL = "/api/ai-test-insights/students/1005/sessions/draft?centre=302";
 const MARKER = "[marker-574-form]";
@@ -92,18 +94,25 @@ const COMPLETED: InsightRequestView = {
   finishedAt: "2026-11-27T19:34:00Z",
 };
 
-let onSubmitted: ReturnType<typeof vi.fn>;
+let onSubmitted: ReturnType<typeof vi.fn<() => void>>;
 
-async function renderNotes(openRequest: InsightRequestView | null = null) {
-  onSubmitted = vi.fn();
-  render(
+/** The section with the page's read of the history route, as the Student page gives it. */
+function NotesWithRead({ openRequest }: { openRequest: InsightRequestView | null }) {
+  const sessions = useAiTestInsightsSessions(SESSIONS_URL);
+  return (
     <AiTestInsightsSessionNotes
+      sessions={sessions}
       sessionsUrl={SESSIONS_URL}
       draftUrl={DRAFT_URL}
       openRequest={openRequest}
       onSubmitted={onSubmitted}
-    />,
+    />
   );
+}
+
+async function renderNotes(openRequest: InsightRequestView | null = null) {
+  onSubmitted = vi.fn();
+  render(<NotesWithRead openRequest={openRequest} />);
   await tick(0);
 }
 
@@ -346,7 +355,7 @@ describe("AiTestInsightsSessionNotes", () => {
 
   it("shows no form before the draft is known, and a failed read offers Retry", async () => {
     reads = [{ status: 500, body: { error: "Session Notes could not be loaded" } }, writeAccess()];
-    render(<AiTestInsightsSessionNotes sessionsUrl={SESSIONS_URL} draftUrl={DRAFT_URL} openRequest={null} />);
+    render(<NotesWithRead openRequest={null} />);
     expect(within(section()).queryByRole("textbox")).not.toBeInTheDocument();
     await tick(0);
 

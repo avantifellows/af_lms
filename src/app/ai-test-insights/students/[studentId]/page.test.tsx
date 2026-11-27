@@ -134,7 +134,7 @@ describe("AI Test Insights Student page", () => {
     await renderPage("1005");
 
     const regions = screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"));
-    expect(regions).toEqual(["Student", "Performance", "AI Summary", "Session Notes"]);
+    expect(regions).toEqual(["Student", "Performance", "AI Summary", "Session Notes", "History"]);
     const testReads = askedUrls().filter((url) => url.pathname.endsWith("/tests"));
     expect(testReads.map((url) => url.pathname)).toEqual(["/api/ai-test-insights/students/1005/tests"]);
   });

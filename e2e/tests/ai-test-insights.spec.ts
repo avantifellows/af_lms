@@ -5,6 +5,7 @@ import type { Page } from "@playwright/test";
 import { test, expect, signInAs } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
 import {
+  AI_TEST_INSIGHTS_ASHA_HISTORY,
   AI_TEST_INSIGHTS_CARDS,
   AI_TEST_INSIGHTS_COE_CENTRE_LIST,
   AI_TEST_INSIGHTS_NOT_LISTED_KEYS,
@@ -81,6 +82,18 @@ async function studentCard(page: Page): Promise<{ name: string; fields: string[]
     terms.map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
   );
   return { name, fields };
+}
+
+/** The History section's entries, each as its lines of text, once it has loaded. */
+async function historyEntries(page: Page): Promise<string[][]> {
+  const history = page.getByRole("region", { name: "History" });
+  await expect(history.getByText("Loading history…")).toHaveCount(0);
+  await expect(history.getByRole("alert")).toHaveCount(0);
+  return history
+    .getByRole("listitem")
+    .evaluateAll((items) =>
+      items.map((item) => Array.from(item.querySelectorAll("h3, p, dt, dd")).map((line) => line.textContent ?? "")),
+    );
 }
 
 async function expectNotFound(page: Page, url: string) {
@@ -190,7 +203,7 @@ test.describe("AI Test Insights tab", () => {
     const rows = await listedRows(adminPage);
 
     // Asha: 3 submitted sessions (a newer draft ignored), 2 completed requests
-    // (failed, no-data and queued ignored), newest submitted on 14 Nov 2026.
+    // (failed, no-data and running ignored), newest submitted on 14 Nov 2026.
     expect(rows).toContainEqual(["Asha Atiq", "E2E-ATI-ASHA", "11", "3", "2", "14 Nov 2026"]);
     // Divya has only a draft and a failed request; Bhavya has nothing.
     expect(rows).toContainEqual(["Divya Dutt", "E2E-ATI-DIVYA", "12", "0", "0", ""]);
@@ -1305,6 +1318,95 @@ test.describe("AI Test Insights tab", () => {
 
     // Session Notes (#574): a Teacher's private draft, saved by itself about
     // a second after typing stops. Bhavya and Esha have no seeded sessions.
+    // History (#576): every submitted Insight Session and every completed
+    // Test Insight no session records, newest first, for everyone who can
+    // open the page.
+    test.describe("History", () => {
+      test("shows Asha's declared entries in the declared order to the author, a second Teacher and each viewer role", async ({
+        page,
+        browser,
+        pmPage,
+        programAdminPage,
+        adminPage,
+      }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        const secondContext = await browser.newContext();
+        const secondTeacher = await signInAs(await secondContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+        for (const viewer of [page, secondTeacher, pmPage, programAdminPage, adminPage]) {
+          await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+          await viewer.goto(studentUrl("asha"));
+          expect(await historyEntries(viewer)).toEqual(AI_TEST_INSIGHTS_ASHA_HISTORY);
+        }
+        await secondContext.close();
+      });
+
+      test("puts History below Session Notes for a Teacher and below the AI Summary card for a viewer", async ({
+        page,
+        programAdminPage,
+      }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        for (const [viewer, sections] of [
+          [page, ["AI Summary", "Session Notes", "History"]],
+          [programAdminPage, ["AI Summary", "History"]],
+        ] as const) {
+          await viewer.goto(studentUrl("asha"));
+          await expect(viewer.getByRole("region", { name: "History" })).toBeVisible();
+          const regions = await viewer
+            .getByRole("main")
+            .getByRole("region")
+            .evaluateAll((all) => all.map((region) => region.getAttribute("aria-label")));
+          expect(regions).toEqual(["Student", "Performance", ...sections]);
+        }
+      });
+
+      test("says so for a Student with no entry", async ({ adminPage }) => {
+        await adminPage.goto(studentUrl("bhavya"));
+
+        await expect(
+          adminPage.getByRole("region", { name: "History" }).getByText("No Insight Sessions or AI Summaries yet.", { exact: true }),
+        ).toBeVisible();
+      });
+
+      test("keeps the AI Summary card working when the sessions route fails, and Retry loads the timeline", async ({
+        adminPage,
+      }) => {
+        let failures = 0;
+        await adminPage.route("**/api/ai-test-insights/students/*/sessions*", async (route) => {
+          if (route.request().method() === "GET" && failures === 0) {
+            failures += 1;
+            await route.fulfill({ status: 500, json: { error: "Session Notes could not be loaded" } });
+            return;
+          }
+          await route.continue();
+        });
+        await answerTestPicker(adminPage, 200, { tests: PICKER_TESTS });
+        await adminPage.goto(studentUrl("asha"));
+
+        const history = adminPage.getByRole("region", { name: "History" });
+        await expect(history.getByRole("alert")).toContainText("History could not be loaded.");
+        const summary = adminPage.getByRole("region", { name: "AI Summary" });
+        await expect(summary.getByText("Writing the AI Summary. This usually takes about 4 minutes.")).toBeVisible();
+        await expect(summary.getByRole("checkbox")).toHaveCount(PICKER_TESTS.length);
+        expect(await studentCard(adminPage)).toEqual({
+          ...AI_TEST_INSIGHTS_CARDS.asha,
+          fields: AI_TEST_INSIGHTS_CARDS.asha.fields.map(([label, value]) =>
+            label === "Newest test" ? [label, "Mock Test 1 · 2 Nov 2026"] : [label, value],
+          ),
+        });
+
+        await history.getByRole("button", { name: "Retry" }).click();
+        expect(await historyEntries(adminPage)).toEqual(AI_TEST_INSIGHTS_ASHA_HISTORY);
+      });
+
+      test("answers 404 from the sessions route to a Teacher of another School", async ({ page }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher);
+
+        const response = await page.request.get(`/api/ai-test-insights/students/${ids.studentIds.asha}/sessions`);
+
+        expect(response.status()).toBe(404);
+      });
+    });
+
     test.describe("Session Notes", () => {
       const CONCERN = "Loses marks on rotational motion [e2e-574]";
       const ACTIONS = "Two torque worksheets a week [e2e-574]";
@@ -1535,6 +1637,10 @@ test.describe("AI Test Insights tab", () => {
 
         test("links the AI Summary the card shows, writes one submitted audit row, blanks the form, and the counts move", async ({
           page,
+          browser,
+          pmPage,
+          programAdminPage,
+          adminPage,
         }) => {
           test.slow();
           await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
@@ -1556,6 +1662,13 @@ test.describe("AI Test Insights tab", () => {
           await notes.getByLabel("Areas of concern").fill(`  ${CONCERN}  `);
           await notes.getByLabel("Immediate actions").fill(`\n${ACTIONS}\n`);
           await notes.getByLabel("Other notes (optional)").fill("   ");
+          // Before the submit the AI Summary is a History entry of its own.
+          const ESHA_AI_SUMMARY = [
+            "AI Summary of 27 Nov 2026",
+            "Made from: Mock Test 1",
+            "Asked for by E2E ATI Teacher on 27 Nov 2026, 11:00",
+          ];
+          expect(await historyEntries(page)).toEqual([ESHA_AI_SUMMARY]);
           await notes.getByRole("button", { name: "Submit" }).click();
 
           // The form is blank again, dated today, and the Student card moves with no reload.
@@ -1564,6 +1677,31 @@ test.describe("AI Test Insights tab", () => {
           await expect(notes.getByLabel("Date of conversation")).toHaveValue(todayInIndia());
           await expect(cardValue(page, "Insight Sessions completed")).toHaveText("1");
           await expect(cardValue(page, "Last Insight Session")).toHaveText("20 Nov 2026");
+
+          // The session joins History with no reload, with the AI Summary it
+          // records inside it and not on its own; the second Teacher and each
+          // viewer role see it once they open the page.
+          const ESHA_HISTORY = [
+            [
+              "20 Nov 2026",
+              "Notes by E2E ATI Teacher",
+              "Areas of concern",
+              CONCERN,
+              "Immediate actions",
+              ACTIONS,
+              ...ESHA_AI_SUMMARY,
+            ],
+          ];
+          await expect(page.getByRole("region", { name: "History" }).getByText("20 Nov 2026", { exact: true })).toBeVisible();
+          expect(await historyEntries(page)).toEqual(ESHA_HISTORY);
+          const secondContext = await browser.newContext();
+          const secondTeacher = await signInAs(await secondContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+          for (const viewer of [secondTeacher, pmPage, programAdminPage, adminPage]) {
+            await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+            await viewer.goto(studentUrl("esha"));
+            expect(await historyEntries(viewer)).toEqual(ESHA_HISTORY);
+          }
+          await secondContext.close();
 
           const [row] = await readInsightSessions(pool, ids.studentIds.esha);
           const teacherUserId = ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email];

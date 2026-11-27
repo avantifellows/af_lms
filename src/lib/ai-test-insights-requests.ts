@@ -120,6 +120,22 @@ export async function requestByKey(studentId: number, requestKey: string): Promi
   return rows[0] ? toView(rows[0]) : null;
 }
 
+/**
+ * Every `completed` request of a Student, in any academic year and under any
+ * School or Program, each with its `id`: the History timeline's Test Insights
+ * (#576), in no order (the timeline orders them).
+ */
+export async function listCompletedRequests(studentId: number): Promise<Array<{ id: number; request: InsightRequestView }>> {
+  const rows = await query<RequestRow & { id: string | number }>(
+    `SELECT r.id, ${VIEW_COLUMNS}
+     FROM ai_test_insight_requests r
+     JOIN "user" u ON u.id = r.requested_by_user_id
+     WHERE r.student_id = $1 AND r.state = 'completed'`,
+    [studentId],
+  );
+  return rows.map((row) => ({ id: Number(row.id), request: toView(row) }));
+}
+
 /** The Student's `queued` or `running` request, if any (at most one, by the unique index). */
 async function inProgressRequest(studentId: number): Promise<InsightRequestView | null> {
   const rows = await query<RequestRow>(

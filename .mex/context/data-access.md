@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-27
+last_updated: 2026-11-28
 ---
 
 # Data Access
@@ -1152,7 +1152,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   (0 when none). Text is stored as typed, a blank field as null; no audit row. Routes:
   `GET …/students/[studentId]/sessions` (view; 200 `{ timeline: [], draft, notesAccess }`, `no-store`;
   `notesAccess` `write` / `no_linked_user` / `read`, draft read only for an `edit` caller with a User;
-  `timeline` stays `[]` until #576) and `PUT …/sessions/draft` (edit; 200 `{ revision }`, 409
+  `timeline` is the History timeline since #576, below) and `PUT …/sessions/draft` (edit; 200 `{ revision }`, 409
   `{ code: "stale", currentRevision }`, 422 `{ error, field }`). Both open through
   `src/lib/ai-test-insights-student-routes.ts` (`withAiTestInsightsStudent` /
   `withAiTestInsightsStudentWrite`: Student access with `centre`, then body 422, then the shared
@@ -1184,3 +1184,21 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   getTodayIST())`; 201 `{ sessionId, revision }`. The counts read is unchanged: the Tab and the
   Student card count the new `submitted` row. E2E cleanup order: sessions before requests (a submitted
   session's composite FK holds its request); the Submit specs' own `afterEach` does both in that order.
+- **History timeline (#551 slice #576, 2026-11-28):** server-only `src/lib/ai-test-insights-history.ts`
+  (`readTimeline(studentId, callerUserId)`) composes the timeline from two reads keyed by
+  `student_id` only (no School, Program or year filter): `listSubmittedSessions` in the Session Notes
+  module (`state = 'submitted'`; author name by the "Asked for by" rule — first + last name, else
+  email — joined from `"user"`; `lastEditedAt` = newest `submitted_edited` audit `occurred_at`, null
+  when none; times as `YYYY-MM-DDTHH:MM:SSZ`) and `listCompletedRequests` in the Insight Request
+  module (`state = 'completed'`, the request view plus `id`). Dependencies run History → Session
+  Notes and Insight Requests. A completed request whose `id` a submitted session's
+  `insight_request_id` holds appears only inside that session's entry. The order is
+  `orderTimeline` in the client-safe `src/lib/ai-test-insights-timeline.ts` (with the `TimelineEntry`
+  type): day newest first (`session_date`; a request's `requested_at` day in India), then moment
+  (`submitted_at` / `requested_at`), then sessions before Test Insights, then id descending.
+  `GET …/sessions` fills `timeline` for every viewer; `isAuthor` is true only when the caller has
+  `edit`, a User, and wrote the session. E2E: Asha's seeded rows (sessions by the Teacher and the
+  seated Teacher over two years with declared text and `submitted_at`, one `submitted_edited` audit,
+  a draft; requests with declared `requested_at`, the 14 Nov one recorded by her 14 Nov session, plus
+  failed, no-data and running) and her expected entries, `AI_TEST_INSIGHTS_ASHA_HISTORY`, are in
+  `e2e/helpers/ai-test-insights-fixtures.ts`; her counts are unchanged (3, 2, 14 Nov 2026).
