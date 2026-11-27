@@ -14,13 +14,15 @@
 // the secret or a URL.
 
 /** The settings a configured environment has. Every value is trimmed. */
+import { aiTestInsightsEnvironment, aiTestInsightsSetting, errorName, type AiTestInsightsEnvironment } from "@/lib/ai-test-insights-env";
+
 export interface AiTestInsightsDeliverySettings {
   /** The collection endpoint, ending in `/api/internal/insight-requests`, no trailing slash. */
   enqueueUrl: string;
   enqueueSecret: string;
   /** The wake base URL, no trailing slash; null skips the wake call. */
   wakeUrl: string | null;
-  environment: "staging" | "production";
+  environment: AiTestInsightsEnvironment;
 }
 
 /** How the generator answered the enqueue call. */
@@ -34,12 +36,6 @@ export type AiTestInsightsEnqueueOutcome =
 
 const REJECTED_STATUSES = new Set([401, 404, 422]);
 
-/** A setting's value, trimmed; a blank after trimming counts as unset. */
-function setting(name: string): string | null {
-  const value = process.env[name]?.trim();
-  return value ? value : null;
-}
-
 const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
 
 /**
@@ -48,12 +44,11 @@ const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
  * `production`. A blank wake URL only skips the wake call.
  */
 export function aiTestInsightsDeliverySettings(): AiTestInsightsDeliverySettings | null {
-  const enqueueUrl = setting("AI_TEST_INSIGHTS_ENQUEUE_URL");
-  const enqueueSecret = setting("AI_TEST_INSIGHTS_ENQUEUE_SECRET");
-  const environment = setting("APP_ENV");
-  if (!enqueueUrl || !enqueueSecret) return null;
-  if (environment !== "staging" && environment !== "production") return null;
-  const wakeUrl = setting("AI_TEST_INSIGHTS_WAKE_URL");
+  const enqueueUrl = aiTestInsightsSetting("AI_TEST_INSIGHTS_ENQUEUE_URL");
+  const enqueueSecret = aiTestInsightsSetting("AI_TEST_INSIGHTS_ENQUEUE_SECRET");
+  const environment = aiTestInsightsEnvironment();
+  if (!enqueueUrl || !enqueueSecret || !environment) return null;
+  const wakeUrl = aiTestInsightsSetting("AI_TEST_INSIGHTS_WAKE_URL");
   return {
     enqueueUrl: withoutTrailingSlash(enqueueUrl),
     enqueueSecret,
@@ -62,7 +57,6 @@ export function aiTestInsightsDeliverySettings(): AiTestInsightsDeliverySettings
   };
 }
 
-const errorName = (error: unknown) => (error instanceof Error ? error.name : "unknown");
 
 /** Wakes the generator. Never throws; its answer does not matter. */
 async function wake(settings: AiTestInsightsDeliverySettings, timeoutMs: number): Promise<void> {

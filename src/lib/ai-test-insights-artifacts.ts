@@ -27,6 +27,7 @@
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+import { aiTestInsightsEnvironment, aiTestInsightsSetting, errorName, type AiTestInsightsEnvironment } from "@/lib/ai-test-insights-env";
 import { query } from "@/lib/db";
 
 /** How long a presigned PDF URL lasts: 60 seconds, as the document downloads. */
@@ -43,30 +44,23 @@ interface AiTestInsightsArtifactSettings {
   secretAccessKey: string;
   /** Only a local fake sets it; null reads from AWS. */
   endpoint: string | null;
-  environment: "staging" | "production";
-}
-
-/** A setting's value, trimmed; a blank after trimming counts as unset. */
-function setting(name: string): string | null {
-  const value = process.env[name]?.trim();
-  return value ? value : null;
+  environment: AiTestInsightsEnvironment;
 }
 
 /** The reader's settings, or null when reading is not configured. */
 function aiTestInsightsArtifactSettings(): AiTestInsightsArtifactSettings | null {
-  const bucket = setting("AI_TEST_INSIGHTS_S3_BUCKET");
-  const accessKeyId = setting("AI_TEST_INSIGHTS_S3_ACCESS_KEY_ID");
-  const secretAccessKey = setting("AI_TEST_INSIGHTS_S3_SECRET_ACCESS_KEY");
-  const environment = setting("APP_ENV");
-  if (!bucket || !accessKeyId || !secretAccessKey) return null;
-  if (environment !== "staging" && environment !== "production") return null;
+  const bucket = aiTestInsightsSetting("AI_TEST_INSIGHTS_S3_BUCKET");
+  const accessKeyId = aiTestInsightsSetting("AI_TEST_INSIGHTS_S3_ACCESS_KEY_ID");
+  const secretAccessKey = aiTestInsightsSetting("AI_TEST_INSIGHTS_S3_SECRET_ACCESS_KEY");
+  const environment = aiTestInsightsEnvironment();
+  if (!bucket || !accessKeyId || !secretAccessKey || !environment) return null;
   return {
     bucket,
-    region: setting("AI_TEST_INSIGHTS_S3_REGION") ?? "ap-south-1",
-    prefix: (setting("AI_TEST_INSIGHTS_S3_PREFIX") ?? "acad-mentorship").replace(/^\/+|\/+$/g, ""),
+    region: aiTestInsightsSetting("AI_TEST_INSIGHTS_S3_REGION") ?? "ap-south-1",
+    prefix: (aiTestInsightsSetting("AI_TEST_INSIGHTS_S3_PREFIX") ?? "acad-mentorship").replace(/^\/+|\/+$/g, ""),
     accessKeyId,
     secretAccessKey,
-    endpoint: setting("AI_TEST_INSIGHTS_S3_ENDPOINT"),
+    endpoint: aiTestInsightsSetting("AI_TEST_INSIGHTS_S3_ENDPOINT"),
     environment,
   };
 }
@@ -137,8 +131,6 @@ export type TestInsightTextRead =
   | { status: "not_configured" }
   | { status: "no_file" }
   | { status: "unreadable"; reason: "outside_prefix" | "too_large" | "store_failed"; errorName?: string };
-
-const errorName = (error: unknown) => (error instanceof Error ? error.name : "unknown");
 
 /**
  * The Test Insight text (Markdown) of a completed request of the Student.

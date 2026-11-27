@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
+import { errorName } from "@/lib/ai-test-insights-env";
 import { createRequest, resolveActorUserId } from "@/lib/ai-test-insights-requests";
 import {
   NO_LINKED_USER_CODE,
@@ -81,7 +82,7 @@ export async function POST(
     // Only the Student's id and the error name: a database message can quote values.
     console.error(
       `AI Test Insights request create failed: student=${student.studentId} status=500 error=${
-        error instanceof Error ? error.name : "unknown"
+        errorName(error)
       }`,
     );
     return NextResponse.json({ error: "The AI Summary could not be requested" }, { status: 500 });

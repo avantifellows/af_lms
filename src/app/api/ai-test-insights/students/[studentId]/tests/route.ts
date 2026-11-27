@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
+import { errorName } from "@/lib/ai-test-insights-env";
 import type { AiTestInsightsTestsResponse } from "@/lib/ai-test-insights-shared";
 import { readAiTestInsightsTests } from "@/lib/ai-test-insights-tests";
 
@@ -22,7 +23,7 @@ export async function GET(
     return NextResponse.json(body);
   } catch (error) {
     // Error name only: a warehouse message can quote ids or row values.
-    console.error("AI Test Insights test picker read failed:", error instanceof Error ? error.name : "unknown error");
+    console.error("AI Test Insights test picker read failed:", errorName(error, "unknown error"));
     return NextResponse.json({ error: "Tests could not be loaded" }, { status: 502 });
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { errorName } from "@/lib/ai-test-insights-env";
 import { withInsightRequest } from "@/lib/ai-test-insights-request-routes";
 import { redeliver, requestByKey } from "@/lib/ai-test-insights-requests";
 import type { AiTestInsightsRequestStatusResponse } from "@/lib/ai-test-insights-shared";
@@ -27,7 +28,7 @@ export const GET = withInsightRequest("Request not found", async (requested, stu
       // Only the request key, the Student's id and the error name.
       console.error(
         `AI Test Insights re-delivery failed: request=${found.requestKey} student=${student.studentId} error=${
-          error instanceof Error ? error.name : "unknown"
+          errorName(error)
         }`,
       );
     }

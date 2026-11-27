@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveAiTestInsightsListScope } from "@/lib/ai-test-insights-access";
+import { errorName } from "@/lib/ai-test-insights-env";
 import { listAiTestInsightsStudents } from "@/lib/ai-test-insights-students";
 import type { AiTestInsightsListResponse } from "@/lib/ai-test-insights-shared";
 
@@ -21,7 +22,7 @@ export async function GET(
   } catch (error) {
     // Error name only: a database message can quote row values, and logs never
     // carry a Student name.
-    console.error("AI Test Insights list failed:", error instanceof Error ? error.name : "unknown error");
+    console.error("AI Test Insights list failed:", errorName(error, "unknown error"));
     return NextResponse.json({ error: "Failed to load AI Test Insights" }, { status: 500 });
   }
 }
