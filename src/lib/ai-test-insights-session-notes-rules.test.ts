@@ -97,6 +97,81 @@ describe("validateSessionNotes, draft rule", () => {
   });
 });
 
+// The final rule (#575): the draft rule, plus Areas of concern and Immediate
+// actions non-blank after trim, plus a date that is present and not after
+// "today", which the caller passes.
+describe("validateSessionNotes, final rule", () => {
+  const TODAY = "2026-11-28";
+
+  it("accepts notes dated today, keeping the text as typed, with Other notes blank", () => {
+    const typed = { ...NOTES, sessionDate: "2026-11-28", areasOfConcern: "  spaces kept  ", otherNotes: "" };
+
+    expect(validateSessionNotes(typed, "final", TODAY)).toEqual({ ok: true, notes: typed });
+  });
+
+  it("accepts Other notes null and an earlier date", () => {
+    expect(validateSessionNotes({ ...NOTES, sessionDate: "2025-01-01" }, "final", TODAY).ok).toBe(true);
+  });
+
+  it("refuses a date one day after today", () => {
+    expect(validateSessionNotes({ ...NOTES, sessionDate: "2026-11-29" }, "final", TODAY)).toEqual({
+      ok: false,
+      field: "sessionDate",
+      error: "Date of conversation can't be after today.",
+    });
+  });
+
+  it("refuses a missing date", () => {
+    expect(validateSessionNotes({ ...NOTES, sessionDate: null }, "final", TODAY)).toEqual({
+      ok: false,
+      field: "sessionDate",
+      error: "Date of conversation is required.",
+    });
+  });
+
+  it.each([
+    ["null", null],
+    ["empty", ""],
+    ["whitespace only", " \n\t "],
+  ])("refuses Areas of concern %s", (_label, areasOfConcern) => {
+    expect(validateSessionNotes({ ...NOTES, areasOfConcern }, "final", TODAY)).toEqual({
+      ok: false,
+      field: "areasOfConcern",
+      error: "Areas of concern is required.",
+    });
+  });
+
+  it.each([
+    ["null", null],
+    ["empty", ""],
+    ["whitespace only", "   "],
+  ])("refuses Immediate actions %s", (_label, immediateActions) => {
+    expect(validateSessionNotes({ ...NOTES, immediateActions }, "final", TODAY)).toEqual({
+      ok: false,
+      field: "immediateActions",
+      error: "Immediate actions is required.",
+    });
+  });
+
+  it("still applies the draft rule: a field over the limit and an impossible date", () => {
+    expect(validateSessionNotes({ ...NOTES, otherNotes: "a".repeat(2001) }, "final", TODAY)).toMatchObject({
+      ok: false,
+      field: "otherNotes",
+    });
+    expect(validateSessionNotes({ ...NOTES, sessionDate: "2026-02-30" }, "final", TODAY)).toMatchObject({
+      ok: false,
+      field: "sessionDate",
+      error: "Date of conversation is not a real date.",
+    });
+  });
+
+  it("leaves the draft rule as it was: blank fields and a future date pass", () => {
+    const empty = { sessionDate: "2026-12-31", areasOfConcern: null, immediateActions: " ", otherNotes: null };
+
+    expect(validateSessionNotes(empty, "draft").ok).toBe(true);
+  });
+});
+
 describe("Session Notes routes", () => {
   it("builds the history and draft routes of a Student, carrying the page's centre", () => {
     expect(aiTestInsightsSessionsUrl(1001, null)).toBe("/api/ai-test-insights/students/1001/sessions");

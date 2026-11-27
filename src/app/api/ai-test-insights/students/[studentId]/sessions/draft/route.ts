@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { saveSessionNotes } from "@/lib/ai-test-insights-session-notes";
-import {
-  parseSessionNotesRequest,
-  SESSION_NOTES_STALE_CODE,
-  type SessionNotesDraftResponse,
-  type SessionNotesStaleResponse,
-} from "@/lib/ai-test-insights-session-notes-rules";
-import { withAiTestInsightsStudentWrite } from "@/lib/ai-test-insights-student-routes";
+import { parseSessionNotesRequest, type SessionNotesDraftResponse } from "@/lib/ai-test-insights-session-notes-rules";
+import { sessionNotesRefusalResponse, withAiTestInsightsStudentWrite } from "@/lib/ai-test-insights-student-routes";
 
 // The Session Notes draft autosave (#574, physical centres only). Saves the
 // acting Teacher's own draft for the Student. The Student route opening
@@ -28,17 +23,7 @@ export const PUT = withAiTestInsightsStudentWrite(
   async ({ student, actorUserId, body }) => {
     const { expectedRevision, ...notes } = body;
     const result = await saveSessionNotes({ mode: "draft", student, actorUserId, notes, expectedRevision });
-    if (result.outcome === "invalid") {
-      return NextResponse.json({ error: result.error, field: result.field }, { status: 422 });
-    }
-    if (result.outcome === "stale") {
-      const stale: SessionNotesStaleResponse = {
-        error: "These notes were changed in another tab.",
-        code: SESSION_NOTES_STALE_CODE,
-        currentRevision: result.currentRevision,
-      };
-      return NextResponse.json(stale, { status: 409 });
-    }
+    if (result.outcome !== "saved") return sessionNotesRefusalResponse(result);
     const saved: SessionNotesDraftResponse = { revision: result.revision };
     return NextResponse.json(saved);
   },

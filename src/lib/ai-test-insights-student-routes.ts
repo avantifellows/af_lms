@@ -18,6 +18,8 @@ import {
   type AiTestInsightsStudentContext,
 } from "@/lib/ai-test-insights-access";
 import { errorName } from "@/lib/ai-test-insights-env";
+import type { SessionNotesRefusal } from "@/lib/ai-test-insights-session-notes";
+import { SESSION_NOTES_STALE_CODE, type SessionNotesStaleResponse } from "@/lib/ai-test-insights-session-notes-rules";
 import { NO_LINKED_USER_CODE } from "@/lib/ai-test-insights-shared";
 
 type StudentRouteContext = { params: Promise<{ studentId: string }> };
@@ -100,4 +102,20 @@ export function withAiTestInsightsStudentWrite<B>(
     },
     { write: true },
   );
+}
+
+/**
+ * A Session Notes save the module refused: 409 `stale` with `currentRevision`
+ * (another tab saved first), or 422 naming the failing field. No note text.
+ */
+export function sessionNotesRefusalResponse(refusal: SessionNotesRefusal): Response {
+  if (refusal.outcome === "invalid") {
+    return NextResponse.json({ error: refusal.error, field: refusal.field }, { status: 422 });
+  }
+  const stale: SessionNotesStaleResponse = {
+    error: "These notes were changed in another tab.",
+    code: SESSION_NOTES_STALE_CODE,
+    currentRevision: refusal.currentRevision,
+  };
+  return NextResponse.json(stale, { status: 409 });
 }

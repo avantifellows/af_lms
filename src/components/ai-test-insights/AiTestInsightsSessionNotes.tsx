@@ -15,34 +15,50 @@
 // another tab saved first (409 `stale`), autosave stops and the typed text
 // stays until "Reload notes". Leaving with an unsaved or failed draft asks the
 // browser to confirm. Labels, the limit and the rule come from the shared
-// Session Notes rules. Submit comes in #575.
+// Session Notes rules.
+//
+// Submit (#575) turns the draft into an Insight Session linked to the AI
+// Summary the card shows (`openRequest`), when that request is `completed`;
+// a line under the form says which one, or that none is open, and another
+// says who reads submitted notes. Submit is off while a required field is
+// blank, the date is empty or after today in India, a field is over the
+// limit, or a save or submit is running. It first saves any pending change,
+// then submits at the draft's revision. After a submit the form is blank
+// again (dated today) and the page is told (`onSubmitted`), so the Student
+// card's counts move. A stale submit shows the same other-tab message as a
+// stale save.
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Card } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { RetryAlert } from "@/components/ui/RetryAlert";
 import { baseInputClasses } from "@/components/ui/styles";
 import { useDraftAutosave, useDraftAutosaveRefs } from "@/hooks/use-draft-autosave";
 import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
 import {
+  openInsightRequestKey,
   SESSION_NOTES_LABELS,
   SESSION_NOTES_MAX_LENGTH,
   SESSION_NOTES_STALE_CODE,
   SESSION_NOTES_TEXT_FIELDS,
+  SESSION_NOTES_VISIBILITY_TEXT,
   sessionNotesLength,
+  sessionNotesLinkText,
   validateSessionNotes,
   type AiTestInsightsSessionsResponse,
   type SessionNotesDraft,
   type SessionNotesDraftRequest,
   type SessionNotesField,
   type SessionNotesFields,
+  type SessionNotesSubmitRequest,
   type SessionNotesTextField,
 } from "@/lib/ai-test-insights-session-notes-rules";
-import { NO_LINKED_USER_MESSAGE } from "@/lib/ai-test-insights-shared";
+import { NO_LINKED_USER_MESSAGE, type InsightRequestView } from "@/lib/ai-test-insights-shared";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 /** How long after the last change the draft saves. */
 const AUTOSAVE_DELAY_MS = 1000;
 const STALE_MESSAGE = "These notes were changed in another tab.";
+const SUBMIT_FAILED_MESSAGE = "These notes could not be submitted. Please try again.";
 const READ_INIT: RequestInit = { cache: "no-store" };
 const formatCount = (count: number) => count.toLocaleString("en-IN");
 
@@ -92,6 +108,29 @@ async function putDraft(url: string, values: FormValues, expectedRevision: numbe
   return body.revision;
 }
 
+/** Submits the draft at `expectedRevision`, linked to `openRequestKey` (null for none). */
+async function postSubmit(
+  url: string,
+  values: FormValues,
+  expectedRevision: number,
+  openRequestKey: string | null,
+): Promise<"submitted" | "stale" | "failed"> {
+  const request: SessionNotesSubmitRequest = { ...asNotes(values), expectedRevision, openRequestKey };
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (response.ok) return "submitted";
+    const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
+    if (response.status === 409 && body?.code === SESSION_NOTES_STALE_CODE) return "stale";
+  } catch {
+    // A network failure reads as any other failure.
+  }
+  return "failed";
+}
+
 /** Asks the browser to confirm leaving the page while `unsaved`. */
 function useLeaveGuard(unsaved: boolean) {
   useEffect(() => {
@@ -134,20 +173,23 @@ function useSessionNotesDraft(draft: SessionNotesDraft | null, draftUrl: string)
     onSaving: () => setStatus("saving"),
     onSaved: setSavedValues,
     onFailed: (caught) => {
-      if (caught instanceof StaleNotesError) {
-        staleRef.current = true;
-        setStale(true);
-      }
+      if (caught instanceof StaleNotesError) markStale();
       setStatus("failed");
     },
     onDrained: () => setStatus("saved"),
   });
 
+  /** Another tab saved first: autosave stops for good. */
+  function markStale() {
+    staleRef.current = true;
+    setStale(true);
+  }
+
   const changed = JSON.stringify(values) !== JSON.stringify(savedValues);
   useLeaveGuard(changed || status === "failed" || status === "saving");
   const update = (field: SessionNotesField) => (value: string) =>
     setValues((current) => ({ ...current, [field]: value }));
-  return { values, update, status, stale, changed, retry };
+  return { values, update, status, stale, changed, retry, markStale, revision: () => revisionRef.current };
 }
 
 function TextField({
@@ -214,17 +256,57 @@ function saveStatusText(status: SaveStatus, changed: boolean): string {
   return status === "saved" && !changed ? "Saved" : "";
 }
 
+/** The date's message: the draft rule's, else the final rule's (empty, or after today). */
+function dateError(values: FormValues, today: string): string | null {
+  const draftError = fieldError("sessionDate", values);
+  if (draftError) return draftError;
+  const checked = validateSessionNotes(asNotes(values), "final", today);
+  return !checked.ok && checked.field === "sessionDate" ? checked.error : null;
+}
+
 function SessionNotesForm({
   draft,
   draftUrl,
+  sessionsUrl,
+  openRequest,
   onReload,
+  onSubmitted,
 }: {
   draft: SessionNotesDraft | null;
   draftUrl: string;
+  /** The history route, which a submit posts to. */
+  sessionsUrl: string;
+  /** The request the AI Summary card shows. */
+  openRequest: InsightRequestView | null;
   /** Reads the history route again, which shows a fresh form. */
   onReload: () => void;
+  /** The draft became an Insight Session. */
+  onSubmitted: () => void;
 }) {
-  const { values, update, status, stale, changed, retry } = useSessionNotesDraft(draft, draftUrl);
+  const { values, update, status, stale, changed, retry, markStale, revision } = useSessionNotesDraft(draft, draftUrl);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitFailed, setSubmitFailed] = useState(false);
+  const today = getTodayIST();
+  const canSubmit =
+    validateSessionNotes(asNotes(values), "final", today).ok && !stale && !submitting && status !== "saving";
+
+  async function submit() {
+    setSubmitting(true);
+    setSubmitFailed(false);
+    // Any pending change is saved first, so the submit sends the draft's revision.
+    if (!(await retry())) {
+      setSubmitting(false);
+      return;
+    }
+    const outcome = await postSubmit(sessionsUrl, values, revision(), openInsightRequestKey(openRequest));
+    if (outcome === "submitted") {
+      onSubmitted();
+      return;
+    }
+    if (outcome === "stale") markStale();
+    else setSubmitFailed(true);
+    setSubmitting(false);
+  }
 
   let saveState = (
     <p role="status" className="min-h-5 text-sm text-text-secondary">
@@ -243,11 +325,7 @@ function SessionNotesForm({
 
   return (
     <div className="space-y-4">
-      <DateField
-        value={values.sessionDate}
-        onChange={update("sessionDate")}
-        error={fieldError("sessionDate", values)}
-      />
+      <DateField value={values.sessionDate} onChange={update("sessionDate")} error={dateError(values, today)} />
       {SESSION_NOTES_TEXT_FIELDS.map((field) => (
         <TextField
           key={field}
@@ -258,6 +336,18 @@ function SessionNotesForm({
         />
       ))}
       {saveState}
+      <div className="space-y-1 text-sm text-text-secondary">
+        <p>{sessionNotesLinkText(openRequest)}</p>
+        <p>{SESSION_NOTES_VISIBILITY_TEXT}</p>
+      </div>
+      {submitFailed && (
+        <p role="alert" className="text-sm text-danger">
+          {SUBMIT_FAILED_MESSAGE}
+        </p>
+      )}
+      <Button onClick={() => void submit()} disabled={!canSubmit}>
+        Submit
+      </Button>
     </div>
   );
 }
@@ -265,13 +355,21 @@ function SessionNotesForm({
 export default function AiTestInsightsSessionNotes({
   sessionsUrl,
   draftUrl,
+  openRequest,
+  onSubmitted,
 }: {
-  /** The Student's history route, with the page's `centre`. */
+  /** The Student's history route, with the page's `centre`; a submit posts to it. */
   sessionsUrl: string;
   /** The Student's draft save route, with the page's `centre`. */
   draftUrl: string;
+  /** The request the AI Summary card shows; a submit links it when it is `completed`. */
+  openRequest: InsightRequestView | null;
+  /** A submit made an Insight Session (the page refreshes the Student card's counts). */
+  onSubmitted?: () => void;
 }) {
   const { state, retry } = useFetchWithRetry(sessionsUrl, readSessions, READ_INIT);
+  // Submits so far: each one shows a fresh blank form; a reload shows the draft the route reads.
+  const [submits, setSubmits] = useState(0);
   if (state.status === "loaded" && state.sessions.notesAccess === "read") return null;
 
   return (
@@ -284,7 +382,21 @@ export default function AiTestInsightsSessionNotes({
           <p className="text-sm text-text-primary">{NO_LINKED_USER_MESSAGE}</p>
         )}
         {state.status === "loaded" && state.sessions.notesAccess === "write" && (
-          <SessionNotesForm draft={state.sessions.draft} draftUrl={draftUrl} onReload={retry} />
+          <SessionNotesForm
+            key={submits}
+            draft={submits > 0 ? null : state.sessions.draft}
+            draftUrl={draftUrl}
+            sessionsUrl={sessionsUrl}
+            openRequest={openRequest}
+            onReload={() => {
+              setSubmits(0);
+              retry();
+            }}
+            onSubmitted={() => {
+              setSubmits((count) => count + 1);
+              onSubmitted?.();
+            }}
+          />
         )}
       </Card>
     </section>

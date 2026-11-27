@@ -883,6 +883,7 @@ _Avoid_: Post-Session Notes, Teacher Feedback, Follow-up Note, mentor notes
 - A Student has at most one running **Insight Request** at a time
 - Asking again for the same Student and the same tests shows the **Test Insight** that exists; generating again needs a confirmation and keeps the earlier **Test Insight** in history
 - An **Insight Session** exists once its **Session Notes** are submitted; it records the **Test Insight** that was open, if any, and the date the conversation happened as entered by the Teacher
+- The **Test Insight** an **Insight Session** records is the one the AI Summary card showed when the Teacher pressed Submit, and only when it was a finished one; while the card shows a failed, no-data, waiting or running request, the **Insight Session** records none. Later edits of the **Session Notes** keep it
 - A **Test Insight** can exist without an **Insight Session**, and an **Insight Session** can exist without a **Test Insight**
 - Draft **Session Notes** are visible only to their author; submitted **Session Notes** are visible to every Teacher with access to the School, whoever held the **Insight Session**
 - Only the author can edit submitted **Session Notes**, and each edit is audited

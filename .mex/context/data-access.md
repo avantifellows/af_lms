@@ -1158,9 +1158,29 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `withAiTestInsightsStudentWrite`: Student access with `centre`, then body 422, then the shared
   `actorUserId` lookup 409 `no_linked_user`; a 500 logs only `student.id` and the error name), which
   Generate's create route now uses too. Labels, the 2,000-character limit, `validateSessionNotes`
-  (draft rule; #575 adds the final rule), `parseSessionNotesRequest`, URL builders and types live in
+  (draft and final rules), `parseSessionNotesRequest`, URL builders and types live in
   the client-safe `src/lib/ai-test-insights-session-notes-rules.ts`. E2E: seeded sessions carry
   `other_notes = 'e2e-ati-fixture'`; `readInsightSessions` / `readSessionNoteAudits` read rows back and
   `removeInsightSessionsMadeBySpecs` deletes every other session of the given Students with its audit
   rows (one transaction, `SET LOCAL session_replication_role = replica`, test DB only). The mirror was
   re-diffed against db-service `44b4cac6` on 2026-11-27: identical.
+- **Session Notes submit (#551 slice #575, 2026-11-27):** `saveSessionNotes({ mode: "submit",
+  openRequestKey, … })` checks the final rule (`validateSessionNotes(notes, "final", getTodayIST())`:
+  the draft rule, Areas of concern and Immediate actions non-blank after trim, a date present and not
+  after today in India) and then, in one `withTransaction`: (1) when `openRequestKey` is not null,
+  `SELECT id FROM ai_test_insight_requests WHERE student_id = $1 AND request_key = $2 AND state =
+  'completed'` — no row is `invalid` (`field: "openRequestKey"`, route 422) and nothing is written (the
+  module reads that table in its own SQL; it still imports nothing from the Insight Request module);
+  (2) `UPDATE ai_test_insight_sessions SET state = 'submitted'`, trimmed text (blank Other notes →
+  null), `insight_request_id`, `school_id` / `program_id` / `academic_year` from the Student context
+  (the page's `centre`) and `CURRENT_ACADEMIC_YEAR`, `submitted_at`, `revision + 1`, `updated_at`
+  `WHERE student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft' RETURNING id,
+  revision` — zero rows is `stale` with the caller's draft revision (0 when none), so a second press of
+  Submit never makes a second session; (3) `INSERT INTO ai_test_insight_session_note_audits
+  (session_id, actor_user_id, action, revision, …) VALUES (…, 'submitted', <new revision>, …)` — no
+  note text. Route `POST …/students/[studentId]/sessions` (edit): body `sessionDate`,
+  `areasOfConcern`, `immediateActions`, `otherNotes`, `expectedRevision` (1 or more),
+  `openRequestKey` (null or 1–200 characters), parsed by `parseSessionNotesSubmitRequest(raw,
+  getTodayIST())`; 201 `{ sessionId, revision }`. The counts read is unchanged: the Tab and the
+  Student card count the new `submitted` row. E2E cleanup order: sessions before requests (a submitted
+  session's composite FK holds its request); the Submit specs' own `afterEach` does both in that order.

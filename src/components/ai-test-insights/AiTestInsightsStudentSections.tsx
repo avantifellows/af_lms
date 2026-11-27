@@ -8,8 +8,12 @@
 //
 // Below the AI Summary card, a Teacher (feature access `edit`) gets the
 // Session Notes section (#574), which reads the history route with the page's
-// `centre`; a viewer gets no Session Notes section.
-import type { ReactNode } from "react";
+// `centre`; a viewer gets no Session Notes section. The AI Summary card
+// reports the request it shows, and Session Notes links it at submit (#575).
+// After a submit the page is refreshed from the server, so the Student card
+// shows the new count and last Insight Session date with no manual reload.
+import { useRouter } from "next/navigation";
+import { useState, type ReactNode } from "react";
 
 import AiTestInsightsSessionNotes from "@/components/ai-test-insights/AiTestInsightsSessionNotes";
 import AiTestInsightsStudentCard from "@/components/ai-test-insights/AiTestInsightsStudentCard";
@@ -53,6 +57,9 @@ export default function AiTestInsightsStudentSections({
 }) {
   // Reads the picker route once, and again on each Retry; an unmount or a newer read drops an older answer.
   const { state, retry } = useFetchWithRetry(aiTestInsightsTestsUrl(studentId), readTests);
+  // The request the AI Summary card shows: the page's latest until the card reports.
+  const [shownRequest, setShownRequest] = useState<InsightRequestView | null>(latestRequest);
+  const router = useRouter();
 
   return (
     <>
@@ -64,11 +71,14 @@ export default function AiTestInsightsStudentSections({
         onRetry={retry}
         requestsUrl={aiTestInsightsRequestsUrl(studentId, centreId)}
         initialRequest={latestRequest}
+        onRequestChange={setShownRequest}
       />
       {canEdit && (
         <AiTestInsightsSessionNotes
           sessionsUrl={aiTestInsightsSessionsUrl(studentId, centreId)}
           draftUrl={aiTestInsightsSessionDraftUrl(studentId, centreId)}
+          openRequest={shownRequest}
+          onSubmitted={() => router.refresh()}
         />
       )}
     </>

@@ -9,8 +9,9 @@
 // the Holistic notes save (`saveHolisticNotes`): one transaction per save,
 // and a revision check on every update.
 //
-// Slice #574 has the `draft` mode only; submit (#575) and edit (#578) add
-// theirs here.
+// Modes: `draft` (#574) and `submit` (#575); edit (#578) adds its own here.
+// A submit checks its open request key against `ai_test_insight_requests`
+// in its own SQL.
 import type { AiTestInsightsStudentContext } from "@/lib/ai-test-insights-access";
 import {
   isBlankNote,
@@ -18,8 +19,10 @@ import {
   validateSessionNotes,
   type SessionNotesDraft,
   type SessionNotesField,
+  type SessionNotesFields,
 } from "@/lib/ai-test-insights-session-notes-rules";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { query, withTransaction } from "@/lib/db";
 
 const UTC_NOW = "(now() AT TIME ZONE 'UTC')";
@@ -85,24 +88,38 @@ export async function readSubmittedSessionCounts(
   }));
 }
 
-/** What a save did: the route maps it to a status. */
-export type SaveSessionNotesResult =
-  | { outcome: "saved"; revision: number }
+/** A save the module refused: the route maps it to 409 `stale` or 422. */
+export type SessionNotesRefusal =
   | { outcome: "stale"; currentRevision: number }
-  | { outcome: "invalid"; field: SessionNotesField; error: string };
+  | { outcome: "invalid"; field: SessionNotesField | "openRequestKey"; error: string };
+
+/** What a draft save did. */
+type DraftSaveResult = { outcome: "saved"; revision: number } | SessionNotesRefusal;
+/** What a submit did. */
+type SubmitResult = { outcome: "submitted"; sessionId: number; revision: number } | SessionNotesRefusal;
 
 function isOneDraftConflict(error: unknown): boolean {
   const pgError = error as { code?: string; constraint?: string } | null;
   return pgError?.code === "23505" && pgError.constraint === ONE_DRAFT_INDEX;
 }
 
-async function stale(studentId: number, authorUserId: number): Promise<SaveSessionNotesResult> {
+async function stale(studentId: number, authorUserId: number): Promise<SessionNotesRefusal> {
   return { outcome: "stale", currentRevision: (await readOwnDraft(studentId, authorUserId))?.revision ?? 0 };
 }
 
+type SaveBase = {
+  student: AiTestInsightsStudentContext;
+  actorUserId: number;
+  notes: unknown;
+  expectedRevision: number;
+};
+type DraftParams = SaveBase & { mode: "draft" };
+type SubmitParams = SaveBase & { mode: "submit"; openRequestKey: string | null };
+
 /**
- * Saves the acting Teacher's Session Notes for a Student. `draft` mode, by
- * `expectedRevision`:
+ * Saves the acting Teacher's Session Notes for a Student, in one transaction.
+ *
+ * `draft` mode, by `expectedRevision`:
  *
  * - 0: inserts the author's draft at revision 1 with the Student context's
  *   School and Program and the current academic year. While all three text
@@ -114,20 +131,36 @@ async function stale(studentId: number, authorUserId: number): Promise<SaveSessi
  *   when the author has no draft).
  *
  * Text is stored as typed; a blank field is stored as null. No audit row.
+ *
+ * `submit` mode (the final rule, with today in India from the server's
+ * clock): turns the author's draft of that Student at `expectedRevision` into
+ * a `submitted` Insight Session at the next revision, with the text trimmed (a
+ * blank Other notes is null), `submitted_at`, the School, Program and current
+ * academic year of the Student context, and the open request linked; and
+ * writes one `submitted` audit row (the acting User and the new revision, no
+ * note text). The open request key is null or the key of a `completed`
+ * Insight Request of the same Student; anything else is invalid and nothing
+ * is stored. No draft at that revision (none saved, another revision, already
+ * submitted) is stale, so a second press of Submit never makes a second
+ * session.
  */
-export async function saveSessionNotes(params: {
-  mode: "draft";
-  student: AiTestInsightsStudentContext;
-  actorUserId: number;
-  notes: unknown;
-  expectedRevision: number;
-}): Promise<SaveSessionNotesResult> {
-  const { student, actorUserId, expectedRevision } = params;
-  const checked = validateSessionNotes(params.notes, params.mode);
+export async function saveSessionNotes(params: DraftParams): Promise<DraftSaveResult>;
+export async function saveSessionNotes(params: SubmitParams): Promise<SubmitResult>;
+export async function saveSessionNotes(params: DraftParams | SubmitParams): Promise<DraftSaveResult | SubmitResult> {
+  const checked =
+    params.mode === "submit"
+      ? validateSessionNotes(params.notes, "final", getTodayIST())
+      : validateSessionNotes(params.notes, "draft");
   if (!checked.ok) return { outcome: "invalid", field: checked.field, error: checked.error };
-  const { sessionDate } = checked.notes;
+  if (params.mode === "submit") return submitDraft(params, checked.notes);
+  return saveDraft(params, checked.notes);
+}
+
+async function saveDraft(params: DraftParams, notes: SessionNotesFields): Promise<DraftSaveResult> {
+  const { student, actorUserId, expectedRevision } = params;
+  const { sessionDate } = notes;
   const text = SESSION_NOTES_TEXT_FIELDS.map((field) => {
-    const value = checked.notes[field];
+    const value = notes[field];
     return isBlankNote(value) ? null : value;
   });
 
@@ -169,4 +202,68 @@ export async function saveSessionNotes(params: {
   });
   if (revision === null) return stale(student.studentId, actorUserId);
   return { outcome: "saved", revision };
+}
+
+async function submitDraft(params: SubmitParams, notes: SessionNotesFields): Promise<SubmitResult> {
+  const { student, actorUserId, expectedRevision, openRequestKey } = params;
+  const text = SESSION_NOTES_TEXT_FIELDS.map((field) => {
+    const value = notes[field];
+    return isBlankNote(value) ? null : (value as string).trim();
+  });
+
+  const result = await withTransaction(async (client): Promise<SubmitResult | null> => {
+    let insightRequestId: number | null = null;
+    if (openRequestKey !== null) {
+      const found = await client.query<{ id: string | number }>(
+        `SELECT id
+         FROM ai_test_insight_requests
+         WHERE student_id = $1 AND request_key = $2 AND state = 'completed'`,
+        [student.studentId, openRequestKey],
+      );
+      if (!found.rows[0]) {
+        return { outcome: "invalid", field: "openRequestKey", error: "The AI Summary these notes link to is not open." };
+      }
+      insightRequestId = Number(found.rows[0].id);
+    }
+
+    const updated = await client.query<{ id: string | number; revision: number }>(
+      `UPDATE ai_test_insight_sessions
+       SET state = 'submitted',
+           session_date = $4::date,
+           areas_of_concern = $5,
+           immediate_actions = $6,
+           other_notes = $7,
+           insight_request_id = $8,
+           school_id = $9,
+           program_id = $10,
+           academic_year = $11,
+           submitted_at = ${UTC_NOW},
+           revision = revision + 1,
+           updated_at = ${UTC_NOW}
+       WHERE student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft'
+       RETURNING id, revision`,
+      [
+        student.studentId,
+        actorUserId,
+        expectedRevision,
+        notes.sessionDate,
+        ...text,
+        insightRequestId,
+        student.school.id,
+        student.programId,
+        CURRENT_ACADEMIC_YEAR,
+      ],
+    );
+    const row = updated.rows[0];
+    if (!row) return null;
+    const sessionId = Number(row.id);
+    const revision = Number(row.revision);
+    await client.query(
+      `INSERT INTO ai_test_insight_session_note_audits (session_id, actor_user_id, action, revision, occurred_at, inserted_at)
+       VALUES ($1, $2, 'submitted', $3, ${UTC_NOW}, ${UTC_NOW})`,
+      [sessionId, actorUserId, revision],
+    );
+    return { outcome: "submitted", sessionId, revision };
+  });
+  return result ?? stale(student.studentId, actorUserId);
 }

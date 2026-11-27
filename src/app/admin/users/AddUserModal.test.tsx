@@ -484,7 +484,7 @@ describe("AddUserModal — role descriptions", () => {
   it("shows teacher description when role is teacher", () => {
     renderModal();
     expect(screen.getByText(
-      "Teachers can view and manage students in their assigned schools, and generate AI Test Insights for the JEE students of their physical centres",
+      "Teachers can view and manage students in their assigned schools, and generate AI Test Insights and write Session Notes for the JEE students of their physical centres",
     )).toBeInTheDocument();
   });
 

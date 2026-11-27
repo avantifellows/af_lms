@@ -58,6 +58,10 @@
 // shows that request with the note "An AI Summary for these tests already
 // exists", and the ticked tests now match it, so "Generate again" is offered.
 // Viewers never see Generate or "Generate again".
+//
+// The card reports the request it shows to its parent (`onRequestChange`,
+// #575), on load and each time it changes, so Session Notes knows which Test
+// Insight is open. Reporting changes nothing the card shows.
 import { useEffect, useState, useSyncExternalStore, type MouseEvent } from "react";
 
 import TestInsightText from "@/components/ai-test-insights/TestInsightText";
@@ -584,6 +588,7 @@ export default function AiTestInsightsSummaryCard({
   onRetry,
   requestsUrl,
   initialRequest = null,
+  onRequestChange,
 }: {
   /** The page's read of the test picker route. */
   tests: AiTestInsightsTestsState;
@@ -595,6 +600,8 @@ export default function AiTestInsightsSummaryCard({
   requestsUrl: string;
   /** The Student's latest request, read by the page on the server. */
   initialRequest?: InsightRequestView | null;
+  /** Told the request the card shows, on load and on each change. */
+  onRequestChange?: (request: InsightRequestView | null) => void;
 }) {
   const [request, setRequest] = useState<InsightRequestView | null>(initialRequest);
   const [submitting, setSubmitting] = useState(false);
@@ -602,6 +609,9 @@ export default function AiTestInsightsSummaryCard({
   /** The shown request is the `existing` answer to the last Generate. */
   const [existing, setExisting] = useState(false);
   useRequestPolling(requestsUrl, request, setRequest);
+  useEffect(() => {
+    onRequestChange?.(request);
+  }, [request, onRequestChange]);
 
   async function generate(selectedTestIds: string[], generateAgain = false) {
     setSubmitting(true);

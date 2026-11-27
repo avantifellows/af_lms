@@ -18,7 +18,12 @@ const { mockResolveAccess, mockReadCard, mockLatestRequest, mockGetServerSession
 }));
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
+// The page's client sections refresh it after a Session Notes submit (#575).
+vi.mock("next/navigation", () => ({
+  redirect: mockRedirect,
+  notFound: mockNotFound,
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 vi.mock("@/lib/ai-test-insights-access", () => ({ resolveAiTestInsightsStudentAccess: mockResolveAccess }));
 vi.mock("@/lib/ai-test-insights-student-card", () => ({ readAiTestInsightsStudentCard: mockReadCard }));
 vi.mock("@/lib/ai-test-insights-requests", () => ({ latestRequest: mockLatestRequest }));

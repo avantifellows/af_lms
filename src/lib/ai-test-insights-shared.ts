@@ -236,13 +236,17 @@ export function aiTestInsightsRequestPdfUrl(requestsUrl: string, requestKey: str
  * `2026-11-27T05:30:00Z` of Student 1001 is `ai-summary-1001-2026-11-27.pdf`.
  */
 export function aiTestInsightPdfFileName(studentId: number, requestedAt: string): string {
-  const date = new Intl.DateTimeFormat("en-CA", {
+  return `ai-summary-${studentId}-${insightRequestDateInIndia(requestedAt)}.pdf`;
+}
+
+/** The day of a UTC moment in India, `YYYY-MM-DD`: `2026-11-27T19:30:00Z` is `2026-11-28`. */
+export function insightRequestDateInIndia(iso: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date(requestedAt));
-  return `ai-summary-${studentId}-${date}.pdf`;
+  }).format(new Date(iso));
 }
 
 const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
