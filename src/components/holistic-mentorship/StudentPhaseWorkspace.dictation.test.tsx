@@ -10,6 +10,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
 }));
 
+import { HOLISTIC_PHASE_CLOSED_ERROR } from "@/lib/holistic-phase-messages";
 import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import StudentPhaseWorkspace from "./StudentPhaseWorkspace";
 
@@ -85,7 +86,8 @@ function deferred(): Deferred {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-function stubNetwork() {
+// `saveReply` answers every Notes or Follow-up save; by default each one succeeds.
+function stubNetwork(saveReply?: () => Response | Promise<Response>) {
   const dictationCalls: Array<{ url: string; body: FormData }> = [];
   const notesCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
   const pendingDictation: Deferred[] = [];
@@ -97,7 +99,7 @@ function stubNetwork() {
       return response.promise;
     }
     if (init?.body) notesCalls.push({ url, body: JSON.parse(String(init.body)) });
-    return Promise.resolve(json({ revision: notesCalls.length }));
+    return Promise.resolve(saveReply && init?.body ? saveReply() : json({ revision: notesCalls.length }));
   });
   vi.stubGlobal("fetch", fetchMock);
   const transcribe = async (text: string, remainingSeconds = 1_700) => {
@@ -111,7 +113,7 @@ function stubNetwork() {
   const dropConnection = async () => {
     await act(async () => { pendingDictation.shift()!.reject(new TypeError("Failed to fetch")); });
   };
-  return { dictationCalls, notesCalls, transcribe, respond, dropConnection };
+  return { dictationCalls, notesCalls, pendingDictation, transcribe, respond, dropConnection };
 }
 
 const bytesOf = async (form: FormData) =>
@@ -126,9 +128,9 @@ const questions = [
 
 const mentorDetail = (notes: Notes = null, overrides: Partial<OpenPhase> = {}): HolisticStudentPhaseDetail => ({
   student: { id: 41, name: "Asha Rao", externalStudentId: "S41", grade: 11 as const },
-  phases: [{ phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true, progress: "pending" as const, draftSaved: false, grade: 11 as const, academicYear: "2026-2027" }],
+  phases: [{ phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true, closed: false, progress: "pending" as const, draftSaved: false, grade: 11 as const, academicYear: "2026-2027" }],
   selectedPhase: {
-    phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true,
+    phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true, closed: false,
     progress: "pending" as const, draftSaved: false, grade: 11 as const, academicYear: "2026-2027",
     revision: 5, mappingId: 300, notesRevision: notes?.revision ?? 0, canEditNotes: true, guidanceMarkdown: "Listen.",
     context: { label: null, items: [] as [], missing: "No previous session notes available" as const },
@@ -176,6 +178,7 @@ const box = (question: string) => screen.getByRole("textbox", { name: question }
 // ---- Saving while a clip is in progress ----
 
 const SAVE_HINT = "Finish dictating first";
+const DICTATION_NOT_SENT = "Couldn't send that recording. Reload the page and try again.";
 
 function expectSaveBlocked(button: HTMLElement) {
   expect(button).toBeDisabled();
@@ -488,6 +491,233 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(tracks[0].stop).toHaveBeenCalled();
       expect(network.dictationCalls).toHaveLength(0);
       expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
+  // Issue #536: a save refused because the Phase closed freezes the form and keeps
+  // the typed text for copying. The form has ended, so its recorder is dropped as
+  // when the Mentor leaves: the mic is released, nothing more is uploaded, and late
+  // words are ignored (the server refuses a clip for a Closed Phase anyway), so the
+  // frozen text is exactly what was on screen when the form froze.
+  describe("when the Phase closes while the Mentor is writing (#536)", () => {
+    const closedRefusal = () => json({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422);
+    const CLOSED_ALERT = "This Phase was closed while you were writing.";
+
+    afterEach(() => mockRefresh.mockClear());
+
+    async function typeAndAutosave(question: string, text: string) {
+      fireEvent.change(box(question), { target: { value: text } });
+      await act(async () => vi.advanceTimersByTimeAsync(750));
+    }
+
+    it("stops a recording in progress, releases the mic, uploads nothing and lets the Mentor leave", async () => {
+      const network = stubNetwork(closedRefusal);
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "true");
+      await typeAndAutosave("What happens next?", "Typed as it closed");
+
+      expect(screen.getByRole("alert")).toHaveTextContent(CLOSED_ALERT);
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: /^Dictate/ })).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Recording/)).not.toBeInTheDocument();
+      expect(screen.queryByText(SAVE_HINT)).not.toBeInTheDocument();
+      await act(async () => vi.advanceTimersByTimeAsync(300_000));
+      expect(network.dictationCalls).toHaveLength(0);
+      expect(screen.getByText("Met parents")).toBeInTheDocument();
+      expect(screen.getByText("Typed as it closed")).toBeInTheDocument();
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      expect(leaving.defaultPrevented).toBe(false);
+    });
+
+    it("ignores words of a clip still being transcribed when the form froze", async () => {
+      const network = stubNetwork(closedRefusal);
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await dictate("What helped?");
+      expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+      await typeAndAutosave("What happens next?", "Typed as it closed");
+      expect(screen.getByRole("alert")).toHaveTextContent(CLOSED_ALERT);
+      await network.transcribe("late words");
+
+      expect(screen.getByText("Met parents")).toBeInTheDocument();
+      expect(screen.queryByText(/late words/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Transcribing…")).not.toBeInTheDocument();
+      expect(network.notesCalls).toHaveLength(1);
+    });
+
+    it("freezes the form the same way when Dictation itself is refused because the Phase closed", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await dictate("What helped?");
+      // Typed while the clip is sent, before autosave's 750 ms have passed.
+      fireEvent.change(box("What happens next?"), { target: { value: "Not saved yet" } });
+      await network.respond({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422);
+
+      expect(screen.getByRole("alert")).toHaveTextContent(CLOSED_ALERT);
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(DICTATION_NOT_SENT)).not.toBeInTheDocument();
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+      expect(screen.getByText("Met parents")).toBeInTheDocument();
+      expect(screen.getByText("Not saved yet")).toBeInTheDocument();
+      // Nothing is saved after the freeze, not even the text typed before it.
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(network.notesCalls).toHaveLength(0);
+    });
+
+    it("keeps the usual message for any other refused clip", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await dictate("What helped?");
+      await network.respond({ error: "Phase is not Open" }, 422);
+
+      expect(screen.getByText(DICTATION_NOT_SENT)).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(box("What helped?")).toBeEnabled();
+    });
+    // Each save waits until the test answers it.
+    function heldSaves() {
+      const saves: Deferred[] = [];
+      const reply = () => {
+        const save = deferred();
+        saves.push(save);
+        return save.promise;
+      };
+      return { saves, reply };
+    }
+
+    // Lets fetch replies and their .json() run without a React render in between.
+    const settle = async () => {
+      for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+    };
+
+    it("drops the words of a clip answered in the same batch as the refused save (A)", async () => {
+      const held = heldSaves();
+      const network = stubNetwork(held.reply);
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await dictate("What helped?");
+      await typeAndAutosave("What happens next?", "Typed as it closed");
+      expect(held.saves).toHaveLength(1);
+      // The save is refused and the clip's words arrive before React renders again.
+      await act(async () => {
+        held.saves[0].resolve(closedRefusal());
+        await settle();
+        network.pendingDictation.shift()!.resolve(json({ outcome: "ok", text: "late words", remainingSeconds: 1_700 }));
+        await settle();
+      });
+
+      expect(screen.getByRole("alert")).toHaveTextContent(CLOSED_ALERT);
+      expect(screen.queryByText(/late words/)).not.toBeInTheDocument();
+      expect(screen.getByText("Met parents")).toBeInTheDocument();
+    });
+
+    it("sends nothing queued behind a save still in flight when a clip is refused because the Phase closed (B)", async () => {
+      const held = heldSaves();
+      const network = stubNetwork(held.reply);
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await typeAndAutosave("What happens next?", "First");
+      expect(held.saves).toHaveLength(1);
+      await act(async () => fireEvent.click(mic("What helped?")));
+      // Typed while the first save is in flight: autosave queues it behind that save.
+      fireEvent.change(box("What happens next?"), { target: { value: "First and second" } });
+      await act(async () => vi.advanceTimersByTimeAsync(3_000));
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await network.respond({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422);
+      expect(screen.getByRole("alert")).toHaveTextContent(CLOSED_ALERT);
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      expect(leaving.defaultPrevented).toBe(false);
+
+      await act(async () => {
+        held.saves[0].resolve(json({ revision: 2 }));
+        await settle();
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+
+      expect(network.notesCalls).toHaveLength(1);
+      expect(screen.getByText("First and second")).toBeInTheDocument();
+    });
+
+    it("does not Submit after the form froze during Submit's draft save (B)", async () => {
+      const held = heldSaves();
+      const network = stubNetwork(held.reply);
+      vi.useFakeTimers();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWorkspace(mentorDetail({
+        ...draft({ 91: "A plan", 92: "Review it" })!, challengeCategories: ["academic.other", "non_academic.other"],
+      }));
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await network.respond({ error: "Couldn't transcribe. Try again", remainingSeconds: 1_790 }, 502);
+      fireEvent.change(box("What happens next?"), { target: { value: "Review it weekly" } });
+      // Submit first saves the draft; the Mentor retries the failed clip meanwhile.
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit Notes" })));
+      expect(held.saves).toHaveLength(1);
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry" })));
+      await network.respond({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422);
+      expect(screen.getByRole("alert")).toHaveTextContent(CLOSED_ALERT);
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      expect(leaving.defaultPrevented).toBe(false);
+
+      await act(async () => {
+        held.saves[0].resolve(json({ revision: 2 }));
+        await settle();
+      });
+
+      expect(network.notesCalls.map(({ body }) => body.action)).toEqual(["draft"]);
+      expect(screen.queryByRole("button", { name: /Submit Notes/ })).not.toBeInTheDocument();
+    });
+  });
+
+  // Issue #536: a refresh can bring the Phase back as Closed before this form has
+  // written anything. The form stays as #536 left it; Dictation stops there.
+  describe("when a refresh shows the Phase closed (#536)", () => {
+    const closedDetail = (notes: Notes, overrides: Partial<OpenPhase> = {}) => {
+      const detail = mentorDetail(notes, { active: false, closed: true, canEditNotes: false, ...overrides });
+      Object.assign(detail.phases[0], { active: false, closed: true });
+      return detail;
+    };
+
+    it("stops a recording in the Notes form and uploads nothing (C)", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      const view = renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={closedDetail(draft({ 91: "Met parents" }))} dictation={ON} />);
+      await act(async () => vi.advanceTimersByTimeAsync(300_000));
+
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("ignores the late words of a clip being transcribed in the Notes form (C)", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      const view = renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await dictate("What helped?");
+      view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={closedDetail(draft({ 91: "Met parents" }))} dictation={ON} />);
+      await network.transcribe("late words");
+
+      expect(screen.getByText("Met parents")).toBeInTheDocument();
+      expect(screen.queryByText(/late words/)).not.toBeInTheDocument();
     });
   });
 
@@ -1504,6 +1734,145 @@ describe("Follow-up Note Dictation", () => {
       await act(async () => fireEvent.click(mic("What helped?")));
       await act(async () => vi.advanceTimersByTimeAsync(20_000));
       expect(network.dictationCalls[0].body.get("duration_ms")).toBe("20000");
+    });
+  });
+
+  describe("when the Phase closes while the note is being written (#536)", () => {
+    const FOLLOW_UP_CLOSED = "This Phase was closed while you were writing. This follow-up note was not saved.";
+
+    afterEach(() => mockRefresh.mockClear());
+
+    it("disables every mic and Save after a Save refused because the Phase closed, and keeps the text", async () => {
+      const network = stubNetwork(() => json({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422));
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+
+      expect(within(dialog).getByText(new RegExp(FOLLOW_UP_CLOSED))).toBeInTheDocument();
+      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) {
+        expect(modalMic(dialog, question)).toBeDisabled();
+      }
+      expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(modalBox(dialog, SOLUTIONS)).toHaveValue("Daily check-in");
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("stops a recording, and offers no mic, when a refresh shows the Phase closed while the pop-up is open (C)", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      const view = renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+
+      const closed = completedDetail();
+      Object.assign(closed.phases[0], { active: false, closed: true });
+      Object.assign(closed.selectedPhase, { active: false, closed: true, canEditNotes: false });
+      view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={closed} dictation={ON} />);
+      await act(async () => vi.advanceTimersByTimeAsync(300_000));
+
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) {
+        expect(modalMic(dialog, question)).toBeDisabled();
+      }
+      // As before #500 met #536: the text stays, and a Save is answered by the server.
+      expect(modalBox(dialog, SOLUTIONS)).toHaveValue("Daily check-in");
+    });
+
+    it("keeps Add notes off after a refusal, so a closed and reopened pop-up takes no new clip (C)", async () => {
+      stubNetwork(() => json({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422));
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+      expect(within(dialog).getByText(new RegExp(FOLLOW_UP_CLOSED))).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      // The refresh has not arrived yet (the router is mocked), but the page knows.
+      const addNotes = screen.getByRole("button", { name: "Add notes" });
+      expect(addNotes).toBeDisabled();
+      expect(addNotes).toHaveAccessibleDescription("This Phase is closed");
+    });
+
+    // The latch only bridges the wait for fresh page data; then the server decides.
+    describe("after a refusal, Cancel, and new page data", () => {
+      const rerenderWith = (view: ReturnType<typeof renderWorkspace>, detail: HolisticStudentPhaseDetail) =>
+        view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} dictation={ON} />);
+      const closedDetail = () => {
+        const closed = completedDetail();
+        Object.assign(closed.phases[0], { active: false, closed: true });
+        Object.assign(closed.selectedPhase, { active: false, closed: true, canEditNotes: false });
+        return closed;
+      };
+
+      async function refuseThenCancel() {
+        stubNetwork(() => json({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422));
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        const detail = completedDetail();
+        const view = renderWorkspace(detail);
+        const dialog = openModal();
+        fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+        await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeDisabled();
+        return { view, detail };
+      }
+
+      it("keeps Add notes off through a re-render that brings no new data", async () => {
+        const { view, detail } = await refuseThenCancel();
+
+        rerenderWith(view, detail);
+
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeDisabled();
+      });
+
+      it("offers Add notes again when the refreshed page shows the Phase Active", async () => {
+        const { view } = await refuseThenCancel();
+
+        // An Admin returned the newer, unused Phase to Locked: this one is Active again.
+        rerenderWith(view, completedDetail());
+
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeEnabled();
+      });
+
+      it("offers Add notes again when a Closed refresh is followed by an Active one", async () => {
+        const { view } = await refuseThenCancel();
+
+        rerenderWith(view, closedDetail());
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeDisabled();
+        rerenderWith(view, completedDetail());
+
+        expect(screen.getByRole("button", { name: "Add notes" })).toBeEnabled();
+      });
+    });
+
+    it("says so, and drops the clip, when Dictation is refused because the Phase closed", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+
+      await dictate(dialog, CHALLENGES);
+      await network.respond({ error: HOLISTIC_PHASE_CLOSED_ERROR }, 422);
+
+      expect(within(dialog).getByText(new RegExp(FOLLOW_UP_CLOSED))).toBeInTheDocument();
+      expect(within(dialog).queryByText("Couldn't send that recording. Reload the page and try again."))
+        .not.toBeInTheDocument();
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) {
+        expect(modalMic(dialog, question)).toBeDisabled();
+      }
+      expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(modalBox(dialog, SOLUTIONS)).toHaveValue("Daily check-in");
+      expect(modalBox(dialog, SOLUTIONS)).toHaveAttribute("readonly");
+      expect(network.notesCalls).toHaveLength(0);
     });
   });
 

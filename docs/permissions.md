@@ -62,6 +62,8 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
   summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  test_attendance: { teacher: "none", program_manager: "none", program_admin: "none", admin: "view" },
+  exam_passwords:  { teacher: "view", program_manager: "view", program_admin: "view", admin: "view" },
 };
 ```
 
@@ -133,7 +135,8 @@ The school page query fetches `program_id` per student via a LATERAL join.
 `PMU_ROLES`, `isPmuRole(role)` and `PMU_PROGRAM_ID` (= `PROGRAM_IDS.NVS`) live in the
 client-safe `src/lib/constants.ts`.
 
-- **Matrix:** explicit columns — `students: "edit"`, `performance: "view"`, every other feature `"none"` at every level. `read_only` downgrades `students` to view.
+- **Matrix:** explicit columns — `students: "edit"`, `performance: "view"`, `test_attendance: "view"`, every other feature `"none"` at every level. `read_only` downgrades `students` to view; `test_attendance` has no edit level, so it stays view.
+- **Test Attendance (#517):** both PMU roles, and `admin`, can view the Test Attendance tab on a JNV NVS School page (a School page, never a Centre page, of a JNV School with at least one listed NVS Student in Grade 11 or 12). It is view only: the tab shows attendance and lets them download its lists (built in the browser from what the tab loaded; there is no separate export route), and nothing on it edits data. `GET /api/school/[udise]/test-attendance` checks School scope and the `test_attendance` feature, then refuses any non-JNV School for every role. Every other role is `none`. Full detail: `.mex/context/permissions.md`.
 - **Program context:** `getProgramContextSync` returns `{ hasAccess: true, programIds: [64], isNVSOnly: true, hasCoEOrNodal: false }` before any admin, seat or `program_ids` logic. CoE/Nodal ids, level 3 and seats never widen it.
 - **Scope:** `resolveScope` skips the centre-seat lookup. Level 3 → `{ schools: "all", centres: ∅, programs: ∅ }`; levels 1/2 keep explicit codes and lazy regions only. `isCentreSeated`, `getCentreConfinement` and `canAccessCentreSync` are false, and `canViewCentre` denies outright (no School fallback).
 - **Ownership:** `ownsRecord` is true only for program 64; a null (unassigned) program is false.
@@ -199,6 +202,9 @@ page and API denies them (`getUserPermission` returns `null` for them).
 | summary_stats | none | view | view | view |
 | pm_dashboard | none | view | view | view |
 | exam_passwords | view | view | view | view |
+| test_attendance | none | none | none | view |
+
+`test_attendance` is `view` only for `admin` here; the PMU roles (`pmu_manager`, `pmu_govt_school_user`) are the others who get it (see "PMU roles" above).
 
 `exam_passwords` is the right to reveal a Student's decrypted exam-portal password on the
 Edit Student Exams tab. It sits on top of the tab's own gate (edit rights on the Student,
@@ -231,8 +237,10 @@ too.
 | performance | view | view | view | view |
 | summary_stats | none | none | none | view |
 | pm_dashboard | none | none | none | view |
+| exam_passwords | view | view | view | view |
+| test_attendance | none | none | none | view |
 
-NVS-only users can edit students and view performance. All other features are gated off by the NVS restriction.
+NVS-only users can edit students and view performance. `exam_passwords` and `test_attendance` are not NVS-gated, so the matrix value applies (the Exams tab itself never shows a JNV NVS Student's password). Test Attendance for NVS staff comes through the PMU roles, not Teacher / Program Manager / Program Admin (ADR 0007). The other features are gated off by the NVS restriction.
 
 ---
 

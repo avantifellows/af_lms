@@ -381,6 +381,12 @@ describe("Holistic progress", () => {
     });
     expect(sql).toContain("$3::bigint IS NULL OR selected_phase.id IS NOT NULL");
     expect(sql).toContain("THEN 'active'");
+    // A past year's Plan has no Active Phase: the year check comes before the Active one.
+    const pastYearClosed = sql.indexOf("WHEN $2 <> $11 THEN 'closed'");
+    expect(pastYearClosed).toBeGreaterThan(sql.indexOf("WHEN phase.state = 'locked' THEN 'locked'"));
+    expect(pastYearClosed).toBeLessThan(sql.indexOf("THEN 'active'"));
+    // An opened Phase that is not the Grade's Active one is Closed (#536).
+    expect(sql).toContain("ELSE 'closed' END AS phase_availability");
     expect(sql).toContain("WHEN notes.state = 'submitted' THEN 'completed'");
     expect(sql).toContain("ELSE 'pending'");
     expect(sql).toContain("notes.state = 'submitted' THEN notes.last_edited_at");
@@ -482,7 +488,32 @@ describe("Holistic progress", () => {
     const sql = String(mockQuery.mock.calls[0][0]);
     expect(sql).toContain("AND notes.state = 'submitted'");
     expect(sql).not.toContain("WHEN notes.state = 'draft'");
-    expect(sql).toContain("WHEN base.initial_active_position IS NOT NULL AND base.phase_number < base.initial_active_position THEN 'skipped'");
+    expect(sql).toContain("WHEN base.initial_active_position IS NOT NULL AND base.phase_position < base.initial_active_position THEN 'skipped'");
+  });
+
+  // Issue #516: the shown and sorted Phase number is per Grade; Skipped still compares Plan positions.
+  it("reads the per-Grade Phase number for the selected Phase and keeps its Plan position apart", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: null,
+      search: "",
+      sort: "phase",
+      direction: "asc",
+      page: 1,
+    }, adminPermission);
+
+    const sql = String(mockQuery.mock.calls[0][0]).replace(/\s+/g, " ");
+    expect(sql).toContain("same_grade_phase.grade_id = phase.grade_id AND same_grade_phase.position <= phase.position");
+    expect(sql).toContain("CASE WHEN phase_grade.number = 12 THEN 3 ELSE 0 END)::int AS number");
+    expect(sql).toContain("selected_phase.number AS phase_number, selected_phase.position AS phase_position");
+    expect(sql).toContain("ORDER BY phase_number ASC NULLS LAST");
   });
 
   it("exports only approved fields and neutralizes formula-leading names and authored text", () => {
@@ -657,7 +688,11 @@ describe("Holistic progress", () => {
     mockQuery
       .mockResolvedValueOnce([{ code: "SCH001", name: "School One" }])
       .mockResolvedValueOnce([{ user_id: "9", name: "Current Mentor", email: "current@example.com" }])
-      .mockResolvedValueOnce([{ id: "70", position: 2, title: "Check-in", grade: "11", state: "open" }]);
+      .mockResolvedValueOnce([
+        { id: "69", position: 1, title: "Start", grade: "12", state: "open" },
+        { id: "70", position: 2, title: "Check-in", grade: "11", state: "open" },
+        { id: "71", position: 3, title: "Close", grade: "12", state: "locked" },
+      ]);
 
     const options = await getHolisticProgressOptions("2025-2026", 1, adminPermission);
 
@@ -665,6 +700,10 @@ describe("Holistic progress", () => {
       schools: [{ code: "SCH001", name: "School One" }],
       mentors: [{ userId: 9, name: "Current Mentor" }],
     });
+    // Numbered per Grade and listed by that number, not in Plan order.
+    expect(options.phases.map(({ id, number, grade }) => [id, number, grade])).toEqual([
+      [70, 1, 11], [69, 4, 12], [71, 5, 12],
+    ]);
     for (const call of mockQuery.mock.calls.slice(0, 2)) {
       const sql = String(call[0]);
       expect(sql).toContain("SELECT DISTINCT ON (mapping.student_id) mapping.*");

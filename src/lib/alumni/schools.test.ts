@@ -4,7 +4,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { query } from "@/lib/db";
 import type { UserPermission } from "@/lib/permissions";
-import { getSchoolName, listAlumniSchools, schoolHasAlumni } from "./schools";
+import { getSchoolName, listAlumniSchools, loadAlumniTotals, schoolHasAlumni } from "./schools";
 
 const mockQuery = vi.mocked(query);
 const perm = (overrides: Partial<UserPermission>): UserPermission =>
@@ -79,5 +79,32 @@ describe("schoolHasAlumni", () => {
   it("is false when nothing comes back", async () => {
     mockQuery.mockResolvedValueOnce([] as never);
     expect(await schoolHasAlumni(9)).toBe(false);
+  });
+});
+
+describe("loadAlumniTotals", () => {
+  it("counts the whole alumni table for level 3, no school join", async () => {
+    mockQuery.mockResolvedValue([{ alumni: 8337, studying: 5726, employed: 1085 }] as never);
+    expect(await loadAlumniTotals(perm({}))).toEqual({ alumni: 8337, studying: 5726, employed: 1085 });
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).not.toContain("enrollment_record");
+    expect(sql).toContain("lower(trim(a.current_status)) = 'studying'");
+    expect(sql).toContain("lower(trim(a.current_status)) = 'employed'");
+    expect(params).toEqual([]);
+  });
+
+  it("counts only alumni whose latest school is in a manager's scope", async () => {
+    mockQuery.mockResolvedValue([{ alumni: 49, studying: 40, employed: 2 }] as never);
+    const manager = perm({ role: "alumni_manager", level: 1, school_codes: ["59525"] });
+    expect(await loadAlumniTotals(manager)).toEqual({ alumni: 49, studying: 40, employed: 2 });
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("ORDER BY er.academic_year DESC NULLS LAST, er.is_current DESC, er.id DESC");
+    expect(sql).toContain("WHERE (sch.code = ANY($1::text[]) OR sch.region = ANY($2::text[]))");
+    expect(params).toEqual([["59525"], []]);
+  });
+
+  it("reads 0s when nothing comes back", async () => {
+    mockQuery.mockResolvedValue([] as never);
+    expect(await loadAlumniTotals(perm({}))).toEqual({ alumni: 0, studying: 0, employed: 0 });
   });
 });

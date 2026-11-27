@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-11-10
+last_updated: 2026-11-20
 ---
 
 # CMS-sourced quiz sessions
@@ -41,12 +41,28 @@ in them, including students who sat only the retest. sessionCreator's `db_id` pa
 `meta_data` key by key, so the flag survives it; quiz-creator edits spread `meta_data`.
 
 **Test types the picker offers** (`CMS_TEST_TYPES` in `src/lib/cms-tests.ts`): `chapter_test`
-(Exam track → Grade → Subject → Chapter), and `major_test` / `full_syllabus_test` (straight off
-Exam track + Grade). The list route forwards the type to the CMS as `testtype-dropdown` and
-keeps only tests whose `subtype` matches exactly, so a CMS type missing from this list is
-invisible in the LMS, with no error. `full_syllabus_test` was added on 10 Nov 2026 when AIAT-05
-(`JN-FST-2-26`) was authored as an FST and didn't show under Major Test. quiz-backend ingest and
-`MAJOR_TEST_FORMATS` already handled it; adding a new CMS type is a picker-only change.
+(Exam track → Grade → Subject → Chapter), and `major_test` / `full_syllabus_test` / `part_test` /
+`mock_test` / `previous_year_test` (straight off Exam track + Grade). The list route forwards the type to
+the CMS as `testtype-dropdown` and keeps only tests whose `subtype` matches exactly, so a CMS
+type missing from this list is invisible in the LMS, with no error. `full_syllabus_test` was
+added on 10 Nov 2026 when AIAT-05 (`JN-FST-2-26`) was authored as an FST and didn't show under
+Major Test. `part_test`, `mock_test` and `previous_year_test` followed in Nov 2026 (#540).
+
+The CMS subtype is stored as-is as the test format (session `meta_data.test_format`, and the
+quiz's `test_format` that quiz-backend's `/quiz/from-cms` sets), so it must be a value in
+quiz-backend's `TestFormat` enum, or quiz creation fails. The CMS called previous-year (NTA)
+papers `nta_test`, which no downstream enum knows; nex-gen-cms #232 renamed the subtype to
+`previous_year_test` and the 5 existing tests in prod (25 Nov 2026), so no mapping is needed.
+Adding a CMS type is a picker-only change only when its subtype is already a `TestFormat`
+value; otherwise rename it at the CMS or add it to the enum first. `homework_assignment` (none in
+the CMS yet; downstream says `homework`) and `evaluation_test` (for teachers) stay out.
+`previous_year_test` counts as a big test (Nov 2026), but only for engineering / medical
+(JEE / NEET) streams: legacy CUET, NDA and CLAT practice PYQs use the same format. In af_lms it
+is in `MAJOR_TEST_FORMATS`; the Score journey's cumulative-AL query drops non-JEE/NEET ones
+(`PYQ_JEE_NEET_ONLY` in `bigquery.ts`, since the warehouse marks them "Not Eligible", a value
+that query keeps), and student-support filters by the test's stream already. The same guard is
+in etl-next's academic level / cutoffs (etl-next#243) and reporting's cumulative report
+(reporting#109). Anything new that treats `previous_year_test` as a full test must keep it.
 
 ## The one thing that breaks silently: two homes per setting
 

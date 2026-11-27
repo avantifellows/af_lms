@@ -87,7 +87,7 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
-  it.each([2, 5])("returns only configured Grade 12 Phase %s without placeholders", (phaseNumber) => {
+  it.each([4, 5])("returns only configured Grade 12 Phase %s without placeholders", (phaseNumber) => {
     expect(buildHolisticApplicablePhases({
       currentGrade: 12,
       entryGrade: 12,
@@ -118,7 +118,7 @@ describe("Holistic Student Phase derivation", () => {
       profileRows: [],
       context: { label: null, items: [], missing: "Profile unavailable" },
     },
-  ])("keeps the configured Grade 12 phase ID and number $label", async ({ entryGrade, profileRows, context }) => {
+  ])("keeps the configured Grade 12 phase ID and numbers it Phase 4 $label", async ({ entryGrade, profileRows, context }) => {
     mockQuery
       .mockResolvedValueOnce([{
         student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
@@ -154,14 +154,85 @@ describe("Holistic Student Phase derivation", () => {
     expect(result).toMatchObject({
       phases: [{
         phaseId: 6,
-        number: 2,
+        number: 4,
         title: "Grade 12 start",
         grade: 12,
         academicYear: "2026-2027",
       }],
-      selectedPhase: { phaseId: 6, number: 2, context },
+      selectedPhase: { phaseId: 6, number: 4, context },
     });
     expect(result?.phases.every((phase) => phase.phaseId !== null)).toBe(true);
+  });
+
+  // Issue #516: the JNV CoE Plan is ordered Grade 11, 12, 11, 12.
+  it.each([
+    { grade: 11, phaseId: 15, tabs: [[1, 1], [15, 2]] },
+    { grade: 12, phaseId: 16, tabs: [[2, 4], [16, 5]] },
+  ])("numbers a Grade $grade Mentee's tabs per Grade when the Plan mixes Grades", async ({ grade, phaseId, tabs }) => {
+    const phase = (id: number, phaseGrade: number, position: number) => ({
+      id, academic_year: "2026-2027", grade: phaseGrade, title: `Phase row ${id}`,
+      position, revision: 1, state: "open", guidance_markdown: "Listen first.",
+    });
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade, entry_grade: grade,
+      }])
+      .mockResolvedValueOnce([phase(1, 11, 1), phase(2, 12, 2), phase(15, 11, 3), phase(16, 12, 4)])
+      .mockResolvedValue([]);
+
+    const result = await getHolisticStudentPhase({
+      programId: PROGRAM_IDS.COE,
+      studentId: 41,
+      phaseId,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    expect(result?.phases.map((item) => [item.phaseId, item.number])).toEqual(tabs);
+    expect(result?.selectedPhase.number).toBe(tabs[1][1]);
+  });
+
+  // Each Academic Year's Plan is numbered on its own: last year's Grade 11 Phases
+  // stay 1 and 2 beside this year's Plan, which also has Grade 11 Phases.
+  it("numbers a continuing Grade 12 Mentee's prior-year tabs from the prior Plan only", async () => {
+    const phase = (id: number, year: string, phaseGrade: number, position: number) => ({
+      id, academic_year: year, grade: phaseGrade, title: `Phase row ${id}`,
+      position, revision: 1, state: "open", guidance_markdown: "Listen first.",
+    });
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade: 12, entry_grade: 11,
+      }])
+      .mockResolvedValueOnce([
+        phase(51, "2025-2026", 11, 1), phase(52, "2025-2026", 11, 2),
+        phase(1, "2026-2027", 11, 1), phase(2, "2026-2027", 12, 2),
+        phase(15, "2026-2027", 11, 3), phase(16, "2026-2027", 12, 4),
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { academic_year: "2025-2026", started_at: "2025-07-01T00:00:00Z" },
+        { academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" },
+      ])
+      .mockResolvedValue([]);
+
+    const result = await getHolisticStudentPhase({
+      programId: PROGRAM_IDS.COE,
+      studentId: 41,
+      phaseId: 16,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    expect(result?.phases.map((item) => [item.phaseId, item.number])).toEqual([[51, 1], [52, 2], [2, 4], [16, 5]]);
   });
 
   it("shows real prior-year Grade 11 history for a continuing Grade 12 Mentee", () => {
@@ -937,6 +1008,115 @@ describe("Holistic Student Phase derivation", () => {
       String(sql).includes("FROM holistic_mentorship_post_session_notes notes")
     );
     expect(notesCall?.[1]).toEqual([41, [73], true, 10]);
+  });
+
+  describe("Closed Phases (#536)", () => {
+    const phase = (id: number, position: number, overrides: Record<string, unknown> = {}) => ({
+      id, academic_year: "2026-2027", grade: 11, title: `Phase title ${id}`,
+      position, revision: 5, state: "open", guidance_markdown: "Listen first.", ...overrides,
+    });
+    const ownSubmittedNotes = (phaseId: number) => ({
+      notes_id: 101, phase_id: phaseId, author_user_id: 10, author_name: "Nila Sen",
+      state: "submitted", revision: 2, first_submitted_at: "2026-07-05T00:00:00Z",
+      last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
+      question: "What helped?", question_position: 1, answer: "A weekly plan", challenge_categories: [],
+    });
+
+    function mockMentee(input: {
+      grade: 11 | 12; phases: unknown[]; notes?: unknown[]; mappingYears?: string[];
+    }) {
+      mockQuery
+        .mockResolvedValueOnce([{
+          student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+          grade: input.grade, entry_grade: 11,
+        }])
+        .mockResolvedValueOnce(input.phases)
+        .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce((input.mappingYears ?? ["2026-2027"]).map((academic_year) => ({
+          academic_year, started_at: `${academic_year.slice(0, 4)}-07-01T00:00:00Z`,
+        })))
+        .mockResolvedValueOnce(input.notes ?? [])
+        .mockResolvedValue([]);
+    }
+
+    const asMentor = (phaseId: number, academicYear = "2026-2027") => getHolisticStudentPhase({
+      programId: 1, studentId: 41, phaseId, schoolId: 4, academicYear,
+      actorUserId: 10, role: "teacher", canEdit: true,
+    });
+
+    it("closes an earlier Open Phase to its own author once a later Phase of the Grade is Open", async () => {
+      mockMentee({ grade: 11, phases: [phase(73, 1), phase(75, 3)], notes: [ownSubmittedNotes(73)] });
+
+      const result = await asMentor(73);
+
+      expect(result).toMatchObject({
+        readOnly: false,
+        phases: [
+          { phaseId: 73, locked: false, active: false, closed: true, progress: "completed" },
+          { phaseId: 75, locked: false, active: true, closed: false },
+        ],
+        selectedPhase: {
+          phaseId: 73, active: false, closed: true, canEditNotes: false,
+          // Still readable.
+          notes: { state: "submitted", answers: [{ answer: "A weekly plan" }] },
+        },
+      });
+    });
+
+    it("keeps the Active Phase open for Notes", async () => {
+      mockMentee({ grade: 11, phases: [phase(73, 1), phase(75, 3)] });
+
+      expect(await asMentor(75)).toMatchObject({
+        selectedPhase: { phaseId: 75, active: true, closed: false, canEditNotes: true, notes: null },
+      });
+    });
+
+    it("does not let a Closed Phase with no Notes be started", async () => {
+      mockMentee({ grade: 11, phases: [phase(73, 1), phase(75, 3)] });
+
+      expect(await asMentor(73)).toMatchObject({
+        selectedPhase: { phaseId: 73, closed: true, canEditNotes: false, notes: null },
+      });
+    });
+
+    it("is not closed by another Grade's Open Phase", async () => {
+      mockMentee({ grade: 11, phases: [phase(73, 1), phase(74, 2, { grade: 12 })] });
+
+      const result = await asMentor(73);
+
+      expect(result?.phases).toHaveLength(1);
+      expect(result).toMatchObject({
+        selectedPhase: { phaseId: 73, active: true, closed: false, canEditNotes: true },
+      });
+    });
+
+    it("closes last year's Grade 11 Phase for a Grade 12 Mentee, though it was that year's latest", async () => {
+      mockMentee({
+        grade: 12,
+        phases: [phase(73, 1, { academic_year: "2025-2026" }), phase(80, 1, { grade: 12 })],
+        mappingYears: ["2025-2026", "2026-2027"],
+      });
+
+      expect(await asMentor(73)).toMatchObject({
+        phases: [
+          // A past year's Plan has no Active Phase: never both Active and Closed.
+          { phaseId: 73, academicYear: "2025-2026", active: false, closed: true },
+          { phaseId: 80, academicYear: "2026-2027", active: true, closed: false },
+        ],
+        selectedPhase: { phaseId: 73, active: false, closed: true, canEditNotes: false },
+      });
+    });
+
+    it("keeps a past year's latest Open Phase Closed when that year is the one being viewed", async () => {
+      mockMentee({ grade: 11, phases: [phase(73, 1, { academic_year: "2025-2026" })], mappingYears: ["2025-2026"] });
+
+      // The request names 2025-2026; the rule follows the real current year.
+      expect(await asMentor(73, "2025-2026")).toMatchObject({
+        phases: [{ phaseId: 73, academicYear: "2025-2026", active: false, closed: true }],
+        selectedPhase: { phaseId: 73, active: false, closed: true, canEditNotes: false },
+      });
+    });
   });
 
   describe("Follow-up Notes on the selected Phase", () => {

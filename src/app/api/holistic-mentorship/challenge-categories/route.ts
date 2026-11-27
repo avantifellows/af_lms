@@ -35,7 +35,7 @@ function filtersFrom(request: Request): RequestedFilters | null {
   return { programId, academicYear, grade, phaseId, csv: format === "csv" };
 }
 
-// e.g. challenge-categories-2026-2027-grade-11-program-1-phase-2.csv; the Phase is its Plan number.
+// e.g. challenge-categories-2026-2027-grade-11-program-1-phase-2.csv; the Phase is its displayed Phase N.
 function csvFilename(heatmap: ChallengeCategoryHeatmap, allPrograms: boolean) {
   const program = allPrograms ? "all-programs" : `program-${heatmap.programIds[0]}`;
   const phaseNumber = heatmap.phases.find(({ id }) => id === heatmap.phaseId)?.number;

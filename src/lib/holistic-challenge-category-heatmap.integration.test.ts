@@ -377,13 +377,13 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
       phases: [
         { id: phases.g11p1, number: 1, title: "Settling in", state: "open" },
         { id: phases.g11p2, number: 2, title: "Mid-term check", state: "open" },
-        { id: phases.g11p3, number: 4, title: "Year end", state: "locked" },
+        { id: phases.g11p3, number: 3, title: "Year end", state: "locked" },
       ],
       defaultPhaseId: phases.g11p2,
       academicYears: [academicYear],
     });
     expect(grade12).toMatchObject({
-      phases: [{ id: phases.g12p1, number: 3, title: "Board prep", state: "open" }],
+      phases: [{ id: phases.g12p1, number: 4, title: "Board prep", state: "open" }],
       defaultPhaseId: phases.g12p1,
       total: {
         studentCount: 1,

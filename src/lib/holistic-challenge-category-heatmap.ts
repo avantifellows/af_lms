@@ -6,6 +6,7 @@ import {
   holisticChallengeCategoryPercent,
   isHolisticChallengeCategoryCode,
 } from "./holistic-challenge-categories";
+import { holisticPhaseNumber } from "./holistic-phase-number";
 import { csvCell, getHolisticProgressAcademicYears } from "./holistic-progress";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
 import type { UserPermission } from "./permissions";
@@ -96,7 +97,7 @@ function heatmapSql(schoolScopeSql: string) {
      WHERE NOT EXISTS (SELECT 1 FROM counted WHERE counted.school_id = mapping_school_ids.school_id)`;
 }
 
-// The Grade's Phases in Plan order; `number` is the plan-wide Phase N.
+// The Grade's Phases in Plan order; `number` is the displayed Phase N (per Grade, issue #516).
 // All Programs has no Phases: each Program has its own Phase Plan.
 async function heatmapPhases(filters: HolisticChallengeCategoryHeatmapFilters) {
   if (filters.allPrograms) return [];
@@ -109,8 +110,9 @@ async function heatmapPhases(filters: HolisticChallengeCategoryHeatmapFilters) {
      ORDER BY phase.position, phase.id`,
     [filters.programIds[0], filters.academicYear, filters.grade],
   );
-  return rows.map((phase) => ({
-    id: Number(phase.id), number: Number(phase.position), title: phase.title, state: phase.state,
+  return rows.map((phase, index) => ({
+    id: Number(phase.id), number: holisticPhaseNumber(filters.grade, index + 1),
+    title: phase.title, state: phase.state,
   }));
 }
 

@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-11-18
+last_updated: 2026-11-24
 ---
 
 # Setup
@@ -36,7 +36,7 @@ last_updated: 2026-11-18
 ## Environment Variables
 Required (app won't function without them):
 - `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` — Postgres connection (reads + visit/curriculum writes). `DATABASE_SSL=false` disables SSL locally.
-- `DB_SERVICE_URL`, `DB_SERVICE_TOKEN` — external write API (students/batches/quiz-sessions/documents).
+- `DB_SERVICE_URL`, `DB_SERVICE_TOKEN` — external write API (students/batches/quiz-sessions/documents/alumni).
 - `NEXTAUTH_URL`, `NEXTAUTH_SECRET` — NextAuth (`openssl rand -base64 32` for the secret).
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth.
 

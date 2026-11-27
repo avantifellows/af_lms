@@ -16,7 +16,7 @@ edges:
     condition: when choosing which data backend a library talks to
   - target: context/setup.md
     condition: when installing or configuring these tools locally
-last_updated: 2026-10-22
+last_updated: 2026-11-18
 ---
 
 # Stack
@@ -39,6 +39,7 @@ last_updated: 2026-10-22
 - **`@aws-sdk/client-ses`** — the Blended Learning well-being email only (`src/lib/blended-learning-wellbeing-notifier.ts`, `BLENDED_LEARNING_SES_*` keys, pinned to the same SDK line as `client-s3`).
 - **`sanitize-html`** — server-only allowlist sanitiser for Blended Learning Conversation notes (`src/lib/blended-learning-notes-sanitiser.ts`). **`@tiptap/react` + `starter-kit` + `extension-table`** (Tiptap v3, ProseMirror) — the Blended Learning notes editor only, limited to headings, bold, italic, lists and tables; `immediatelyRender: false` for SSR.
 - **`recharts`** — performance/analytics charts; **`sonner`** — app toasts; **`lucide-react`** — icons; **`csv-parse`** — centre/staff CSV imports.
+- **`exceljs`** — server-built .xlsx downloads, and (Test Attendance, #517) one browser-built download: load it there only with a dynamic `import("exceljs")` inside the click path, so its own chunk (about 931 KB raw / 256 KB gzip, the `browser` build) is fetched on the first Download, never with the page. `npm run build` bundles it with no config.
 - **`vitest` 4 + `@testing-library/react`** (not Jest) — unit/component tests, jsdom env. **`@playwright/test`** — E2E.
 - **`fallow`** — static codebase health/dead-code/risk analysis (`npm run fallow`, `npm run fallow:audit`, `npm run fallow:dead-code`, and `npm run fallow:health`).
 
