@@ -163,13 +163,23 @@ beforeEach(() => {
       Object.assign(target, { state: "failed", outcome_code: "enqueue_rejected", finished_at: "2026-11-27T05:30:02Z" });
       return [target];
     }
-    if (sql.includes("ai_test_insight_requests") && sql.includes("r.selected_test_ids = $2::jsonb")) {
-      // Postgres applies the state filter and compares the two jsonb arrays:
-      // the same ids in the same order. The newest match first.
+    if (sql.includes("ai_test_insight_requests") && sql.includes("$2::jsonb")) {
+      // Postgres applies the state filter and compares the two jsonb arrays
+      // as the SQL says: `=` is the same ids in the same order; `@>` and `<@`
+      // both (each array holds the other) is the same ids in any order. The
+      // newest match first.
       const onlyCompleted = sql.includes("r.state = 'completed'");
+      const sent = JSON.parse(String(params[1])) as string[];
+      const sameTests = (stored: string[]) =>
+        sql.includes("r.selected_test_ids = $2::jsonb")
+          ? JSON.stringify(stored) === params[1]
+          : sql.includes("r.selected_test_ids @> $2::jsonb") &&
+            sql.includes("r.selected_test_ids <@ $2::jsonb") &&
+            sent.every((id) => stored.includes(id)) &&
+            stored.every((id) => sent.includes(id));
       const matches = endedRequests.filter(
         (request) =>
-          (!onlyCompleted || request.state === "completed") && JSON.stringify(request.selected_test_ids) === params[1],
+          (!onlyCompleted || request.state === "completed") && sameTests(request.selected_test_ids as string[]),
       );
       return params[0] === 1001 ? matches.slice(0, 1) : [];
     }
@@ -281,15 +291,32 @@ describe("POST /api/ai-test-insights/students/[studentId]/requests", () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("looks for the Student's newest completed request with exactly these ids", async () => {
+    it("looks for the Student's newest completed request with exactly these ids, in any order", async () => {
       endedRequests = [done()];
 
       await post("1001", { selectedTestIds: ["T9", "T4"] });
 
-      const [[sql, params]] = mockQuery.mock.calls.filter(([text]) => String(text).includes("r.selected_test_ids = $2::jsonb"));
+      const [[sql, params]] = mockQuery.mock.calls.filter(([text]) => String(text).includes("$2::jsonb"));
       expect(params).toEqual([1001, '["T9","T4"]']);
       expect(sql).toContain("r.state = 'completed'");
+      expect(sql).toContain("r.selected_test_ids @> $2::jsonb AND r.selected_test_ids <@ $2::jsonb");
+      expect(sql).not.toContain("r.selected_test_ids = $2::jsonb");
       expect(sql).toMatch(/ORDER BY r\.requested_at DESC, r\.id DESC\s+LIMIT 1/);
+    });
+
+    // The picker lists tests by their newest sitting, so a re-sat test moves
+    // up and the same tests can come in another order than they were stored.
+    it("answers 200 existing for the same tests sent in another order, writing nothing", async () => {
+      endedRequests = [done()];
+
+      const response = await post("1001", { selectedTestIds: ["T4", "T9"] });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.outcome).toBe("existing");
+      expect(body.request).toMatchObject({ requestKey: "done-key", selectedTestIds: ["T9", "T4"] });
+      expect(inserts()).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it("records a new request with generateAgain, leaving the earlier one as it was", async () => {
@@ -316,7 +343,7 @@ describe("POST /api/ai-test-insights/students/[studentId]/requests", () => {
 
       await post("1001", { selectedTestIds: ["T9", "T4"], generateAgain: true });
 
-      expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes("r.selected_test_ids = $2::jsonb"))).toBe(false);
+      expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes("$2::jsonb"))).toBe(false);
     });
 
     it.each([

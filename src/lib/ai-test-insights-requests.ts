@@ -135,16 +135,20 @@ async function inProgressRequest(studentId: number): Promise<InsightRequestView 
 }
 
 /**
- * The Student's newest `completed` request of exactly these tests (jsonb
- * equality: the same ids in the same order, which is always newest first),
- * if any.
+ * The Student's newest `completed` request of exactly these tests, in any
+ * order, if any. Each array holds the other (jsonb `@>` both ways); the ids
+ * are distinct (the route refuses repeats), so that is the same set. Order
+ * is not compared: the picker lists tests by their newest sitting, so a
+ * re-sat test moves up and the same tests can come in another order than the
+ * stored newest-first one.
  */
 async function completedRequestOfTests(studentId: number, selectedTestIds: string[]): Promise<InsightRequestView | null> {
   const rows = await query<RequestRow>(
     `SELECT ${VIEW_COLUMNS}
      FROM ai_test_insight_requests r
      JOIN "user" u ON u.id = r.requested_by_user_id
-     WHERE r.student_id = $1 AND r.state = 'completed' AND r.selected_test_ids = $2::jsonb
+     WHERE r.student_id = $1 AND r.state = 'completed'
+       AND r.selected_test_ids @> $2::jsonb AND r.selected_test_ids <@ $2::jsonb
      ORDER BY r.requested_at DESC, r.id DESC
      LIMIT 1`,
     [studentId, JSON.stringify(selectedTestIds)],
@@ -184,7 +188,7 @@ function isActiveStudentConflict(error: unknown): boolean {
  * 1. A fresh (not stalled) `queued` or `running` request exists for the
  *    Student: `already_running` with it.
  * 2. A `completed` request of the Student with the same `selected_test_ids`
- *    (jsonb equality) exists and `generateAgain` is not true: `existing` with
+ *    (the same ids in any order) exists and `generateAgain` is not true: `existing` with
  *    the newest such request, and nothing is written. With `generateAgain` a
  *    new request is made and the earlier one is left as it is.
  * 3. Generation is not configured (`@/lib/ai-test-insights-delivery`):

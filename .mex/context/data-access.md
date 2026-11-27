@@ -1041,8 +1041,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Same tests again (#567):** step 2 of `createRequest`, after the already-running check and
   before the not-configured check: unless the body says `generateAgain: true`, it reads the
   Student's newest `completed` request `WHERE student_id = $1 AND state = 'completed' AND
-  selected_test_ids = $2::jsonb` (jsonb equality, so the same ids in the same order; the picker
-  always sends newest first) `ORDER BY requested_at DESC, id DESC LIMIT 1`, and if there is one
+  selected_test_ids @> $2::jsonb AND selected_test_ids <@ $2::jsonb` (each array holds the other:
+  the same ids in any order, as the ids are distinct) `ORDER BY requested_at DESC, id DESC LIMIT 1`,
+  and if there is one
   returns `existing` with it — route 200 `{ outcome: "existing", request }`, nothing written, no
   wake or enqueue, even where generation is not configured. `no_data` and `failed` rows never
   count. With `generateAgain: true` the step is skipped and a new row is inserted; the earlier
@@ -1050,6 +1051,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   equals the shown `completed` request's set and opens a confirmation (`Modal`, "Generate again?")
   first; an `existing` answer shows that request with "An AI Summary for these tests already
   exists". E2E "AI Summary" uses a second, stale tab of the Teacher to get an `existing` answer.
+  Order is not compared because the picker lists tests by their newest sitting: after a re-sit the
+  same tests come in another order than the stored one (still stored as sent, newest first at the
+  time). Before the final checks the step used jsonb `=`, so that order made a new request with no
+  confirmation; the route test and the e2e "same tests sent in another order" cover it.
 - **Stall rule (#566):** a `queued` or `running` request whose `requested_at` is 20 minutes old or
   more is shown as `failed` with `outcomeCode: "timed_out"`. The rule lives in one place,
   `insightRequestAsShown(view, nowUtc)` in `src/lib/ai-test-insights-requests.ts`, and `toView`

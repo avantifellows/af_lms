@@ -1186,6 +1186,38 @@ test.describe("AI Test Insights tab", () => {
             ["queued", ["T9", "T4"]],
           ]);
         });
+
+        // The picker lists tests by their newest sitting, so after a re-sit the
+        // same tests can come in another order than they were stored (a stale
+        // tab sends them with no confirmation). Postgres still finds the
+        // existing AI Summary: no new row, no call.
+        test("answers existing for the same tests sent in another order, with no new row", async ({ page }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          await answerTestPicker(page, 200, { tests: PICKER_TESTS });
+          await page.goto(studentUrl("esha"));
+          const summary = page.getByRole("region", { name: "AI Summary" });
+          await summary.getByRole("checkbox", { name: /Major Test 2/ }).check();
+          await summary.getByRole("button", { name: "Generate", exact: true }).click();
+          await expectFixedText(summary, POLLED);
+          const [earlier] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(earlier).toMatchObject({ state: "completed", selectedTestIds: ["T9", "T4"] });
+          await steerFakeAiMentorshipGuide({ enqueue: "accept" });
+          const callsBefore = await enqueueOrWakeCalls();
+
+          const response = await page.request.post(`/api/ai-test-insights/students/${ids.studentIds.esha}/requests`, {
+            data: { selectedTestIds: ["T4", "T9"] },
+          });
+
+          expect(response.status()).toBe(200);
+          expect(await response.json()).toMatchObject({
+            outcome: "existing",
+            request: { requestKey: earlier.requestKey, selectedTestIds: ["T9", "T4"] },
+          });
+          expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([earlier]);
+          expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+        });
       });
     });
 
