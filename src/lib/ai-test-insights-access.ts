@@ -260,7 +260,9 @@ function mayListCentre(permission: UserPermission, row: ListedStudentRow): boole
  * The Student must be listed (the same predicate as the tab's list) by a
  * centre the user may list. A Student listed by two such centres counts once:
  * the context uses the page's `centre` when it is one of them, otherwise the
- * lowest centre id. `centre` changes nothing else; an invalid one is ignored.
+ * lowest centre id. That centre's School and Program are what the page shows
+ * and what a new Insight Request records. `centre` changes nothing else; an
+ * invalid one is ignored.
  * No mentor-mentee mapping applies.
  */
 export async function resolveAiTestInsightsStudentAccess(

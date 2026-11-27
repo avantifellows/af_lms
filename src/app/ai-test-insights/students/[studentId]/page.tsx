@@ -15,7 +15,10 @@ import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 // access gates it: no session goes to the sign-in page, and any refusal —
 // bad id, no feature, a Student missing, not listed or out of scope — is the
 // same not-found page, so a hidden Student cannot be told from a missing one.
-// The optional `centre` value only chooses the back link. Three cards: the
+// The optional `centre` value chooses the back link. For a Student listed by
+// two centres it also picks the centre whose School and Program this page and
+// a new Insight Request use: the centre the Teacher came from, else the lowest
+// centre id (owner decision, PR #573 review). Three cards: the
 // Student card, the performance card and the AI Summary card; the Student
 // card's newest test line and the AI Summary card's test picker share one read.
 // The Student's latest Insight Request is read here, on the server, so the AI
