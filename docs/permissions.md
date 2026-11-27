@@ -243,6 +243,22 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
   same Student access, in the same order, before any warehouse read. Every viewer may read it; a
   viewer (Program Manager, Program Admin, Admin, `read_only` Teacher) sees the picker read-only and
   only a Teacher with `edit` can tick tests.
+- **Generate route** `POST /api/ai-test-insights/students/[studentId]/requests` (#560) is the
+  only write. Only a Teacher with `edit` access (a Teacher who is not `read_only`) whose School
+  scope lets them open the Student can call it: it runs Student access as a write, so a Program
+  Manager, Program Admin, Admin or `read_only` Teacher gets 403 before any Student is read, and a
+  Teacher who may not open the Student gets 404. Then 422 for a bad body, and 409 when the login
+  links to no User. The card hides Generate from viewers, but the route is the gate.
+- **Status route** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]` (#563)
+  runs the same Student access as a read, so every viewer may call it for a Student they may open;
+  a request key of another Student is 404. Its one side effect is only for a caller with `edit`:
+  a poll of a `queued` request may deliver it to AI Mentorship Guide again. A viewer's poll never
+  does.
+- **AI Summary text route**
+  `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]/summary` (#564) runs the
+  same Student access as a read: every viewer may read the AI Summary of a completed request of a
+  Student they may open. A request key of another Student, or a request that is not completed,
+  is 404.
 - **AI Summary PDF route** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]/pdf`
   (#565) runs the same Student access, in the same order, and is a read: every viewer may download
   the PDF of a completed request of a Student they may open. A request key of another Student is 404.
