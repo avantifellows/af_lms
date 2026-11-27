@@ -142,6 +142,26 @@ _Avoid_: Test set, monthly mandated test, test (for the whole month's set)
 One System-wide Mandated Test session inside a Monthly Test, such as "NVS G11 NDA October Test".
 _Avoid_: Test (for one session), quiz, stream paper
 
+**Paper Series**:
+The same Paper across Monthly Tests, such as "Grade 12 · JEE": the Papers that share a grade and a name label.
+_Avoid_: Paper (for the line across months), sitting (for one Paper in the series), test series
+
+**Struggled**:
+A Student struggled on a Paper if they opened it and their marks are zero or below, whether or not they submitted.
+_Avoid_: Failed, weak student, low scorer
+
+**Under 90 Min**:
+A mark on a Student who spent less than 90 minutes on a Paper, whatever the Paper's allowed time.
+_Avoid_: Rushed, early leaver, fast finisher
+
+**Weak Subject**:
+A subject of a Paper in which the School's average score is below 20%.
+_Avoid_: Low subject, poor subject
+
+**Chapter To Focus On**:
+A chapter of a Paper in which the School's average score is below 20%.
+_Avoid_: Weak chapter, focus chapter
+
 **Test Attendance Tab**:
 The School page tab that shows, for each JNV NVS Student, whether they opened and submitted each Monthly Test.
 _Avoid_: Attendance tab, test tracking tab, live tracking
@@ -834,6 +854,15 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A resolved **Visit Concern** reopens automatically when a **Visit** dated after its resolution mentions it again; a Visit dated on or before the resolution never reopens it
 - The **Test Attendance Tab** is for JNV NVS only; a **PMU Manager**, a **PMU Govt School User**, and an **Admin** can view it, and nobody edits anything on it
 - A **Monthly Test** has many **Papers**; both which Papers belong to it (switched-on System-wide Mandated Test sessions in the `EnableStudents` auth group for grades 11 and 12 in the current academic year, grouped by IST start month and named after that month) and each Paper's grade and opening and closing times come from the LMS `session` table
+- A **Paper** belongs to one **Paper Series**, decided by its grade and the label in its name ("NVS G12 JEE October Test" is in Grade 12 · JEE); a Paper whose name cannot be read is a Paper Series of its own
+- Two sessions of one **Monthly Test** with the same grade and name label count as one **Paper** on the NVS Performance tab, their Students combined
+- On a JNV NVS School page the Performance tab is built around **Papers** and **Paper Series**; a **PMU Manager**, a **PMU Govt School User**, and an **Admin** can view it, and physical-centre Schools keep their own Performance tab
+- The NVS Performance tab counts every Student who opened a **Paper**, submitted or not, and shows a score as marks divided by maximum marks, so a score can be negative
+- The NVS Performance tab lists every **Paper** of a **Monthly Test** for the grade, including one no Student of the School opened, and a **Monthly Test** appears on it once the first of its Papers has results
+- A Student can be both **Struggled** and **Under 90 Min** on the same **Paper**
+- A **Weak Subject** or **Chapter To Focus On** is decided on the School's average alone, however few Students sat the **Paper**; a Paper whose questions carry no chapter has no chapter level
+- The NVS Performance tab counts Students for a **Monthly Test** by the same list and joining rule as the **Test Attendance Tab**, and a Student with a result for a **Paper** always shows for it
+- An all-JNV or region average on the NVS Performance tab is taken over all JNV NVS Students who opened the **Paper**, pooled, not over School averages
 - A **Monthly Test** is running from the earliest opening time to the latest closing time among its **Papers**
 - **Exam Preparing For** does not decide which **Paper** a Student sits: a Student may open any Paper of the **Monthly Test**, and more than one
 - A Student has one **Test Attendance Status** per **Monthly Test**, the furthest state reached on any of its **Papers**; Submitted on one Paper makes the Student Submitted
