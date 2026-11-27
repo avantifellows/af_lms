@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 
 import { test, expect, signInAs } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
+import { TEST_USERS } from "../helpers/test-users";
 import {
   AI_TEST_INSIGHTS_ASHA_HISTORY,
   AI_TEST_INSIGHTS_CARDS,
@@ -177,6 +178,16 @@ function expectAfterTeacherFeedback(names: string[]) {
 // Students and one of each kind the tab leaves out, a second School, a School
 // with no active centre, the personas the e2e seed lacks, and Insight Sessions
 // and Insight Requests whose counts it declares by hand.
+/**
+ * Fails unless `page` is signed in as the Admin test user. `adminPage` is the
+ * test's own `page`, so a `signInAs(page, …)` in the same test would quietly
+ * turn an Admin check into a check of that persona.
+ */
+async function expectAdmin(page: Page) {
+  const session = (await (await page.request.get("/api/auth/session")).json()) as { user?: { email?: string } };
+  expect(session.user?.email).toBe(TEST_USERS.admin.email);
+}
+
 test.describe("AI Test Insights tab", () => {
   const pool = getTestPool();
   let ids: AiTestInsightsFixtureIds;
@@ -263,12 +274,14 @@ test.describe("AI Test Insights tab", () => {
   });
 
   test("shows the tab after Teacher Feedback for Teacher, Program Manager, Program Admin and Admin", async ({
-    page,
+    browser,
     adminPage,
     pmPage,
     programAdminPage,
   }) => {
-    await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+    // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+    const teacherContext = await browser.newContext();
+    const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
     for (const viewer of [page, pmPage, programAdminPage, adminPage]) {
       await viewer.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
       expectAfterTeacherFeedback(await tabNames(viewer));
@@ -277,6 +290,8 @@ test.describe("AI Test Insights tab", () => {
       await viewer.goto(`/centre/${ids.coeCentreId}`);
       expectAfterTeacherFeedback(await tabNames(viewer));
     }
+    await expectAdmin(adminPage);
+    await teacherContext.close();
   });
 
   test("hides the tab for both PMU roles and an NVS-only Teacher", async ({ page }) => {
@@ -299,16 +314,20 @@ test.describe("AI Test Insights tab", () => {
   });
 
   test("hides the tab for every role at a School with no active centre", async ({
-    page,
+    browser,
     adminPage,
     pmPage,
     programAdminPage,
   }) => {
-    await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+    // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+    const teacherContext = await browser.newContext();
+    const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
     for (const viewer of [page, pmPage, programAdminPage, adminPage]) {
       await viewer.goto(`/school/${AI_TEST_INSIGHTS_NO_CENTRE_SCHOOL.code}`);
       expect(await tabNames(viewer)).not.toContain(TAB);
     }
+    await expectAdmin(adminPage);
+    await teacherContext.close();
   });
 
   test("refuses a Teacher of another School with 403 from the list route", async ({ page }) => {
@@ -1518,13 +1537,14 @@ test.describe("AI Test Insights tab", () => {
     // open the page.
     test.describe("History", () => {
       test("shows Asha's declared entries in the declared order to the author, a second Teacher and each viewer role", async ({
-        page,
         browser,
         pmPage,
         programAdminPage,
         adminPage,
       }) => {
-        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+        const teacherContext = await browser.newContext();
+        const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
         const secondContext = await browser.newContext();
         const secondTeacher = await signInAs(await secondContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
         for (const viewer of [page, secondTeacher, pmPage, programAdminPage, adminPage]) {
@@ -1532,7 +1552,9 @@ test.describe("AI Test Insights tab", () => {
           await viewer.goto(studentUrl("asha"));
           expect(await historyEntries(viewer)).toEqual(AI_TEST_INSIGHTS_ASHA_HISTORY);
         }
+        await expectAdmin(adminPage);
         await secondContext.close();
+        await teacherContext.close();
       });
 
       test("puts History below Session Notes for a Teacher and below the AI Summary card for a viewer", async ({
@@ -1917,7 +1939,6 @@ test.describe("AI Test Insights tab", () => {
           page.getByRole("region", { name: "Student" }).locator(`dt:text-is('${label}') + dd`);
 
         test("links the AI Summary the card shows, writes one submitted audit row, blanks the form, and the counts move", async ({
-          page,
           browser,
           pmPage,
           programAdminPage,
@@ -1925,6 +1946,9 @@ test.describe("AI Test Insights tab", () => {
         }) => {
           test.slow();
           await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          // The Teacher works in a browser of their own: `adminPage` is the test's `page`.
+          const teacherContext = await browser.newContext();
+          const page = await teacherContext.newPage();
           const summary = await generateForEsha(page);
           await expect(summary.getByRole("link", { name: "Download PDF" })).toBeVisible(POLLED);
           const [request] = await readInsightRequests(pool, ids.studentIds.esha);
@@ -1982,6 +2006,7 @@ test.describe("AI Test Insights tab", () => {
             await viewer.goto(studentUrl("esha"));
             expect(await historyEntries(viewer)).toEqual(ESHA_HISTORY);
           }
+          await expectAdmin(adminPage);
           await secondContext.close();
 
           const [row] = await readInsightSessions(pool, ids.studentIds.esha);
@@ -2019,6 +2044,7 @@ test.describe("AI Test Insights tab", () => {
           await page.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
           const rows = await listedRows(page);
           expect(rows.find(([name]) => name === "Esha Ekka")).toEqual(["Esha Ekka", "E2E-ATI-ESHA", "11", "1", "1", "20 Nov 2026"]);
+          await teacherContext.close();
         });
 
         test("links nothing with no request, or when the latest request failed, and the route refuses that key", async ({
@@ -2384,16 +2410,20 @@ test.describe("AI Test Insights tab", () => {
     });
 
     test("shows the page to a Teacher, Program Manager, Program Admin and Admin", async ({
-      page,
+      browser,
       adminPage,
       pmPage,
       programAdminPage,
     }) => {
-      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+      // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+      const teacherContext = await browser.newContext();
+      const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
       for (const viewer of [page, pmPage, programAdminPage, adminPage]) {
         await viewer.goto(studentUrl("chirag"));
         expect(await studentCard(viewer)).toEqual(AI_TEST_INSIGHTS_CARDS.chirag);
       }
+      await expectAdmin(adminPage);
+      await teacherContext.close();
     });
 
     test("is not found for a Teacher of another School, either way round", async ({ page, browser }) => {
