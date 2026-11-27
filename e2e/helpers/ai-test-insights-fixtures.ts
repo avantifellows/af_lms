@@ -188,11 +188,15 @@ const PERSONA_EMAILS = Object.values(AI_TEST_INSIGHTS_PERSONAS).map((p) => p.ema
 const ALL_EMAILS = [...PERSONA_EMAILS, ...STUDENTS.map((s) => studentEmail(s.key))];
 
 export interface AiTestInsightsFixtureIds {
+  /** The main School's `school.id`. */
+  schoolId: number;
   coeCentreId: number;
   nodalCentreId: number;
   otherCentreId: number;
   /** `student.id` by fixture key (asha, esha, medical, …). */
   studentIds: Record<string, number>;
+  /** Each persona's `user.id`, by persona email. */
+  personaUserIds: Record<string, number>;
 }
 
 async function oneId(pool: Pool, sql: string, params: unknown[], what: string): Promise<number> {
@@ -337,7 +341,61 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
     teacherUserId: personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
   });
 
-  return { coeCentreId, nodalCentreId, otherCentreId, studentIds };
+  return { schoolId: main.id, coeCentreId, nodalCentreId, otherCentreId, studentIds, personaUserIds };
+}
+
+/** An Insight Request row as stored, with its times as seconds since the epoch, read as UTC. */
+export interface StoredInsightRequest {
+  requestKey: string;
+  state: string;
+  selectedTestIds: unknown;
+  notesSnapshot: unknown;
+  requestedByUserId: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  requestedAt: number;
+  insertedAt: number;
+  updatedAt: number;
+}
+
+/** The Student's Insight Requests, oldest first. */
+export async function readInsightRequests(pool: Pool, studentId: number): Promise<StoredInsightRequest[]> {
+  const result = await pool.query(
+    `SELECT request_key, state, selected_test_ids, notes_snapshot, requested_by_user_id, school_id, program_id,
+            academic_year,
+            EXTRACT(EPOCH FROM requested_at)::float8 AS requested_at,
+            EXTRACT(EPOCH FROM inserted_at)::float8 AS inserted_at,
+            EXTRACT(EPOCH FROM updated_at)::float8 AS updated_at
+     FROM ai_test_insight_requests
+     WHERE student_id = $1
+     ORDER BY id`,
+    [studentId],
+  );
+  return result.rows.map((row) => ({
+    requestKey: row.request_key,
+    state: row.state,
+    selectedTestIds: row.selected_test_ids,
+    notesSnapshot: row.notes_snapshot,
+    requestedByUserId: Number(row.requested_by_user_id),
+    schoolId: Number(row.school_id),
+    programId: Number(row.program_id),
+    academicYear: row.academic_year,
+    requestedAt: Number(row.requested_at),
+    insertedAt: Number(row.inserted_at),
+    updatedAt: Number(row.updated_at),
+  }));
+}
+
+/** Moves a `queued` request to `running`, as AI Mentorship Guide does when it claims it. */
+export async function markInsightRequestRunning(pool: Pool, requestKey: string): Promise<void> {
+  const result = await pool.query(
+    `UPDATE ai_test_insight_requests
+     SET state = 'running', started_at = ${NOW}, updated_at = ${NOW}
+     WHERE request_key = $1 AND state = 'queued'`,
+    [requestKey],
+  );
+  if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no queued request to move to running");
 }
 
 /**

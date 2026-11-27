@@ -140,7 +140,16 @@ describe("resolveAiTestInsightsStudentAccess", () => {
         canEdit: true,
       },
       centreNamedByPage: false,
+      actor: { email: "staff@avantifellows.org", linkedUserId: 777 },
     });
+  });
+
+  it("gives no linked User when the permission links none", async () => {
+    permissionRow = row("teacher", { user_id: null });
+
+    const result = await resolveAiTestInsightsStudentAccess("1001");
+
+    expect(result.authorized && result.actor).toEqual({ email: "staff@avantifellows.org", linkedUserId: null });
   });
 
   describe("refusal order", () => {

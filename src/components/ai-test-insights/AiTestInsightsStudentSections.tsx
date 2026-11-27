@@ -10,10 +10,12 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import AiTestInsightsStudentCard from "@/components/ai-test-insights/AiTestInsightsStudentCard";
 import AiTestInsightsSummaryCard from "@/components/ai-test-insights/AiTestInsightsSummaryCard";
 import {
+  aiTestInsightsRequestsUrl,
   aiTestInsightsTestsUrl,
   type AiTestInsightsStudentCardData,
   type AiTestInsightsTestsResponse,
   type AiTestInsightsTestsState,
+  type InsightRequestView,
 } from "@/lib/ai-test-insights-shared";
 
 async function readTests(response: Response): Promise<AiTestInsightsTestsState> {
@@ -54,13 +56,19 @@ export default function AiTestInsightsStudentSections({
   student,
   studentId,
   canEdit,
+  centreId = null,
+  latestRequest = null,
   children,
 }: {
   student: AiTestInsightsStudentCardData;
   /** `student.id`. */
   studentId: number;
-  /** Feature access is `edit`; a viewer sees the picker read-only. */
+  /** Feature access is `edit`; a viewer sees the picker read-only and no Generate. */
   canEdit: boolean;
+  /** The centre the page named, when it lists the Student; Generate records its School and Program. */
+  centreId?: number | null;
+  /** The Student's latest Insight Request, read on the server. */
+  latestRequest?: InsightRequestView | null;
   /** The cards between the Student card and the AI Summary card. */
   children?: ReactNode;
 }) {
@@ -70,7 +78,13 @@ export default function AiTestInsightsStudentSections({
     <>
       <AiTestInsightsStudentCard student={student} tests={state} />
       {children}
-      <AiTestInsightsSummaryCard tests={state} canEdit={canEdit} onRetry={retry} />
+      <AiTestInsightsSummaryCard
+        tests={state}
+        canEdit={canEdit}
+        onRetry={retry}
+        requestsUrl={aiTestInsightsRequestsUrl(studentId, centreId)}
+        initialRequest={latestRequest}
+      />
     </>
   );
 }

@@ -12,10 +12,13 @@ import {
   AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
+  markInsightRequestRunning,
+  readInsightRequests,
   removeAiTestInsightsFixture,
   seedAiTestInsightsFixture,
   type AiTestInsightsFixtureIds,
 } from "../helpers/ai-test-insights-fixtures";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "../../src/lib/constants";
 
 const TAB = "AI Test Insights";
 
@@ -391,9 +394,10 @@ test.describe("AI Test Insights tab", () => {
     test("lists the Student's tests in the AI Summary card with the newest ticked, and shows it as the newest test", async ({
       page,
     }) => {
+      // Esha has no Insight Request, so nothing is in progress and the picker is free.
       await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
       const asked = await answerTestPicker(page, 200, { tests: PICKER_TESTS });
-      await page.goto(studentUrl("asha"));
+      await page.goto(studentUrl("esha"));
 
       const summary = page.getByRole("region", { name: "AI Summary" });
       await expect(summary.getByRole("listitem")).toHaveText([
@@ -416,12 +420,12 @@ test.describe("AI Test Insights tab", () => {
       await expect(summary.getByRole("checkbox", { name: /Major Test 2/ })).toBeDisabled();
 
       // One read feeds both the picker and the newest test line.
-      expect(asked).toEqual([`/api/ai-test-insights/students/${ids.studentIds.asha}/tests`]);
+      expect(asked).toEqual([`/api/ai-test-insights/students/${ids.studentIds.esha}/tests`]);
     });
 
     test("shows a Program Manager the test picker read-only", async ({ pmPage }) => {
       await answerTestPicker(pmPage, 200, { tests: PICKER_TESTS });
-      await pmPage.goto(studentUrl("asha"));
+      await pmPage.goto(studentUrl("esha"));
 
       const checkboxes = pmPage.getByRole("region", { name: "AI Summary" }).getByRole("checkbox");
       await expect(checkboxes).toHaveCount(3);
@@ -459,6 +463,119 @@ test.describe("AI Test Insights tab", () => {
       await summary.getByRole("button", { name: "Retry" }).click();
       expect((await retried).status()).toBe(502);
       await expect(summary.getByRole("alert")).toContainText("Tests could not be loaded");
+    });
+
+    test.describe("Generate", () => {
+      const WAITING = "Waiting to start. This can take about 2 minutes if the server was asleep.";
+      const WRITING = "Writing the AI Summary. This usually takes about 4 minutes.";
+      const LEAVE = "You can leave this page and come back.";
+
+      /** Opens Bhavya's page as this persona with the picker answered, ready to Generate. */
+      async function openBhavya(page: Page) {
+        await answerTestPicker(page, 200, { tests: PICKER_TESTS });
+        await page.goto(studentUrl("bhavya"));
+        const summary = page.getByRole("region", { name: "AI Summary" });
+        await expect(summary.getByRole("checkbox", { name: /Mock Test 1/ })).toBeChecked();
+        return summary;
+      }
+
+      test("records one queued request per Student, whoever clicks, and every page shows it", async ({
+        page,
+        browser,
+      }) => {
+        // Three pages open before anyone clicks: the Teacher twice, and a
+        // second Teacher (seated at the CoE centre that lists Bhavya).
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        const samePage = await page.context().newPage();
+        const otherContext = await browser.newContext();
+        const otherPage = await otherContext.newPage();
+        await signInAs(otherPage, AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+        const summary = await openBhavya(page);
+        const sameSummary = await openBhavya(samePage);
+        const otherSummary = await openBhavya(otherPage);
+
+        await summary.getByRole("checkbox", { name: /Major Test 2/ }).check();
+        await summary.getByRole("checkbox", { name: /Full Syllabus Test 1/ }).check();
+        await summary.getByRole("button", { name: "Generate" }).click();
+        await expect(summary.getByText(WAITING)).toBeVisible();
+        await expect(summary.getByText(LEAVE)).toBeVisible();
+        await expect(summary.getByText(/^\d+ s elapsed$/)).toBeVisible();
+        await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+        for (const checkbox of await summary.getByRole("checkbox").all()) await expect(checkbox).toBeDisabled();
+
+        const nowSeconds = Date.now() / 1000;
+        const rows = await readInsightRequests(pool, ids.studentIds.bhavya);
+        expect(rows).toHaveLength(1);
+        const [row] = rows;
+        expect(row).toMatchObject({
+          state: "queued",
+          selectedTestIds: ["T9", "T7", "T4"],
+          notesSnapshot: [],
+          requestedByUserId: ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
+          schoolId: ids.schoolId,
+          programId: PROGRAM_IDS.COE,
+          academicYear: CURRENT_ACADEMIC_YEAR,
+        });
+        expect(row.requestKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+        for (const time of [row.requestedAt, row.insertedAt, row.updatedAt]) {
+          expect(Math.abs(time - nowSeconds)).toBeLessThan(60);
+        }
+
+        // A second Generate, from the same Teacher and from another, writes
+        // nothing and shows the request already waiting, with its tests.
+        await sameSummary.getByRole("button", { name: "Generate" }).click();
+        await expect(sameSummary.getByText(WAITING)).toBeVisible();
+        await otherSummary.getByRole("button", { name: "Generate" }).click();
+        await expect(otherSummary.getByText(WAITING)).toBeVisible();
+        for (const name of [/Mock Test 1/, /Full Syllabus Test 1/, /Major Test 2/]) {
+          await expect(otherSummary.getByRole("checkbox", { name })).toBeChecked();
+        }
+        expect(await readInsightRequests(pool, ids.studentIds.bhavya)).toHaveLength(1);
+
+        // The waiting state survives a reload.
+        await page.reload();
+        await expect(summary.getByText(WAITING)).toBeVisible();
+        await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+
+        // Once the generator claims it, a reload shows it being written.
+        await markInsightRequestRunning(pool, row.requestKey);
+        await page.reload();
+        await expect(summary.getByText(WRITING)).toBeVisible();
+        await expect(summary.getByText(LEAVE)).toBeVisible();
+        await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+
+        await otherContext.close();
+      });
+
+      test("shows no Generate to a Program Manager, Program Admin or Admin, and the create route refuses them", async ({
+        pmPage,
+        programAdminPage,
+        adminPage,
+      }) => {
+        for (const viewer of [pmPage, programAdminPage, adminPage]) {
+          await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+          await viewer.goto(studentUrl("esha"));
+          const summary = viewer.getByRole("region", { name: "AI Summary" });
+          await expect(summary.getByRole("checkbox", { name: /Mock Test 1/ })).toBeChecked();
+          await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+
+          const response = await viewer.request.post(`/api/ai-test-insights/students/${ids.studentIds.esha}/requests`, {
+            data: { selectedTestIds: ["T9"] },
+          });
+          expect(response.status()).toBe(403);
+        }
+        expect(await readInsightRequests(pool, ids.studentIds.esha)).toHaveLength(0);
+      });
+
+      test("shows a viewer a request in progress", async ({ pmPage }) => {
+        // Chirag's fixture request is running.
+        await answerTestPicker(pmPage, 200, { tests: PICKER_TESTS });
+        await pmPage.goto(studentUrl("chirag"));
+
+        const summary = pmPage.getByRole("region", { name: "AI Summary" });
+        await expect(summary.getByText(WRITING)).toBeVisible();
+        await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+      });
     });
 
     test("answers 404 from the test picker route to a Teacher of another School", async ({ page }) => {

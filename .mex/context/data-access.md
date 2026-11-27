@@ -1018,3 +1018,23 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   descending; the JS repeats the null-id drop, one-row-per-test and order so the result never
   depends on the warehouse's row order. Served by `GET /api/ai-test-insights/students/[studentId]/tests`;
   the Student page reads it once for the picker and the Student card's Newest test line.
+- **Insight Requests (#560):** the LMS **writes `ai_test_insight_requests` directly** (ADR 0015),
+  only through `src/lib/ai-test-insights-requests.ts` (server-only). Reads `latestRequest(studentId)`
+  (newest by `requested_at`, then `id`) and `requestByKey(studentId, requestKey)` (`WHERE
+  student_id = $1 AND request_key = $2`, so another Student's key is null) return one view shape,
+  `InsightRequestView` in `ai-test-insights-shared.ts`: `requestKey`, `state`, `outcomeCode`,
+  `selectedTestIds`, `requestedAt` / `finishedAt` (`to_char(… 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`, so
+  no layer reads the UTC `timestamp(0)` as local time) and `requestedByName` (the requester
+  `user`'s name, else their email). `createRequest` keeps the PRD's step order in comments: (1) a
+  `queued`/`running` request → `already_running` with it; (2, 3: later) same tests / not
+  configured; (4) `withTransaction` insert (later: close a stalled request first) — a `23505` on
+  `ati_requests_active_student_unique` returns `already_running` with the winner; (5: later)
+  deliver. The insert writes a server `randomUUID()` key, the Student context's `school.id` and
+  `programId` (the page's `centre` if it lists the Student, else the lowest centre),
+  `CURRENT_ACADEMIC_YEAR`, `requested_by_user_id`, `selected_test_ids` as sent (newest first,
+  `$7::jsonb`), `notes_snapshot '[]'`, `state 'queued'` and `requested_at` / `inserted_at` /
+  `updated_at` = `now() AT TIME ZONE 'UTC'`. The actor's User is `user_permission.user_id`, else
+  the lowest-id `user` with the same email (`resolveActorUserId`, as
+  `getAcademicMentorshipActorUserId`); neither → 409 `no_linked_user`. The Student page reads
+  `latestRequest` on the server (no "page data" route). E2E: `readInsightRequests` and
+  `markInsightRequestRunning` in `e2e/helpers/ai-test-insights-fixtures.ts`.

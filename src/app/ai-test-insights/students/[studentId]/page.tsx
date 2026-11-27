@@ -6,6 +6,7 @@ import AiTestInsightsPerformanceCard from "@/components/ai-test-insights/AiTestI
 import AiTestInsightsStudentSections from "@/components/ai-test-insights/AiTestInsightsStudentSections";
 import PageHeader from "@/components/PageHeader";
 import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
+import { latestRequest } from "@/lib/ai-test-insights-requests";
 import { readAiTestInsightsStudentCard } from "@/lib/ai-test-insights-student-card";
 import { authOptions } from "@/lib/auth";
 import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
@@ -17,6 +18,8 @@ import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 // The optional `centre` value only chooses the back link. Three cards: the
 // Student card, the performance card and the AI Summary card; the Student
 // card's newest test line and the AI Summary card's test picker share one read.
+// The Student's latest Insight Request is read here, on the server, so the AI
+// Summary card shows it on load and no "page data" route is needed.
 
 interface PageProps {
   params: Promise<{ studentId: string }>;
@@ -36,7 +39,11 @@ export default async function AiTestInsightsStudentPage({ params, searchParams }
   }
 
   const { student } = access;
-  const [card, session] = await Promise.all([readAiTestInsightsStudentCard(student), getServerSession(authOptions)]);
+  const [card, request, session] = await Promise.all([
+    readAiTestInsightsStudentCard(student),
+    latestRequest(student.studentId),
+    getServerSession(authOptions),
+  ]);
   if (!card) notFound();
 
   const backHref = access.centreNamedByPage
@@ -53,7 +60,13 @@ export default async function AiTestInsightsStudentPage({ params, searchParams }
         >
           <span aria-hidden="true">←</span> Back to AI Test Insights
         </Link>
-        <AiTestInsightsStudentSections student={card} studentId={student.studentId} canEdit={student.canEdit}>
+        <AiTestInsightsStudentSections
+          student={card}
+          studentId={student.studentId}
+          canEdit={student.canEdit}
+          centreId={access.centreNamedByPage ? student.centreId : null}
+          latestRequest={request}
+        >
           <AiTestInsightsPerformanceCard
             schoolUdise={student.school.udise || student.school.code}
             grade={student.grade}

@@ -116,3 +116,40 @@ export function formatInsightSessionDate(date: string | null): string {
     timeZone: "UTC",
   });
 }
+
+/** The states an Insight Request is stored in. */
+export type AiTestInsightsRequestState = "queued" | "running" | "completed" | "no_data" | "failed";
+
+/** One Insight Request, as every read of the Insight Request module returns it. */
+export interface InsightRequestView {
+  requestKey: string;
+  state: AiTestInsightsRequestState;
+  outcomeCode: string | null;
+  /** The ticked warehouse `test_id` values, newest first. */
+  selectedTestIds: string[];
+  /** UTC, ISO 8601 (`2026-11-27T05:30:00Z`). */
+  requestedAt: string;
+  requestedByName: string;
+  /** UTC, ISO 8601; null until the request ends. */
+  finishedAt: string | null;
+}
+
+/** A `queued` or `running` request holds the Student's one running slot. */
+export function isInsightRequestInProgress(request: InsightRequestView | null): boolean {
+  return request?.state === "queued" || request?.state === "running";
+}
+
+/** `POST /api/ai-test-insights/students/[studentId]/requests`: 201 created, 200 already running. */
+export interface AiTestInsightsCreateRequestResponse {
+  outcome: "created" | "already_running";
+  request: InsightRequestView;
+}
+
+/** The 409 code of a login whose permission links no User and no User has its email. */
+export const NO_LINKED_USER_CODE = "no_linked_user";
+
+/** The create route for a Student (`student.id`); a centre the page named carries over. */
+export function aiTestInsightsRequestsUrl(studentId: number, centreId?: number | null): string {
+  const base = `/api/ai-test-insights/students/${studentId}/requests`;
+  return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
+}

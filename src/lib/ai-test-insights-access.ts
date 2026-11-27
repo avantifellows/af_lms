@@ -138,12 +138,20 @@ export type AiTestInsightsStudentRefusal = {
   response: NextResponse;
 };
 
+/** Who is asking: the signed-in email and the `user` their permission links, if any. */
+export interface AiTestInsightsActor {
+  email: string;
+  /** `user_permission.user_id`; null when the permission links no User. */
+  linkedUserId: number | null;
+}
+
 export type AiTestInsightsStudentAccess =
   | {
       authorized: true;
       student: AiTestInsightsStudentContext;
       /** The `centre` the page named is the context's centre (a valid one). */
       centreNamedByPage: boolean;
+      actor: AiTestInsightsActor;
     }
   | AiTestInsightsStudentRefusal;
 
@@ -232,7 +240,7 @@ export async function resolveAiTestInsightsStudentAccess(
   const email = session.user?.email;
   const permission = email ? await getResolvedPermission(email) : null;
   const access = getFeatureAccess(permission, "ai_test_insights");
-  if (!permission || !access.canView) return refuseStudent(403);
+  if (!email || !permission || !access.canView) return refuseStudent(403);
   if (options.write && !access.canEdit) return refuseStudent(403);
 
   const rows = (await listedRowsOfStudent(studentId)).filter((row) => mayListCentre(permission, row));
@@ -254,5 +262,6 @@ export async function resolveAiTestInsightsStudentAccess(
       canEdit: access.canEdit,
     },
     centreNamedByPage: byPage !== undefined,
+    actor: { email, linkedUserId: permission.user_id != null ? Number(permission.user_id) : null },
   };
 }

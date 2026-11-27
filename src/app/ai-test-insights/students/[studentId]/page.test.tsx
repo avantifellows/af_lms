@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The AI Test Insights Student page (#557). Student access and the card read
 // have their own tests; here they are stubbed so the page's own behaviour
 // shows: sign-in redirect, not-found on any refusal, the card and the back link.
-const { mockResolveAccess, mockReadCard, mockGetServerSession, mockRedirect, mockNotFound } = vi.hoisted(() => ({
+const { mockResolveAccess, mockReadCard, mockLatestRequest, mockGetServerSession, mockRedirect, mockNotFound } = vi.hoisted(() => ({
   mockResolveAccess: vi.fn(),
   mockReadCard: vi.fn(),
+  mockLatestRequest: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
@@ -20,6 +21,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
 vi.mock("@/lib/ai-test-insights-access", () => ({ resolveAiTestInsightsStudentAccess: mockResolveAccess }));
 vi.mock("@/lib/ai-test-insights-student-card", () => ({ readAiTestInsightsStudentCard: mockReadCard }));
+vi.mock("@/lib/ai-test-insights-requests", () => ({ latestRequest: mockLatestRequest }));
 
 import AiTestInsightsStudentPage from "./page";
 
@@ -64,6 +66,7 @@ beforeEach(() => {
   mockGetServerSession.mockResolvedValue({ user: { email: "teacher@avantifellows.org" } });
   mockResolveAccess.mockResolvedValue({ authorized: true, student: CONTEXT, centreNamedByPage: false });
   mockReadCard.mockResolvedValue(CARD);
+  mockLatestRequest.mockResolvedValue(null);
   // The performance card fetches the Student Report; by default it never answers.
   vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
 });
@@ -177,6 +180,49 @@ describe("AI Test Insights Student page", () => {
     expect(within(card).getByRole("heading", { name: "Esha Ekka" })).toBeInTheDocument();
     expect(within(card).getByText("unavailable")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Performance" })).getByText("Loading test results…")).toBeInTheDocument();
+  });
+
+  it("shows the Student's latest request on the AI Summary card, read on the server", async () => {
+    mockLatestRequest.mockResolvedValue({
+      requestKey: "key-1",
+      state: "running",
+      outcomeCode: null,
+      selectedTestIds: ["T9"],
+      requestedAt: new Date(Date.now() - 65_000).toISOString(),
+      requestedByName: "Asha Teacher",
+      finishedAt: null,
+    });
+
+    await renderPage("1005");
+
+    expect(mockLatestRequest).toHaveBeenCalledWith(1005);
+    const summary = screen.getByRole("region", { name: "AI Summary" });
+    expect(within(summary).getByText("Writing the AI Summary. This usually takes about 4 minutes.")).toBeInTheDocument();
+    expect(within(summary).queryByRole("button", { name: "Generate" })).not.toBeInTheDocument();
+  });
+
+  it("asks for an AI Summary with the centre the page named", async () => {
+    mockResolveAccess.mockResolvedValue({ authorized: true, student: CONTEXT, centreNamedByPage: true });
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<unknown>>((input) => {
+      if (String(input).endsWith("/tests")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ tests: [{ id: "T9", name: "Mock Test 1", date: "2026-11-02", format: "mock_test" }] }),
+        });
+      }
+      return new Promise(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderPage("1005", { centre: "302" });
+    const summary = screen.getByRole("region", { name: "AI Summary" });
+    await within(summary).findByRole("checkbox", { name: /Mock Test 1/ });
+    within(summary).getByRole("button", { name: "Generate" }).click();
+
+    await vi.waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/ai-test-insights/students/1005/requests?centre=302", expect.anything()),
+    );
   });
 
   it("links back to the School page's AI Test Insights tab when no valid centre was named", async () => {
