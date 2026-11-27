@@ -18,8 +18,9 @@
 //
 // A request that ended `no_data` or `failed` (#561) shows why, in the plain
 // words of `@/lib/ai-test-insights-outcomes`, and for an editor "Try again",
-// which posts that request's tests again with no confirmation; the picker and
-// Generate stay usable beneath it.
+// which posts that request's tests again with `generateAgain: true` and no
+// confirmation, so it always makes one new request (never the `existing`
+// answer); the picker and Generate stay usable beneath it.
 //
 // Generate delivers the request to AI Mentorship Guide (#562). A request the
 // generator refused comes back `failed` (`enqueue_rejected`) and shows as any
@@ -572,7 +573,10 @@ export default function AiTestInsightsSummaryCard({
             request={{ ...request, state: request.state }}
             canEdit={canEdit}
             submitting={submitting}
-            onTryAgain={() => generate(request.selectedTestIds)}
+            // Always a new request: `generateAgain` stops the create route from
+            // answering with an earlier completed AI Summary of the same tests,
+            // and the new insert closes a stalled request in the same transaction.
+            onTryAgain={() => generate(request.selectedTestIds, true)}
           />
         )}
         <CardBody

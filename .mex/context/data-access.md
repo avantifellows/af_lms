@@ -1077,8 +1077,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `outcome_code`; the card turns it into words with `outcomeMessage(code)` in the client-safe
   `src/lib/ai-test-insights-outcomes.ts` (the PRD table; any other code, or none, reads "Something
   went wrong while writing the AI Summary."). "Try again" posts the ended request's
-  `selectedTestIds`, in their stored order, to the same create route, so it is an ordinary new
-  `queued` row; the ended row is never updated by the LMS. E2E `endInsightRequestWithoutSummary`
+  `selectedTestIds`, in their stored order, with `generateAgain: true` to the same create route,
+  so it is always an ordinary new `queued` row: never the `existing` answer, even when an earlier
+  completed request has the same tests (PR #573 review: after a failed "Generate again" it used
+  to show that earlier AI Summary and write nothing). A row that really ended is never updated
+  by the LMS; a stalled one (#566, still `queued`/`running` in the table) is closed `timed_out`
+  by that insert's transaction. E2E `endInsightRequestWithoutSummary`
   ends a row as AI Mentorship Guide does (`WHERE state IN ('queued', 'running')`, UTC
   `finished_at` / `updated_at`, `started_at` kept or set); `readInsightRequests` also returns
   `outcomeCode` and `finishedAt`.

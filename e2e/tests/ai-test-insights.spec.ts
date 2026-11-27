@@ -1167,6 +1167,46 @@ test.describe("AI Test Insights tab", () => {
           expect(rows[1].requestKey).not.toBe(earlier.requestKey);
         });
 
+        // Review finding 1 (#573): "Generate again" made a request that
+        // stalled, and an earlier AI Summary of the same tests exists. Try
+        // again closes the stalled request and makes a new one; it never
+        // answers with the earlier AI Summary.
+        test("Try again after a stalled Generate again closes it and makes one new request", async ({ page }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          const summary = await generateForEsha(page);
+          await expectFixedText(summary, POLLED);
+          // Made well before the stalled one, so the stalled one stays the latest.
+          await backdateInsightRequest(pool, (await readInsightRequests(pool, ids.studentIds.esha))[0].requestKey, 40);
+          const [earlier] = await readInsightRequests(pool, ids.studentIds.esha);
+
+          await steerFakeAiMentorshipGuide({ enqueue: "asleep" });
+          await summary.getByRole("button", { name: "Generate again" }).click();
+          await page.getByRole("dialog", { name: "Generate again?" }).getByRole("button", { name: "Generate again" }).click();
+          await expect(
+            summary.getByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
+          ).toBeVisible();
+          const stalled = (await readInsightRequests(pool, ids.studentIds.esha))[1];
+          await page.goto("about:blank");
+          await backdateInsightRequest(pool, stalled.requestKey, 20);
+          await answerTestPicker(page, 200, { tests: PICKER_TESTS });
+          await page.goto(studentUrl("esha"));
+          await expect(summary.getByText("The AI Summary took too long and was stopped.", { exact: true })).toBeVisible();
+
+          await steerFakeAiMentorshipGuide({ enqueue: "accept" });
+          await summary.getByRole("button", { name: "Try again" }).click();
+
+          await expect(
+            summary.getByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
+          ).toBeVisible();
+          await expect(summary.getByText("An AI Summary for these tests already exists", { exact: true })).toHaveCount(0);
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows).toHaveLength(3);
+          expect(rows[0]).toEqual(earlier);
+          expect(rows[1]).toMatchObject({ requestKey: stalled.requestKey, state: "failed", outcomeCode: "timed_out" });
+          expect(rows[2]).toMatchObject({ state: "queued", outcomeCode: null, selectedTestIds: ["T9"] });
+        });
+
         test("makes a new request for a different set of tests with no confirmation", async ({ page }) => {
           test.slow();
           await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });

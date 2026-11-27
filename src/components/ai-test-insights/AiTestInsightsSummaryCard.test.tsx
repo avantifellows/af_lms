@@ -433,13 +433,62 @@ describe("AiTestInsightsSummaryCard", () => {
       const [url, init] = fetchMock.mock.calls[0];
       expect(url).toBe(URL);
       expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toEqual({ selectedTestIds: ["T4", "T9"] });
+      expect(JSON.parse(String(init?.body))).toEqual({ selectedTestIds: ["T4", "T9"], generateAgain: true });
       expect(within(card()).queryByRole("dialog")).not.toBeInTheDocument();
       expect(
         await within(card()).findByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
       ).toBeInTheDocument();
       expect(within(card()).queryByText("The run was interrupted.")).not.toBeInTheDocument();
       expect(tryAgain()).not.toBeInTheDocument();
+    });
+
+    // Review finding 1 (#573): after "Generate again" failed or stalled, an
+    // earlier completed AI Summary of the same tests exists. Try again must
+    // still make a new request, never answer with that earlier one.
+    it("Try again makes a new request even when a completed AI Summary of the same tests exists", async () => {
+      const user = userEvent.setup();
+      const earlier = ended({ requestKey: "key-earlier", state: "completed", outcomeCode: null });
+      // Answers as the create route does: `existing` unless the body says generateAgain.
+      const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>((_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          body.generateAgain === true
+            ? {
+                ok: true,
+                status: 201,
+                json: () =>
+                  Promise.resolve({
+                    outcome: "created",
+                    request: ended({
+                      requestKey: "key-new",
+                      state: "queued",
+                      outcomeCode: null,
+                      requestedAt: new Date().toISOString(),
+                      finishedAt: null,
+                    }),
+                  }),
+              }
+            : { ok: true, status: 200, json: () => Promise.resolve({ outcome: "existing", request: earlier }) },
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      render(
+        <AiTestInsightsSummaryCard
+          tests={LOADED}
+          canEdit
+          onRetry={() => {}}
+          requestsUrl={URL}
+          initialRequest={ended({ outcomeCode: "timed_out" })}
+        />,
+      );
+
+      await user.click(tryAgain()!);
+
+      expect(
+        await within(card()).findByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
+      ).toBeInTheDocument();
+      expect(within(card()).queryByText("An AI Summary for these tests already exists")).not.toBeInTheDocument();
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     });
 
     it("keeps the reason and Try again when Try again cannot be recorded", async () => {
