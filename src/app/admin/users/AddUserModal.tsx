@@ -84,11 +84,11 @@ interface School {
 
 const labelClassName = "block text-sm font-medium text-gray-700";
 const ROLE_DESCRIPTIONS: Record<string, string> = {
-  program_manager: "Program Managers can conduct school visits, view all visits and the Visit Summary for centres where they hold a PM/SPM/PH seat, view assigned schools, and monitor scoped Holistic Mentorship progress",
-  program_admin: "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
-  teacher: "Teachers can view and manage students in their assigned schools",
+  program_manager: "Program Managers can conduct school visits, view all visits and the Visit Summary for centres where they hold a PM/SPM/PH seat, view assigned schools, monitor scoped Holistic Mentorship progress, and view AI Test Insights",
+  program_admin: "Program Admins can oversee scoped schools, manage their own school visits, monitor scoped Holistic Mentorship progress, and view AI Test Insights",
+  teacher: "Teachers can view and manage students in their assigned schools, and generate AI Test Insights for the JEE students of their physical centres",
   holistic_mentorship_admin: `Holistic Mentorship Admins can manage ${HOLISTIC_PROGRAM_LABELS_TEXT} mentorship`,
-  admin: "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only",
+  admin: "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only. AI Test Insights is view-only: only Teachers generate them",
   pmu_manager: "PMU Managers can view and manage JNV NVS students, view performance and view Test Attendance in their assigned JNV Schools",
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students, view performance and view Test Attendance in their one JNV School",
   blended_mentor: "Blended Learning Mentors can see and log Conversations with only their own Mentees. They have no other LMS access",

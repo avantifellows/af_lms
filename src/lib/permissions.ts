@@ -55,7 +55,8 @@ export type Feature =
   | "blended_learning"
   | "alumni"
   | "test_attendance"
-  | "exam_passwords";
+  | "exam_passwords"
+  | "ai_test_insights";
 
 // Feature access levels
 export type FeatureAccess = "none" | "view" | "edit";
@@ -93,12 +94,17 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   // schools' Students and a PM their assigned schools'. Programs confirmed
   // teachers and PMs must be able to see it; admins and program admins may.
   exam_passwords: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  // AI Test Insights (#550): physical centres only, so NVS-gated. Only a
+  // Teacher generates a Test Insight (edit; read_only downgrades to view);
+  // Program Managers, Program Admins and Admins read and never generate.
+  // List and Student scope come from src/lib/ai-test-insights-access.ts.
+  ai_test_insights: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
 const NVS_GATED_FEATURES: Set<Feature> = new Set([
   "visits", "curriculum", "pm_dashboard", "summary_stats", "quiz_sessions",
-  "teacher_feedback",
+  "teacher_feedback", "ai_test_insights",
 ]);
 
 export interface FeatureAccessResult {

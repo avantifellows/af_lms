@@ -168,6 +168,16 @@ vi.mock("@/components/holistic-mentorship/AdminSchoolRoster", () => ({
     </div>
   ),
 }));
+// The real AI Test Insights tab fetches its own list; its own tests cover it.
+vi.mock("@/components/ai-test-insights/AiTestInsightsTab", () => ({
+  __esModule: true,
+  default: ({ schoolCode, centreId }: { schoolCode: string; centreId?: number }) => (
+    <div data-testid="ai-test-insights-tab" data-school-code={schoolCode} data-centre-id={centreId ?? ""}>
+      AiTestInsightsTab
+    </div>
+  ),
+}));
+
 vi.mock("@/components/EditStudentModal", () => ({
   __esModule: true,
   default: () => null,
@@ -512,6 +522,88 @@ describe("CentrePage → RosterPage (centre scope)", () => {
 
     expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-test_attendance")).not.toBeInTheDocument();
+  });
+
+  // AI Test Insights tab (#550): every Centre page with a physical-centre
+  // Program. Real matrix and real program context.
+  describe("AI Test Insights tab", () => {
+    const tabOrder = () =>
+      screen
+        .getAllByTestId(/^tab-/)
+        .map((element) => element.dataset.testid!)
+        .filter((id) => !id.startsWith("tab-content-"))
+        .map((id) => id.slice("tab-".length));
+
+    async function setupViewer(role: string, centreOverrides = {}, permissionOverrides = {}) {
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+        "@/lib/permissions",
+      );
+      const seated = role === "teacher";
+      setupCentre(centreOverrides, {
+        email: `${role}@avantifellows.org`,
+        role,
+        ...(seated
+          ? {}
+          : { level: 3, school_codes: null, program_ids: [1, 64], scope: undefined }),
+        ...permissionOverrides,
+      });
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+      mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+    }
+
+    describe.each([
+      ["teacher", {}],
+      ["read_only teacher", { read_only: true }],
+      ["program_manager", {}],
+      ["program_admin", {}],
+      ["admin", {}],
+    ] as const)("%s", (label, permissionOverrides) => {
+      const role = label.replace("read_only ", "");
+
+      it("shows AI Test Insights after Teacher Feedback, for this centre", async () => {
+        await setupViewer(role, {}, permissionOverrides);
+
+        await renderCentre();
+
+        expect(screen.getByTestId("tab-ai_test_insights")).toHaveTextContent("AI Test Insights");
+        const order = tabOrder();
+        const before = order.includes("teacher_feedback") ? "teacher_feedback" : "quiz_sessions";
+        expect(order[order.indexOf(before) + 1]).toBe("ai_test_insights");
+        const tab = screen.getByTestId("ai-test-insights-tab");
+        expect(tab).toHaveAttribute("data-school-code", "70705");
+        expect(tab).toHaveAttribute("data-centre-id", "8");
+      });
+
+      it("is hidden on a Centre page with no Program", async () => {
+        await setupViewer(role, { program_id: null, program_name: null }, permissionOverrides);
+
+        await renderCentre();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      });
+
+      it("is hidden on a JNV NVS Centre page", async () => {
+        await setupViewer(role, { program_id: 64, program_name: "JNV NVS" }, {
+          ...permissionOverrides,
+          ...(role === "teacher" ? { program_ids: [1, 64], scope: undefined, level: 1 } : {}),
+        });
+
+        await renderCentre();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      });
+    });
+
+    it("is hidden for an NVS-only Teacher", async () => {
+      await setupViewer("teacher", {}, { program_ids: [64], scope: undefined });
+
+      await renderCentre();
+
+      expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+    });
   });
 
   it("sends the holistic-mentorship admin to their console instead of the centre", async () => {
@@ -1295,6 +1387,7 @@ describe("CentrePage → Centre switcher → where a switch lands", () => {
     ["curriculum", "/centre/30?tab=curriculum"],
     ["quiz_sessions", "/centre/30?tab=quiz_sessions"],
     ["teacher_feedback", "/centre/30?tab=teacher_feedback"],
+    ["ai_test_insights", "/centre/30?tab=ai_test_insights"],
     ["mentorship", "/centre/30?tab=mentorship"],
     ["visits", "/centre/30?tab=visits"],
   ])("carries the %s tab", async (tab, expected) => {

@@ -970,3 +970,14 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `20261126120504_create_ai_test_insight_tables`, read from `origin/feat/issue-880-ai-test-insights-tables`.
   It seeds no Insight Request or Session rows. Re-diff with `patterns/mirror-db-service-schema-in-e2e.md`
   whenever db-service PR #884 changes.
+- **Listed Students (#555):** the one rule for "which Students AI Test Insights is for" is
+  `listedStudentRowsSql(firstParam)` in `src/lib/ai-test-insights-students.ts`, a subquery of
+  `(student_id, user_id, centre_id, program_id, grade)` rows: `centre_students` for
+  `CURRENT_ACADEMIC_YEAR`, Grade 11 or 12, an active centre whose Program is not JNV NVS,
+  `student.status IS DISTINCT FROM 'dropout'`, and `LOWER(BTRIM(student.stream))` in
+  `ENGINEERING_STREAM_VALUES` (`engineering`, `engg`, `pcm`; exported from
+  `src/lib/student-support-rules.ts`, the exam-stream normaliser). A blank stream is **not**
+  listed, unlike the Student Report's `studentExamStream`, which defaults blank to engineering.
+  A Student on two centres' rosters gives two rows: `listAiTestInsightsStudents(centreIds)` groups
+  by Student (lowest Grade if two), orders by Grade, then name, and reads no `ai_test_insight_*`
+  table yet. Later slices reuse the same subquery for Student access.

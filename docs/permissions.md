@@ -64,6 +64,7 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   test_attendance: { teacher: "none", program_manager: "none", program_admin: "none", admin: "view" },
   exam_passwords:  { teacher: "view", program_manager: "view", program_admin: "view", admin: "view" },
+  ai_test_insights: { teacher: "edit", program_manager: "view", program_admin: "view", admin: "view" },
 };
 ```
 
@@ -83,6 +84,7 @@ Certain features are restricted to users who have CoE or Nodal program access. U
 - mentorship
 - pm_dashboard
 - summary_stats
+- ai_test_insights
 
 ### The Matrix Lives in Code, Not the Database
 
@@ -201,6 +203,7 @@ page and API denies them (`getUserPermission` returns `null` for them).
 | pm_dashboard | none | view | view | view |
 | exam_passwords | view | view | view | view |
 | test_attendance | none | none | none | view |
+| ai_test_insights | edit | view | view | view |
 
 `test_attendance` is `view` only for `admin` here; the PMU roles (`pmu_manager`, `pmu_govt_school_user`) are the others who get it (see "PMU roles" above).
 
@@ -209,6 +212,27 @@ Edit Student Exams tab. It sits on top of the tab's own gate (edit rights on the
 school-scoped, never a JNV NVS Student), so a teacher sees their schools' Students and a PM
 their assigned schools'. Every reveal is logged to `lms_exam_password_reveals`. Every other
 role is `none`.
+
+### AI Test Insights (#550, physical centres only)
+
+`ai_test_insights` is `edit` for Teacher (only a Teacher generates a Test Insight; a
+`read_only` Teacher gets `view`), `view` for Program Manager, Program Admin and Admin, and
+`none` for every other role (both PMU roles, the Holistic Mentorship admin, the Blended
+Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV NVS gets
+`none`.
+
+- **Tab:** "AI Test Insights", right after Teacher Feedback, on a Centre page whose centre has
+  a physical-centre Program (every Program but JNV NVS), or a School page whose School has at
+  least one such active centre. A School with no active centre never shows it, for any role.
+  The tab loads its own list; the roster page runs no AI Test Insights query.
+- **List route:** `GET /api/school/[udise]/ai-test-insights` (optional `centre_id`) refuses,
+  before any Student read: 401 no session, 404 School not found, 403 no School access, 403 no
+  `ai_test_insights` view, 403 no physical-centre scope for this user.
+- **List scope** (`src/lib/ai-test-insights-access.ts`, the only place that decides it): Admin
+  gets every active physical centre of the School; a centre-seated user only their seat centres
+  and is refused on the School route without a centre; other users the School's active physical
+  centres whose Program is in their program context. A named centre must be one of those, at that
+  School, and pass `canViewCentre`.
 
 ### NVS-Only Users
 
@@ -223,6 +247,7 @@ role is `none`.
 | pm_dashboard | none | none | none | view |
 | exam_passwords | view | view | view | view |
 | test_attendance | none | none | none | view |
+| ai_test_insights | none | none | none | view |
 
 NVS-only users can edit students and view performance. `exam_passwords` and `test_attendance` are not NVS-gated, so the matrix value applies (the Exams tab itself never shows a JNV NVS Student's password). Test Attendance for NVS staff comes through the PMU roles, not Teacher / Program Manager / Program Admin (ADR 0007). The other features are gated off by the NVS restriction.
 
