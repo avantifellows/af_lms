@@ -907,20 +907,17 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([SUMMARY_URL]);
   });
 
-  // Review finding 2 (#573): the PDF route answers JSON when it cannot
-  // redirect (404, 502, 503). A click asks the route first without following
-  // the redirect, so a failure stays on the Student page as a message with
-  // Retry; a redirect is followed by the browser, which downloads the file.
+  // Review findings on #573: the PDF route answers JSON when it cannot sign
+  // (404, 502, 503), so a click asks it first and a failure stays on the
+  // Student page as a message with Retry (first review, finding 2). The card
+  // asks for JSON, and the route answers the presigned URL, so a download
+  // makes one call to the route (second review, finding 5).
   describe("Download PDF click", () => {
     const assign = vi.fn();
-    const SUMMARY_OK = { ok: true, status: 200, type: "basic", json: () => Promise.resolve({ markdown: MARKDOWN }) };
-    const REDIRECT = { ok: false, status: 0, type: "opaqueredirect", json: () => Promise.reject(new SyntaxError("opaque")) };
-    const failure = (status: number, body: unknown = {}) => ({
-      ok: false,
-      status,
-      type: "basic",
-      json: () => Promise.resolve(body),
-    });
+    const SIGNED_URL = "https://store.example.test/acad-mentorship/staging/items/41/output/report.pdf?X-Amz-Expires=60";
+    const SUMMARY_OK = { ok: true, status: 200, json: () => Promise.resolve({ markdown: MARKDOWN }) };
+    const SIGNED = { ok: true, status: 200, json: () => Promise.resolve({ url: SIGNED_URL }) };
+    const failure = (status: number, body: unknown = {}) => ({ ok: false, status, json: () => Promise.resolve(body) });
 
     /** The summary read answers the text; each PDF ask answers the next of these (`null`: a network error). */
     function answerPdf(...answers: Array<unknown>) {
@@ -940,17 +937,18 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
       assign.mockReset();
     });
 
-    it("asks the PDF route without following its redirect, then lets the browser download the file", async () => {
+    it("asks the PDF route once for JSON, then goes straight to the signed file", async () => {
       const user = userEvent.setup();
-      const fetchMock = answerPdf(REDIRECT);
+      const fetchMock = answerPdf(SIGNED);
       renderWith(completed());
       await summaryText();
 
       await user.click(pdfLink());
 
-      await waitFor(() => expect(assign).toHaveBeenCalledWith(PDF_URL));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith(SIGNED_URL));
+      expect(assign).toHaveBeenCalledTimes(1);
       expect(pdfAsks(fetchMock)).toHaveLength(1);
-      expect(pdfAsks(fetchMock)[0][1]).toMatchObject({ redirect: "manual" });
+      expect(new Headers(pdfAsks(fetchMock)[0][1]?.headers).get("Accept")).toBe("application/json");
       expect(within(card()).queryByRole("alert")).not.toBeInTheDocument();
     });
 
@@ -958,6 +956,7 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
       ["503 not_configured", failure(503, { code: "not_configured" }), "The PDF can't be downloaded here: AI Summary reading is not set up in this environment."],
       ["404", failure(404, { error: "AI Summary PDF not found" }), "The PDF of this AI Summary could not be found."],
       ["502", failure(502, { error: "AI Summary PDF could not be read" }), "The PDF could not be downloaded. Please try again."],
+      ["a 200 with no URL", { ok: true, status: 200, json: () => Promise.resolve({}) }, "The PDF could not be downloaded. Please try again."],
       ["a network error", null, "The PDF could not be downloaded. Please try again."],
     ] as const)("stays on the page after %s and says so, with Retry", async (_label, answer, message) => {
       const user = userEvent.setup();
@@ -976,9 +975,9 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
       expect(pdfLink()).toHaveAttribute("href", PDF_URL);
     });
 
-    it("Retry asks again and downloads once the route redirects", async () => {
+    it("Retry asks again and downloads once the route signs", async () => {
       const user = userEvent.setup();
-      const fetchMock = answerPdf(failure(502), REDIRECT);
+      const fetchMock = answerPdf(failure(502), SIGNED);
       renderWith(completed());
       await summaryText();
 
@@ -986,13 +985,13 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
       const alert = await within(card()).findByRole("alert");
       await user.click(within(alert).getByRole("button", { name: "Retry" }));
 
-      await waitFor(() => expect(assign).toHaveBeenCalledWith(PDF_URL));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith(SIGNED_URL));
       expect(pdfAsks(fetchMock)).toHaveLength(2);
       expect(within(card()).queryByRole("alert")).not.toBeInTheDocument();
     });
 
-    it("leaves a click that opens a new tab to the browser", async () => {
-      answerPdf(REDIRECT);
+    it("leaves a click that opens a new tab to the browser, which the route answers with its redirect", async () => {
+      const fetchMock = answerPdf(SIGNED);
       renderWith(completed());
       await summaryText();
 
@@ -1000,6 +999,7 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
       pdfLink().dispatchEvent(event);
 
       expect(event.defaultPrevented).toBe(false);
+      expect(pdfAsks(fetchMock)).toHaveLength(0);
       expect(assign).not.toHaveBeenCalled();
     });
   });

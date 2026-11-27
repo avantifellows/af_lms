@@ -16,7 +16,11 @@ import { NOT_CONFIGURED_CODE, type InsightRequestView } from "@/lib/ai-test-insi
 export const NO_STORE = { "Cache-Control": "no-store" };
 
 type InsightRequestRouteContext = { params: Promise<{ studentId: string; requestKey: string }> };
-type InsightRequestHandler = (found: InsightRequestView, student: AiTestInsightsStudentContext) => Promise<Response>;
+type InsightRequestHandler = (
+  found: InsightRequestView,
+  student: AiTestInsightsStudentContext,
+  request: NextRequest,
+) => Promise<Response>;
 type InsightRequestRoute = (request: NextRequest, context: InsightRequestRouteContext) => Promise<Response>;
 
 /** The Student access refusal, or the Student and their request (null when the key is not theirs). */
@@ -38,7 +42,7 @@ export function withInsightRequest(notFoundError: string, handle: InsightRequest
     const opened = await openInsightRequest(request, params);
     if (opened instanceof Response) return opened;
     if (!opened.found) return NextResponse.json({ error: notFoundError }, { status: 404 });
-    return handle(opened.found, opened.student);
+    return handle(opened.found, opened.student, request);
   };
 }
 
@@ -54,7 +58,7 @@ export function withCompletedInsightRequest(notFoundError: string, handle: Insig
     if (!opened.found || opened.found.state !== "completed") {
       return NextResponse.json({ error: notFoundError }, { status: 404, headers: NO_STORE });
     }
-    return handle(opened.found, opened.student);
+    return handle(opened.found, opened.student, request);
   };
 }
 

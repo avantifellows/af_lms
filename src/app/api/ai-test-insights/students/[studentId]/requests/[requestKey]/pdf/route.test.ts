@@ -181,9 +181,11 @@ beforeEach(() => {
   });
 });
 
-async function get(studentId: string, requestKey: string) {
+async function get(studentId: string, requestKey: string, headers: Record<string, string> = {}) {
   return GET(
-    new NextRequest(`http://localhost/api/ai-test-insights/students/${studentId}/requests/${requestKey}/pdf`),
+    new NextRequest(`http://localhost/api/ai-test-insights/students/${studentId}/requests/${requestKey}/pdf`, {
+      headers,
+    }),
     { params: Promise.resolve({ studentId, requestKey }) },
   );
 }
@@ -216,6 +218,31 @@ describe("GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]/p
     expect(location.searchParams.get("X-Amz-Credential")).toMatch(/^AKIA-READ-ONLY-E2E\/\d{8}\/ap-south-1\/s3\//);
     // The browser fetches the file from the store; the route sends no store call.
     expect(s3.calls()).toHaveLength(0);
+  });
+
+  // Second review finding 5 (#573): the card asks for JSON and goes to the
+  // file itself, so a download makes one call to this route. A plain browser
+  // visit (a new tab) still gets the 302.
+  it("answers the card's JSON ask with 200 and the same presigned URL, not a redirect", async () => {
+    const response = await get("1001", KEY, { Accept: "application/json" });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Location")).toBeNull();
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const { url } = (await response.json()) as { url: string };
+    const location = new URL(url);
+    expect(`${location.origin}${location.pathname}`).toBe(
+      "https://af-ai-mentorship-artifacts.s3.ap-south-1.amazonaws.com/acad-mentorship/staging/items/41/output/report.pdf",
+    );
+    expect(location.searchParams.get("X-Amz-Expires")).toBe("60");
+    expect(location.searchParams.get("response-content-disposition")).toMatch(/^attachment; filename="ai-summary-1001-/);
+    expect(s3.calls()).toHaveLength(0);
+  });
+
+  it("answers a browser visit that accepts HTML with the 302", async () => {
+    const response = await get("1001", KEY, { Accept: "text/html,application/xhtml+xml,*/*;q=0.8" });
+
+    expect(response.status).toBe(302);
   });
 
   it("is never stored by a browser or a proxy", async () => {

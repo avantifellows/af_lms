@@ -70,6 +70,15 @@ export interface AiTestInsightsTest {
   format: AiTestInsightsTestFormat;
 }
 
+/**
+ * `GET …/requests/[requestKey]/pdf` asked with `Accept: application/json`
+ * (the card's Download PDF): the 60-second presigned URL of the PDF, which
+ * the browser then opens as a download.
+ */
+export interface AiTestInsightsPdfResponse {
+  url: string;
+}
+
 /** `GET /api/ai-test-insights/students/[studentId]/tests`: newest first. */
 export interface AiTestInsightsTestsResponse {
   tests: AiTestInsightsTest[];

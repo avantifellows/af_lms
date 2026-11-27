@@ -46,8 +46,8 @@
 // It also offers "Download PDF" (#565): a link to the PDF route, which
 // answers with the PDF the generator made. The link stays whether the text
 // loads, is loading or failed. Viewers download it too. A click asks the
-// route first, so a route that cannot redirect (404, 502, 503) leaves the
-// Student page in place with a message and Retry.
+// route for the file's signed URL first, so a route that cannot sign (404,
+// 502, 503) leaves the Student page in place with a message and Retry.
 //
 // The same tests again (#567): while the ticked tests are the shown
 // completed request's tests, Generate reads "Generate again" and opens a
@@ -75,6 +75,7 @@ import {
   NO_LINKED_USER_CODE,
   NOT_CONFIGURED_CODE,
   type AiTestInsightsCreateRequestResponse,
+  type AiTestInsightsPdfResponse,
   type AiTestInsightsRequestStatusResponse,
   type AiTestInsightsSummaryResponse,
   type AiTestInsightsTest,
@@ -196,16 +197,17 @@ const PDF_NOT_FOUND_MESSAGE = "The PDF of this AI Summary could not be found.";
 const PDF_FAILED_MESSAGE = "The PDF could not be downloaded. Please try again.";
 
 /**
- * Asks the PDF route without following its redirect. A redirect (an opaque
- * one, as `redirect: "manual"` gives it) means the PDF is there; otherwise
- * the message to show: the route answers JSON for 404 (no PDF), 503 (reading
- * not set up) and 502 (unreadable).
+ * Asks the PDF route for JSON: on success it answers the 60-second presigned
+ * URL of the file. Otherwise the message to show: the route answers 404 (no
+ * PDF), 503 (reading not set up) and 502 (unreadable).
  */
-async function askForPdf(url: string): Promise<{ ok: true } | { ok: false; message: string }> {
+async function askForPdf(url: string): Promise<{ ok: true; fileUrl: string } | { ok: false; message: string }> {
   try {
-    const response = await fetch(url, { redirect: "manual", cache: "no-store" });
-    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) return { ok: true };
-    const body = (await response.json().catch(() => null)) as { code?: string } | null;
+    const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+    const body = (await response.json().catch(() => null)) as
+      | (Partial<AiTestInsightsPdfResponse> & { code?: string })
+      | null;
+    if (response.ok && typeof body?.url === "string") return { ok: true, fileUrl: body.url };
     if (response.status === 503 && body?.code === NOT_CONFIGURED_CODE) return { ok: false, message: PDF_NOT_CONFIGURED_MESSAGE };
     if (response.status === 404) return { ok: false, message: PDF_NOT_FOUND_MESSAGE };
   } catch {
@@ -215,14 +217,13 @@ async function askForPdf(url: string): Promise<{ ok: true } | { ok: false; messa
 }
 
 /**
- * "Download PDF" (#565). A plain click asks the route first, so an answer
- * that is not a redirect keeps the Student page and shows a message with
- * Retry (PR #573 review: the bare link replaced the page with the JSON). On a
- * redirect the browser goes to the route itself, which redirects again to a
- * fresh 60-second URL that the store answers as a download (named
- * `ai-summary-<student.id>-<date>.pdf`), so the page stays. Each ask signs a
- * URL; nothing is written. A click that opens a new tab or window is left to
- * the browser.
+ * "Download PDF" (#565). A plain click asks the route for the file's
+ * presigned URL and sends the browser there; the store answers it as a
+ * download (named `ai-summary-<student.id>-<date>.pdf`), so the page stays.
+ * Any other answer keeps the Student page and shows a message with Retry
+ * (PR #573 review: the bare link replaced the page with the JSON). One call
+ * to the route per click; nothing is written. A click that opens a new tab or
+ * window is left to the browser, and the route answers it with its 302.
  */
 function DownloadPdf({ url }: { url: string }) {
   const [asking, setAsking] = useState(false);
@@ -234,7 +235,7 @@ function DownloadPdf({ url }: { url: string }) {
     setError(null);
     const result = await askForPdf(url);
     setAsking(false);
-    if (result.ok) window.location.assign(url);
+    if (result.ok) window.location.assign(result.fileUrl);
     else setError(result.message);
   }
 
