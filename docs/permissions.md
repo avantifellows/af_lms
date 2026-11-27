@@ -251,7 +251,7 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
   viewer (Program Manager, Program Admin, Admin, `read_only` Teacher) sees the picker read-only and
   only a Teacher with `edit` can tick tests.
 - **Generate route** `POST /api/ai-test-insights/students/[studentId]/requests` (#560) is one
-  of the three writes (with the two Session Notes writes below). Only a Teacher with `edit` access (a Teacher who is not `read_only`) whose School
+  of the four writes (with the three Session Notes writes below). Only a Teacher with `edit` access (a Teacher who is not `read_only`) whose School
   scope lets them open the Student can call it: it runs Student access as a write, so a Program
   Manager, Program Admin, Admin or `read_only` Teacher gets 403 before any Student is read, and a
   Teacher who may not open the Student gets 404. Then 422 for a bad body, and 409 when the login
@@ -282,6 +282,16 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
   submits only it (409 `stale` otherwise). Any Teacher who may open the Student may write notes
   for them (no mentor-mentee mapping). The form tells the Teacher that submitted notes are visible
   to staff with access to the School and are used for the next AI Summary.
+- **Editing submitted Session Notes** (#578): only the session's author. The edit route
+  `PATCH /api/ai-test-insights/students/[studentId]/sessions/[sessionId]` opens like the submit
+  (401, 422 bad Student id, 403 no view, 403 access not `edit` before any Student read, 404 a
+  Student the Teacher may not open, 422 body under the final rule, 409 `no_linked_user`); then 404
+  when the id names no submitted session of this Student (a draft's id, another Student's session
+  or a malformed id), 403 when the caller is not its author (another Teacher, even of the same
+  School), and 409 `stale` for an older copy. Program Managers, Program Admins, Admins and
+  `read_only` Teachers never edit; a Teacher who may no longer open the Student gets 404 even for
+  their own session. Only the author sees Edit in History. Each saved change writes one
+  `submitted_edited` audit row (who, when, the new revision; no note text).
 
 ### NVS-Only Users
 

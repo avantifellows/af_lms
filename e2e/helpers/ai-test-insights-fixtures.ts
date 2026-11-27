@@ -722,6 +722,74 @@ async function insertInsightSessions(pool: Pool, { studentIds, schoolId, authorU
   }
 }
 
+/**
+ * Adds one `completed` Insight Request of a Student for a spec (#578), with
+ * its own Item, asked for by `requestedByUserId` at `requestedAt` (UTC) for
+ * the test `T9`, on the main School's CoE Program this academic year. Its
+ * key is not the fixture's, so {@link removeInsightRequestsMadeBySpecs}
+ * removes it (after the sessions that record it). Returns its `id`.
+ */
+export async function addCompletedInsightRequest(
+  pool: Pool,
+  request: { requestKey: string; studentId: number; schoolId: number; requestedByUserId: number; requestedAt: string },
+): Promise<number> {
+  if (request.requestKey.startsWith(REQUEST_KEY_PREFIX)) throw new Error("AI Test Insights fixture: a spec's key must not be the fixture's");
+  const itemId = await insertCompletedRequestItem(pool, PROGRAM_IDS.COE, request.studentId);
+  return oneId(
+    pool,
+    `INSERT INTO ai_test_insight_requests
+       (request_key, student_id, school_id, program_id, academic_year, requested_by_user_id,
+        selected_test_ids, state, inference_item_id, requested_at, started_at, finished_at)
+     VALUES ($1, $2, $3, $4, $5, $6, '["T9"]'::jsonb, 'completed', $7,
+             $8::timestamp, $8::timestamp, $8::timestamp + interval '4 minutes')
+     RETURNING id`,
+    [
+      request.requestKey,
+      request.studentId,
+      request.schoolId,
+      PROGRAM_IDS.COE,
+      CURRENT_ACADEMIC_YEAR,
+      request.requestedByUserId,
+      itemId,
+      request.requestedAt,
+    ],
+    "spec's completed request",
+  );
+}
+
+/**
+ * Adds one `submitted` Insight Session of a Student for a spec (#578), by
+ * `authorUserId`, at revision 2, on the main School's CoE Program this
+ * academic year, with no Other notes and no linked request, written straight
+ * to the table (so its author may be one who cannot open the Student). Its
+ * Other notes are not the fixture's, so {@link removeInsightSessionsMadeBySpecs}
+ * removes it. Returns its `id`.
+ */
+export async function addSubmittedInsightSession(
+  pool: Pool,
+  session: { studentId: number; schoolId: number; authorUserId: number; sessionDate: string; areasOfConcern: string; immediateActions: string },
+): Promise<number> {
+  return oneId(
+    pool,
+    `INSERT INTO ai_test_insight_sessions
+       (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
+        areas_of_concern, immediate_actions, submitted_at, revision)
+     VALUES ($1, $2, $3, $4, $5, 'submitted', $6::date, $7, $8, ${NOW}, 2)
+     RETURNING id`,
+    [
+      session.studentId,
+      session.schoolId,
+      PROGRAM_IDS.COE,
+      CURRENT_ACADEMIC_YEAR,
+      session.authorUserId,
+      session.sessionDate,
+      session.areasOfConcern,
+      session.immediateActions,
+    ],
+    "spec's submitted session",
+  );
+}
+
 /** An Insight Session row as stored, with its times as seconds since the epoch, read as UTC. */
 export interface StoredInsightSession {
   id: number;

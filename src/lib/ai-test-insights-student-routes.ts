@@ -1,6 +1,7 @@
 // AI Test Insights (#550, #551): the opening every route of one Student
 // shares (`/api/ai-test-insights/students/[studentId]/…`: Generate's create
-// route and the Session Notes routes). Server-only.
+// route and the Session Notes routes, the edit route of one session
+// `…/sessions/[sessionId]` included). Server-only.
 //
 // Student access gates first, with the page's `centre`: 401 no session, 422
 // bad id, 403 no `ai_test_insights` view, (a write: 403 access not `edit`,
@@ -19,25 +20,34 @@ import {
 } from "@/lib/ai-test-insights-access";
 import { errorName } from "@/lib/ai-test-insights-env";
 import type { SessionNotesRefusal } from "@/lib/ai-test-insights-session-notes";
-import { SESSION_NOTES_STALE_CODE, type SessionNotesStaleResponse } from "@/lib/ai-test-insights-session-notes-rules";
+import {
+  SESSION_NOTES_STALE_CODE,
+  SESSION_NOTES_STALE_MESSAGE,
+  type SessionNotesStaleResponse,
+} from "@/lib/ai-test-insights-session-notes-rules";
 import { NO_LINKED_USER_CODE } from "@/lib/ai-test-insights-shared";
 
-type StudentRouteContext = { params: Promise<{ studentId: string }> };
-type StudentRoute = (request: NextRequest, context: StudentRouteContext) => Promise<Response>;
+/** A route's path values: the Student's id, and any the route's own path adds (as `sessionId`). */
+type StudentRouteParams = { studentId: string };
+type StudentRouteContext<P extends StudentRouteParams> = { params: Promise<P> };
+type StudentRoute<P extends StudentRouteParams> = (request: NextRequest, context: StudentRouteContext<P>) => Promise<Response>;
 
 /** What a route logs, and answers, when the database fails it. */
-interface RouteFailure {
+interface RouteFailure<P extends StudentRouteParams> {
   /** The start of the log line, as `AI Test Insights request create failed`. */
   log: string;
   /** The 500 answer's `error`. */
   message: string;
   headers?: HeadersInit;
+  /** More ids for the log line, as `session=60`; never a body value. */
+  logIds?: (params: P) => string;
 }
 
-/** The Student, as access resolved them, and who is asking. */
-interface OpenedStudent {
+/** The Student, as access resolved them, who is asking, and the route's path values. */
+interface OpenedStudent<P extends StudentRouteParams> {
   student: AiTestInsightsStudentContext;
   actor: AiTestInsightsActor;
+  params: P;
 }
 
 /** A write body: its value, or what is wrong with it (no value is echoed). */
@@ -47,23 +57,24 @@ export type ParsedBody<B> = { ok: true; value: B } | { ok: false; field?: string
  * A route of one Student: Student access (a write also needs `edit`), then
  * `handle`, whose database errors answer 500 with `failure`.
  */
-export function withAiTestInsightsStudent(
-  failure: RouteFailure,
-  handle: (opened: OpenedStudent, request: NextRequest) => Promise<Response>,
+export function withAiTestInsightsStudent<P extends StudentRouteParams = StudentRouteParams>(
+  failure: RouteFailure<P>,
+  handle: (opened: OpenedStudent<P>, request: NextRequest) => Promise<Response>,
   options: { write?: boolean } = {},
-): StudentRoute {
-  return async (request, { params }) => {
-    const { studentId } = await params;
-    const access = await resolveAiTestInsightsStudentAccess(studentId, {
+): StudentRoute<P> {
+  return async (request, context) => {
+    const params = await context.params;
+    const access = await resolveAiTestInsightsStudentAccess(params.studentId, {
       centre: request.nextUrl.searchParams.get("centre"),
       write: options.write,
     });
     if (!access.authorized) return access.response;
 
     try {
-      return await handle({ student: access.student, actor: access.actor }, request);
+      return await handle({ student: access.student, actor: access.actor, params }, request);
     } catch (error) {
-      console.error(`${failure.log}: student=${access.student.studentId} status=500 error=${errorName(error)}`);
+      const ids = failure.logIds ? ` ${failure.logIds(params)}` : "";
+      console.error(`${failure.log}: student=${access.student.studentId}${ids} status=500 error=${errorName(error)}`);
       return NextResponse.json({ error: failure.message }, { status: 500, headers: failure.headers });
     }
   };
@@ -75,12 +86,12 @@ export function withAiTestInsightsStudent(
  * the linked User, else the User with the same email; none is 409
  * `no_linked_user`), then `handle`.
  */
-export function withAiTestInsightsStudentWrite<B>(
-  failure: RouteFailure,
+export function withAiTestInsightsStudentWrite<B, P extends StudentRouteParams = StudentRouteParams>(
+  failure: RouteFailure<P>,
   parseBody: (raw: unknown) => ParsedBody<B>,
-  handle: (opened: OpenedStudent & { body: B; actorUserId: number }) => Promise<Response>,
-): StudentRoute {
-  return withAiTestInsightsStudent(
+  handle: (opened: OpenedStudent<P> & { body: B; actorUserId: number }) => Promise<Response>,
+): StudentRoute<P> {
+  return withAiTestInsightsStudent<P>(
     failure,
     async (opened, request) => {
       const parsed = parseBody(await request.json().catch(() => null));
@@ -113,7 +124,7 @@ export function sessionNotesRefusalResponse(refusal: SessionNotesRefusal): Respo
     return NextResponse.json({ error: refusal.error, field: refusal.field }, { status: 422 });
   }
   const stale: SessionNotesStaleResponse = {
-    error: "These notes were changed in another tab.",
+    error: SESSION_NOTES_STALE_MESSAGE,
     code: SESSION_NOTES_STALE_CODE,
     currentRevision: refusal.currentRevision,
   };

@@ -15,6 +15,8 @@ import {
   AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
+  addCompletedInsightRequest,
+  addSubmittedInsightSession,
   backdateInsightRequest,
   backdateInsightRequestUpdate,
   endInsightRequestWithoutSummary,
@@ -1936,6 +1938,267 @@ test.describe("AI Test Insights tab", () => {
           }
           expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([draft]);
           expect(await readSessionNoteAudits(pool, ids.studentIds.bhavya)).toEqual([]);
+        });
+      });
+      // Edit (#578): only the author corrects submitted notes, each saved
+      // change is audited, and an older copy overwrites nothing. Bhavya has no
+      // seeded row; each test submits or adds its own.
+      test.describe("Edit", () => {
+        const EDITED_CONCERN = "Loses marks on rolling motion [e2e-578]";
+        const EDITED_OTHER = "Parents called on Friday [e2e-578]";
+        const SPEC_REQUEST = "spec-578-bhavya-completed";
+        const sessionRoute = (key: string, sessionId: number) => `${sessionsRoute(key)}/${sessionId}`;
+        const editBody = (overrides: Record<string, unknown> = {}) => ({
+          sessionDate: "2026-11-20",
+          areasOfConcern: CONCERN,
+          immediateActions: ACTIONS,
+          otherNotes: null,
+          expectedRevision: 2,
+          ...overrides,
+        });
+        const historyOf = (page: Page) => page.getByRole("region", { name: "History" });
+        const cardValue = (page: Page, label: string) =>
+          page.getByRole("region", { name: "Student" }).locator(`dt:text-is('${label}') + dd`);
+        /** A date as the Student page writes it (en-GB short), from the test's own clock. */
+        const todayShown = () =>
+          new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(
+            new Date(),
+          );
+        const teacherUserId = () => ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email];
+
+        /** Saves a draft for the Student and submits it as `page`'s Teacher: the session at revision 2. */
+        async function submitFor(page: Page, key: string, openRequestKey: string | null = null): Promise<number> {
+          expect((await page.request.put(draftRoute(key), { data: draftBody() })).status()).toBe(200);
+          const submitted = await page.request.post(sessionsRoute(key), {
+            data: submitBody({ expectedRevision: 1, openRequestKey }),
+          });
+          expect(submitted.status()).toBe(201);
+          return ((await submitted.json()) as { sessionId: number }).sessionId;
+        }
+
+        // Sessions first: a submitted session holds its linked request.
+        test.afterEach(async () => {
+          await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.bhavya, ids.studentIds.divya]);
+          await removeInsightRequestsMadeBySpecs(pool, ids.studentIds.bhavya);
+        });
+
+        test("shows Edit only to the author; a saved change is audited once and keeps submitted_at and the link", async ({
+          browser,
+          pmPage,
+          programAdminPage,
+          adminPage,
+        }) => {
+          // 05:00 UTC is 10:30 on 14 Nov 2026 in India.
+          const requestId = await addCompletedInsightRequest(pool, {
+            requestKey: SPEC_REQUEST,
+            studentId: ids.studentIds.bhavya,
+            schoolId: ids.schoolId,
+            requestedByUserId: teacherUserId(),
+            requestedAt: "2026-11-14 05:00:00",
+          });
+          const teacherContext = await browser.newContext();
+          const teacher = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
+          const sessionId = await submitFor(teacher, "bhavya", SPEC_REQUEST);
+          const [before] = await readInsightSessions(pool, ids.studentIds.bhavya);
+          expect(before).toMatchObject({ id: sessionId, state: "submitted", revision: 2, insightRequestId: requestId });
+
+          // A second Teacher and every viewer role see the entry with no Edit, and the edit route refuses them.
+          const secondContext = await browser.newContext();
+          const secondTeacher = await signInAs(await secondContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+          const readOnlyContext = await browser.newContext();
+          const readOnly = await signInAs(await readOnlyContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.readOnlyTeacher);
+          const others = {
+            "second Teacher": secondTeacher,
+            "Program Manager": pmPage,
+            "Program Admin": programAdminPage,
+            Admin: adminPage,
+            "read_only Teacher": readOnly,
+          };
+          for (const [who, other] of Object.entries(others)) {
+            await test.step(who, async () => {
+              await other.goto(studentUrl("bhavya"));
+              await expect(historyOf(other).getByText("Notes by E2E ATI Teacher", { exact: true })).toBeVisible();
+              await expect(historyOf(other).getByRole("button", { name: "Edit" })).toHaveCount(0);
+              const refused = await other.request.patch(sessionRoute("bhavya", sessionId), {
+                data: editBody({ areasOfConcern: `${who} text [e2e-578]` }),
+              });
+              expect(refused.status()).toBe(403);
+            });
+          }
+          await secondContext.close();
+          await readOnlyContext.close();
+          expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([before]);
+
+          // The author edits in place.
+          await answerTestPicker(teacher, 200, { tests: PICKER_TESTS });
+          await teacher.goto(studentUrl("bhavya"));
+          const history = historyOf(teacher);
+          await history.getByRole("button", { name: "Edit" }).click();
+          await expect(history.getByLabel("Date of conversation")).toHaveValue("2026-11-20");
+          await expect(history.getByLabel("Areas of concern")).toHaveValue(CONCERN);
+          await expect(history.getByLabel("Immediate actions")).toHaveValue(ACTIONS);
+          await expect(history.getByLabel("Other notes (optional)")).toHaveValue("");
+          await history.getByLabel("Areas of concern").fill(`  ${EDITED_CONCERN}  `);
+          await history.getByLabel("Other notes (optional)").fill(`\n${EDITED_OTHER} `);
+          await history.getByRole("button", { name: "Save changes" }).click();
+
+          await expect(history.getByText(`Edited on ${todayShown()}`, { exact: true })).toBeVisible();
+          expect(await historyEntries(teacher)).toEqual([
+            [
+              "20 Nov 2026",
+              "Notes by E2E ATI Teacher",
+              `Edited on ${todayShown()}`,
+              "Areas of concern",
+              EDITED_CONCERN,
+              "Immediate actions",
+              ACTIONS,
+              "Other notes",
+              EDITED_OTHER,
+              "AI Summary of 14 Nov 2026",
+              "Made from: Mock Test 1",
+              "Asked for by E2E ATI Teacher on 14 Nov 2026, 10:30",
+            ],
+          ]);
+          const [after] = await readInsightSessions(pool, ids.studentIds.bhavya);
+          expect(after).toEqual({
+            ...before,
+            areasOfConcern: EDITED_CONCERN,
+            otherNotes: EDITED_OTHER,
+            revision: 3,
+            updatedAt: after.updatedAt,
+          });
+          expect(Math.abs(after.updatedAt - Date.now() / 1000)).toBeLessThan(60);
+          const audits = await readSessionNoteAudits(pool, ids.studentIds.bhavya);
+          expect(audits.map(({ sessionId: id, actorUserId, action, revision }) => ({ id, actorUserId, action, revision }))).toEqual([
+            { id: sessionId, actorUserId: teacherUserId(), action: "submitted", revision: 2 },
+            { id: sessionId, actorUserId: teacherUserId(), action: "submitted_edited", revision: 3 },
+          ]);
+          expect(Math.abs(audits[1].occurredAt - Date.now() / 1000)).toBeLessThan(60);
+          await teacherContext.close();
+        });
+
+        test("adds no audit row and keeps the revision when nothing changed", async ({ page }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          const sessionId = await submitFor(page, "bhavya");
+          const [before] = await readInsightSessions(pool, ids.studentIds.bhavya);
+
+          await page.goto(studentUrl("bhavya"));
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+          const saved = page.waitForResponse(
+            (response) => response.url().endsWith(sessionRoute("bhavya", sessionId)) && response.request().method() === "PATCH",
+          );
+          await history.getByRole("button", { name: "Save changes" }).click();
+          expect(await (await saved).json()).toEqual({ revision: 2 });
+          await expect(history.getByRole("button", { name: "Save changes" })).toHaveCount(0);
+
+          // The same notes with spaces around them are no change either.
+          const spaced = await page.request.patch(sessionRoute("bhavya", sessionId), {
+            data: editBody({ areasOfConcern: `  ${CONCERN}\n`, otherNotes: "  " }),
+          });
+          expect(spaced.status()).toBe(200);
+          expect(await spaced.json()).toEqual({ revision: 2 });
+
+          expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([before]);
+          expect((await readSessionNoteAudits(pool, ids.studentIds.bhavya)).map((audit) => audit.action)).toEqual(["submitted"]);
+          const [entry] = await historyEntries(page);
+          expect(entry.filter((line) => line.startsWith("Edited on"))).toEqual([]);
+        });
+
+        test("refuses an older copy with 409, keeps the newer text, adds no audit row, and the older tab says so", async ({
+          page,
+        }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          const sessionId = await submitFor(page, "bhavya");
+          await page.goto(studentUrl("bhavya"));
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+
+          // Another tab saves first.
+          const newer = await page.request.patch(sessionRoute("bhavya", sessionId), {
+            data: editBody({ areasOfConcern: EDITED_CONCERN }),
+          });
+          expect(await newer.json()).toEqual({ revision: 3 });
+          const older = await page.request.patch(sessionRoute("bhavya", sessionId), {
+            data: editBody({ areasOfConcern: "Older copy [e2e-578]" }),
+          });
+          expect(older.status()).toBe(409);
+          expect(await older.json()).toEqual({
+            error: "These notes were changed in another tab.",
+            code: "stale",
+            currentRevision: 3,
+          });
+
+          await history.getByLabel("Immediate actions").fill("Typed in the older tab [e2e-578]");
+          await history.getByRole("button", { name: "Save changes" }).click();
+          const alert = history.getByRole("alert");
+          await expect(alert).toContainText("These notes were changed in another tab.");
+          await expect(history.getByLabel("Immediate actions")).toHaveValue("Typed in the older tab [e2e-578]");
+          await expect(history.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+          const [row] = await readInsightSessions(pool, ids.studentIds.bhavya);
+          expect([row.areasOfConcern, row.immediateActions, row.revision]).toEqual([EDITED_CONCERN, ACTIONS, 3]);
+          expect((await readSessionNoteAudits(pool, ids.studentIds.bhavya)).map((audit) => [audit.action, audit.revision])).toEqual([
+            ["submitted", 2],
+            ["submitted_edited", 3],
+          ]);
+
+          await alert.getByRole("button", { name: "Reload notes" }).click();
+          await expect(history.getByText(EDITED_CONCERN, { exact: true })).toBeVisible();
+          await expect(history.getByLabel("Immediate actions")).toHaveCount(0);
+        });
+
+        test("answers 404 to a Teacher of another School and to a seat-confined Teacher outside their centre, even as author", async ({
+          browser,
+        }) => {
+          const otherSchoolTeacher = AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher;
+          const seatedTeacher = AI_TEST_INSIGHTS_PERSONAS.seatedTeacher;
+          const asks = [
+            { persona: otherSchoolTeacher, key: "bhavya" },
+            { persona: seatedTeacher, key: "divya" },
+          ];
+          for (const { persona, key } of asks) {
+            const sessionId = await addSubmittedInsightSession(pool, {
+              studentId: ids.studentIds[key],
+              schoolId: ids.schoolId,
+              authorUserId: ids.personaUserIds[persona.email],
+              sessionDate: "2026-11-20",
+              areasOfConcern: CONCERN,
+              immediateActions: ACTIONS,
+            });
+            const context = await browser.newContext();
+            const asker = await signInAs(await context.newPage(), persona);
+            const response = await asker.request.patch(sessionRoute(key, sessionId), {
+              data: editBody({ areasOfConcern: EDITED_CONCERN }),
+            });
+            expect(response.status()).toBe(404);
+            await context.close();
+            const rows = (await readInsightSessions(pool, ids.studentIds[key])).filter((row) => row.id === sessionId);
+            expect(rows.map((row) => [row.areasOfConcern, row.revision])).toEqual([[CONCERN, 2]]);
+            expect((await readSessionNoteAudits(pool, ids.studentIds[key])).filter((audit) => audit.sessionId === sessionId)).toEqual(
+              [],
+            );
+          }
+        });
+
+        test("moves the Student card's last Insight Session date when the newest session's date changes", async ({ page }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          await submitFor(page, "bhavya");
+          await page.goto(studentUrl("bhavya"));
+          await expect(cardValue(page, "Insight Sessions completed")).toHaveText("1");
+          await expect(cardValue(page, "Last Insight Session")).toHaveText("20 Nov 2026");
+
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+          await history.getByLabel("Date of conversation").fill("2026-11-24");
+          await history.getByRole("button", { name: "Save changes" }).click();
+
+          await expect(cardValue(page, "Last Insight Session")).toHaveText("24 Nov 2026");
+          await expect(cardValue(page, "Insight Sessions completed")).toHaveText("1");
+          await expect(history.getByRole("heading", { name: "24 Nov 2026", level: 3 })).toBeVisible();
+          expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => [row.sessionDate, row.revision])).toEqual([
+            ["2026-11-24", 3],
+          ]);
         });
       });
     });

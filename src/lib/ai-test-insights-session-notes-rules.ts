@@ -3,7 +3,8 @@
 // (`@/lib/db`, `@/lib/permissions`) out of this module.
 //
 // Two rules: `draft` (#574) for any draft save, and `final` (#575) for a
-// submit, which also needs the two required fields and a date not after today.
+// submit or an author's edit (#578), which also needs the two required fields
+// and a date not after today.
 import { aiSummaryTitle, aiTestInsightsStudentApiUrl, type InsightRequestView } from "@/lib/ai-test-insights-shared";
 import type { TimelineEntry } from "@/lib/ai-test-insights-timeline";
 import { isDateString } from "@/lib/curriculum-date-helpers";
@@ -138,6 +139,10 @@ export const SESSION_NOTES_VISIBILITY_TEXT =
 
 /** The 409 code of a save made from an older copy of the notes. */
 export const SESSION_NOTES_STALE_CODE = "stale";
+/** What a 409 `stale` says, on the route and on the page. */
+export const SESSION_NOTES_STALE_MESSAGE = "These notes were changed in another tab.";
+/** What the author's edit (#578) says when a save failed for any other reason. */
+export const SESSION_NOTES_EDIT_FAILED_MESSAGE = "These changes could not be saved. Please try again.";
 
 /** The caller's own draft for a Student, as the history route returns it. */
 export interface SessionNotesDraft extends SessionNotesFields {
@@ -199,25 +204,36 @@ export function parseSessionNotesRequest(raw: unknown, rule: "draft"): ParsedReq
 }
 
 /**
- * A submit body: the four fields under the final rule with `today` (today in
- * India, from the server's clock), `expectedRevision` 1 or more (a submit
- * needs a saved draft), and `openRequestKey`, null or a key of 1 to 200
- * characters. Returns the first failing field; never echoes a value.
+ * An edit body (#578): the four fields under the final rule with `today`
+ * (today in India, from the server's clock), and `expectedRevision` 1 or more
+ * (a submitted session is at revision 2 or more). Returns the first failing
+ * field; never echoes a value. A submit body is the same plus its open
+ * request key.
  */
-export function parseSessionNotesSubmitRequest(raw: unknown, today: string): ParsedRequest<SessionNotesSubmitRequest> {
+export function parseSessionNotesEditRequest(raw: unknown, today: string): ParsedRequest<SessionNotesDraftRequest> {
   const checked = validateSessionNotes(raw, "final", today);
   if (!checked.ok) return checked;
-  const fields = raw as Record<string, unknown>;
-  const revision = parseExpectedRevision(fields, 1);
+  const revision = parseExpectedRevision(raw as Record<string, unknown>, 1);
   if (!revision.ok) return revision;
-  const { openRequestKey } = fields;
+  return { ok: true, value: { ...checked.notes, expectedRevision: revision.value } };
+}
+
+/**
+ * A submit body: the edit body (the final rule, `expectedRevision` 1 or more:
+ * a submit needs a saved draft), and `openRequestKey`, null or a key of 1 to
+ * 200 characters. Returns the first failing field; never echoes a value.
+ */
+export function parseSessionNotesSubmitRequest(raw: unknown, today: string): ParsedRequest<SessionNotesSubmitRequest> {
+  const checked = parseSessionNotesEditRequest(raw, today);
+  if (!checked.ok) return checked;
+  const { openRequestKey } = raw as Record<string, unknown>;
   if (
     openRequestKey !== null &&
     (typeof openRequestKey !== "string" || openRequestKey.length < 1 || openRequestKey.length > MAX_REQUEST_KEY_LENGTH)
   ) {
     return { ok: false, field: "openRequestKey", error: "openRequestKey must be a request key or null." };
   }
-  return { ok: true, value: { ...checked.notes, expectedRevision: revision.value, openRequestKey } };
+  return { ok: true, value: { ...checked.value, openRequestKey } };
 }
 
 /** `PUT …/sessions/draft` 200: the draft's revision now (0 while nothing is stored). */
@@ -231,7 +247,12 @@ export interface SessionNotesSubmitResponse {
   revision: number;
 }
 
-/** `PUT …/sessions/draft` or `POST …/sessions` 409 `stale`: the notes changed in another tab. */
+/** `PATCH …/sessions/[sessionId]` 200: the session's revision now (the same one when nothing changed). */
+export interface SessionNotesEditResponse {
+  revision: number;
+}
+
+/** `PUT …/sessions/draft`, `POST …/sessions` or `PATCH …/sessions/[sessionId]` 409 `stale`: the notes changed in another tab. */
 export interface SessionNotesStaleResponse {
   error: string;
   code: typeof SESSION_NOTES_STALE_CODE;
@@ -249,4 +270,12 @@ export function aiTestInsightsSessionsUrl(studentId: number, centreId: number | 
 /** The draft save route of a Student (`student.id`); a centre the page named carries over. */
 export function aiTestInsightsSessionDraftUrl(studentId: number, centreId: number | null): string {
   return aiTestInsightsStudentApiUrl(studentId, "sessions/draft", centreId);
+}
+
+/**
+ * The edit route of one submitted Insight Session (#578) of a Student
+ * (`student.id`); a centre the page named carries over.
+ */
+export function aiTestInsightsSessionUrl(studentId: number, sessionId: number, centreId: number | null): string {
+  return aiTestInsightsStudentApiUrl(studentId, `sessions/${sessionId}`, centreId);
 }

@@ -401,4 +401,89 @@ describe("AiTestInsightsStudentSections", () => {
       expect(within(notes()).getByRole("button", { name: "Submit" })).toBeEnabled();
     });
   });
+
+  // Edit (#578): the author's own History entry saves through its session's
+  // edit route, with the page's centre; the page then refreshes the Student
+  // card and reads the timeline again. The Session Notes form and its draft
+  // stay as they were.
+  describe("an edit in History", () => {
+    const OWN_SESSION = {
+      kind: "session",
+      sessionId: 90,
+      revision: 2,
+      sessionDate: "2026-11-20",
+      authorName: "Asha Teacher",
+      isAuthor: true,
+      areasOfConcern: "Weak in optics",
+      immediateActions: "Two worksheets",
+      otherNotes: null,
+      lastEditedAt: null,
+      testInsight: null,
+    };
+    const withOwnSession = (session: Record<string, unknown> = OWN_SESSION, draft: unknown = null): Reply => ({
+      status: 200,
+      body: { timeline: [session], draft, notesAccess: "write" },
+    });
+
+    it("saves to the session's edit route with the page's centre, refreshes the page and shows the edited entry", async () => {
+      const user = userEvent.setup();
+      writeReplies = { "PATCH /api/ai-test-insights/students/1005/sessions/90": { status: 200, body: { revision: 3 } } };
+      sessionsReplies = [
+        withOwnSession(),
+        withOwnSession({
+          ...OWN_SESSION,
+          revision: 3,
+          sessionDate: "2026-11-18",
+          areasOfConcern: "Weak in ray optics",
+          // 05:30 UTC is 11:00 on 27 Nov 2026 in India.
+          lastEditedAt: "2026-11-27T05:30:00Z",
+        }),
+      ];
+      stubFetch({ status: 200, body: { tests: TESTS } });
+      renderSections(true, 302);
+
+      await user.click(await within(history()).findByRole("button", { name: "Edit" }));
+      const area = within(history()).getByLabelText("Areas of concern");
+      await user.clear(area);
+      await user.type(area, "Weak in ray optics");
+      await user.click(within(history()).getByRole("button", { name: "Save changes" }));
+
+      expect(await within(history()).findByText("Edited on 27 Nov 2026")).toBeInTheDocument();
+      expect(within(history()).getByText("18 Nov 2026")).toBeInTheDocument();
+      expect(within(history()).getByText("Weak in ray optics")).toBeInTheDocument();
+      expect(within(history()).queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "/api/ai-test-insights/students/1005/sessions/90?centre=302",
+        expect.objectContaining({ method: "PATCH" }),
+      );
+      expect(sessionsReads()).toHaveLength(2);
+    });
+
+    it("leaves the Session Notes form and its draft alone, and saves no draft", async () => {
+      const user = userEvent.setup();
+      const draft = { revision: 4, sessionDate: "2026-11-26", areasOfConcern: "Next talk", immediateActions: null, otherNotes: null };
+      writeReplies = { "PATCH /api/ai-test-insights/students/1005/sessions/90": { status: 200, body: { revision: 3 } } };
+      sessionsReplies = [
+        withOwnSession(OWN_SESSION, draft),
+        withOwnSession({ ...OWN_SESSION, revision: 3, immediateActions: "Three worksheets" }, draft),
+      ];
+      stubFetch({ status: 200, body: { tests: TESTS } });
+      renderSections();
+      expect(await within(notes()).findByLabelText("Areas of concern")).toHaveValue("Next talk");
+
+      await user.click(await within(history()).findByRole("button", { name: "Edit" }));
+      const actions = within(history()).getByLabelText("Immediate actions");
+      await user.clear(actions);
+      await user.type(actions, "Three worksheets");
+      await user.click(within(history()).getByRole("button", { name: "Save changes" }));
+
+      expect(await within(history()).findByText("Three worksheets")).toBeInTheDocument();
+      expect(within(notes()).getByLabelText("Areas of concern")).toHaveValue("Next talk");
+      const writes = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method);
+      expect(writes.map(([url, init]) => `${init?.method} ${String(url)}`)).toEqual([
+        "PATCH /api/ai-test-insights/students/1005/sessions/90",
+      ]);
+    });
+  });
 });

@@ -18,7 +18,11 @@
 // share one read of the sessions route, read again after a submit, after
 // "Reload notes", and when the AI Summary card's request becomes `completed`.
 // History opens its Test Insights (#577) through the same requests route as
-// the card, with the page's `centre`.
+// the card, with the page's `centre`. The author's Edit in History (#578)
+// saves through the session's edit route with the page's `centre`; after a
+// save History reads the timeline again and the page is refreshed from the
+// server, so the Student card's last Insight Session date moves. An edit
+// leaves the Session Notes form and its draft as they are.
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 
@@ -28,7 +32,11 @@ import AiTestInsightsStudentCard from "@/components/ai-test-insights/AiTestInsig
 import AiTestInsightsSummaryCard from "@/components/ai-test-insights/AiTestInsightsSummaryCard";
 import { useAiTestInsightsSessions } from "@/hooks/use-ai-test-insights-sessions";
 import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
-import { aiTestInsightsSessionDraftUrl, aiTestInsightsSessionsUrl } from "@/lib/ai-test-insights-session-notes-rules";
+import {
+  aiTestInsightsSessionDraftUrl,
+  aiTestInsightsSessionsUrl,
+  aiTestInsightsSessionUrl,
+} from "@/lib/ai-test-insights-session-notes-rules";
 import {
   aiTestInsightsRequestsUrl,
   aiTestInsightsTestsUrl,
@@ -112,7 +120,13 @@ export default function AiTestInsightsStudentSections({
           }}
         />
       )}
-      <AiTestInsightsHistory sessions={sessions} tests={state} requestsUrl={requestsUrl} />
+      <AiTestInsightsHistory
+        sessions={sessions}
+        tests={state}
+        requestsUrl={requestsUrl}
+        sessionUrl={(sessionId) => aiTestInsightsSessionUrl(studentId, sessionId, centreId)}
+        onEdited={() => router.refresh()}
+      />
     </>
   );
 }

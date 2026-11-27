@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -78,13 +78,26 @@ const loaded = (timeline: TimelineEntry[]): SessionsRead => ({
 });
 
 const REQUESTS_URL = "/api/ai-test-insights/students/1001/requests";
+/** The edit route of one session, as the page builds it with its centre. */
+const sessionUrl = (sessionId: number) => `/api/ai-test-insights/students/1001/sessions/${sessionId}?centre=302`;
+
+let onEdited: ReturnType<typeof vi.fn<() => void>>;
 
 function renderHistory(
   sessions: SessionsRead,
   tests: AiTestInsightsTestsState = TESTS,
   requestsUrl: string = REQUESTS_URL,
 ) {
-  render(<AiTestInsightsHistory sessions={sessions} tests={tests} requestsUrl={requestsUrl} />);
+  onEdited = vi.fn();
+  render(
+    <AiTestInsightsHistory
+      sessions={sessions}
+      tests={tests}
+      requestsUrl={requestsUrl}
+      sessionUrl={sessionUrl}
+      onEdited={onEdited}
+    />,
+  );
   return screen.getByRole("region", { name: "History" });
 }
 
@@ -345,5 +358,227 @@ describe("AiTestInsightsHistory View AI Summary", () => {
       await waitFor(() => expect(assign).toHaveBeenCalledWith(SIGNED_URL));
       expect(askedUrls(fetchMock)).toEqual([summaryUrl("rk-52"), pdfUrl("rk-52"), pdfUrl("rk-52")]);
     });
+  });
+});
+
+// Edit (#578): the author corrects their own submitted notes in place, with
+// "Save changes" (no autosave) and Cancel, under the final rule. fetch is
+// stubbed: each edit answers from `edits`, in turn, or 200 with the next
+// revision once `edits` runs out. Today in India is 28 Nov 2026.
+describe("AiTestInsightsHistory Edit", () => {
+  type Reply = { status: number; body: unknown };
+  type Deferred = { reply: Promise<Reply>; resolve: (reply: Reply) => void };
+  let edits: Array<Reply | Deferred>;
+  let fetchMock: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>>;
+
+  const asResponse = (reply: Reply) => ({
+    ok: reply.status >= 200 && reply.status < 300,
+    status: reply.status,
+    json: () => Promise.resolve(reply.body),
+  });
+  function deferred(): Deferred {
+    let resolve!: (reply: Reply) => void;
+    const reply = new Promise<Reply>((res) => {
+      resolve = res;
+    });
+    return { reply, resolve };
+  }
+
+  beforeEach(() => {
+    // 19:00 UTC on 27 Nov is 00:30 on 28 Nov in India.
+    vi.useFakeTimers({ now: new Date("2026-11-27T19:00:00Z"), toFake: ["setTimeout", "clearTimeout", "Date"] });
+    edits = [];
+    fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const next = edits.shift();
+      if (next) return asResponse("reply" in next ? await next.reply : next);
+      const { expectedRevision } = JSON.parse(String(init?.body)) as { expectedRevision: number };
+      return asResponse({ status: 200, body: { revision: expectedRevision + 1 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+  /** The timeline's entry (list item) whose text holds `text`. */
+  const entryWith = (history: HTMLElement, text: string) =>
+    within(history)
+      .getAllByRole("listitem")
+      .find((item) => item.textContent?.includes(text))!;
+  const field = (entry: HTMLElement, label: string) =>
+    within(entry).getByLabelText(label) as HTMLInputElement | HTMLTextAreaElement;
+  const type = (entry: HTMLElement, label: string, value: string) =>
+    fireEvent.change(field(entry, label), { target: { value } });
+  const saveButton = (entry: HTMLElement) => within(entry).getByRole("button", { name: "Save changes" });
+
+  /** Asha's own entry (session 11, revision 4), with Edit pressed. */
+  function editAshasEntry(sessions: SessionsRead = loaded(TIMELINE)) {
+    const entry = entryWith(renderHistory(sessions), "Notes by Asha Teacher");
+    fireEvent.click(within(entry).getByRole("button", { name: "Edit" }));
+    return entry;
+  }
+
+  it("offers Edit only on the caller's own entries", () => {
+    const history = renderHistory(loaded(TIMELINE));
+
+    expect(within(history).getAllByRole("button", { name: "Edit" })).toHaveLength(1);
+    expect(within(entryWith(history, "Notes by Asha Teacher")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(within(entryWith(history, "Notes by Bina Teacher")).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("offers no Edit to a viewer, whose entries are never their own", () => {
+    const viewerTimeline = TIMELINE.map((entry) => (entry.kind === "session" ? { ...entry, isAuthor: false } : entry));
+
+    expect(within(renderHistory(loaded(viewerTimeline))).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("opens the four fields in place, filled with the entry's notes, with Save changes and Cancel", () => {
+    const entry = editAshasEntry();
+
+    expect(field(entry, "Date of conversation").value).toBe("2026-11-14");
+    expect(field(entry, "Areas of concern").value).toBe(`Weak in optics ${MARKER}`);
+    expect(field(entry, "Immediate actions").value).toBe(`Two worksheets ${MARKER}`);
+    expect(field(entry, "Other notes (optional)").value).toBe(`Parents informed ${MARKER}`);
+    expect(saveButton(entry)).toBeEnabled();
+    expect(within(entry).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(within(entry).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("fills a blank Other notes as empty", () => {
+    const entry = entryWith(renderHistory(loaded([{ ...TIMELINE[2], isAuthor: true } as TimelineEntry])), "Notes by Bina Teacher");
+    fireEvent.click(within(entry).getByRole("button", { name: "Edit" }));
+
+    expect(field(entry, "Other notes (optional)").value).toBe("");
+  });
+
+  it("saves nothing by itself: no autosave", async () => {
+    const entry = editAshasEntry();
+
+    type(entry, "Areas of concern", `Weak in ray optics ${MARKER}`);
+    await tick(5_000);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("Save changes is off", () => {
+    it.each([
+      ["Areas of concern is blank", "Areas of concern", "  "],
+      ["Immediate actions is blank", "Immediate actions", ""],
+      ["the date is empty", "Date of conversation", ""],
+      ["the date is after today in India", "Date of conversation", "2026-11-29"],
+      ["a field is over the limit", "Other notes (optional)", "a".repeat(2001)],
+    ])("while %s", (_label, label, value) => {
+      const entry = editAshasEntry();
+
+      type(entry, label, value);
+
+      expect(saveButton(entry)).toBeDisabled();
+    });
+
+    it("says why when the date is after today, and turns on again for today in India", () => {
+      const entry = editAshasEntry();
+
+      type(entry, "Date of conversation", "2026-11-29");
+      expect(within(entry).getByText("Date of conversation can't be after today.")).toBeInTheDocument();
+      type(entry, "Date of conversation", "2026-11-28");
+
+      expect(saveButton(entry)).toBeEnabled();
+    });
+
+    it("while a save is running", async () => {
+      const pending = deferred();
+      edits = [pending];
+      const entry = editAshasEntry();
+
+      fireEvent.click(saveButton(entry));
+      await tick(0);
+      expect(saveButton(entry)).toBeDisabled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      pending.resolve({ status: 200, body: { revision: 5 } });
+      await tick(0);
+    });
+  });
+
+  it("puts the entry back as it was on Cancel and sends nothing", () => {
+    const entry = editAshasEntry();
+    type(entry, "Areas of concern", "Changed my mind");
+
+    fireEvent.click(within(entry).getByRole("button", { name: "Cancel" }));
+
+    expect(within(entry).queryByLabelText("Areas of concern")).not.toBeInTheDocument();
+    expect(within(entry).getByText(`Weak in optics ${MARKER}`)).toBeInTheDocument();
+    expect(within(entry).queryByText("Changed my mind")).not.toBeInTheDocument();
+    fireEvent.click(within(entry).getByRole("button", { name: "Edit" }));
+    expect(field(entry, "Areas of concern").value).toBe(`Weak in optics ${MARKER}`);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends the four fields at the entry's revision to the session's edit route, then reads the timeline again", async () => {
+    const sessions = loaded(TIMELINE);
+    const entry = editAshasEntry(sessions);
+    type(entry, "Date of conversation", "2026-11-13");
+    type(entry, "Areas of concern", `  Weak in ray optics ${MARKER} `);
+    type(entry, "Other notes (optional)", "");
+
+    fireEvent.click(saveButton(entry));
+    await tick(0);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/ai-test-insights/students/1001/sessions/11?centre=302");
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      sessionDate: "2026-11-13",
+      areasOfConcern: `  Weak in ray optics ${MARKER} `,
+      immediateActions: `Two worksheets ${MARKER}`,
+      otherNotes: "",
+      expectedRevision: 4,
+    });
+    expect(sessions.reload).toHaveBeenCalledTimes(1);
+    expect(onEdited).toHaveBeenCalledTimes(1);
+  });
+
+  it("says another tab changed the notes on a 409 stale, keeps the typed text, and Reload notes reads again", async () => {
+    edits = [{ status: 409, body: { error: "These notes were changed in another tab.", code: "stale", currentRevision: 5 } }];
+    const sessions = loaded(TIMELINE);
+    const entry = editAshasEntry(sessions);
+    type(entry, "Areas of concern", `Typed in this tab ${MARKER}`);
+
+    fireEvent.click(saveButton(entry));
+    await tick(0);
+
+    const alert = within(entry).getByRole("alert");
+    expect(alert).toHaveTextContent("These notes were changed in another tab.");
+    expect(field(entry, "Areas of concern").value).toBe(`Typed in this tab ${MARKER}`);
+    expect(saveButton(entry)).toBeDisabled();
+    expect(sessions.reload).not.toHaveBeenCalled();
+    expect(onEdited).not.toHaveBeenCalled();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Reload notes" }));
+    expect(sessions.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a failed save failed, keeps the typed text, and lets the Teacher save again", async () => {
+    edits = [{ status: 500, body: { error: "Session Notes could not be saved" } }];
+    const sessions = loaded(TIMELINE);
+    const entry = editAshasEntry(sessions);
+    type(entry, "Areas of concern", `Typed in this tab ${MARKER}`);
+
+    fireEvent.click(saveButton(entry));
+    await tick(0);
+
+    expect(within(entry).getByRole("alert")).toHaveTextContent("These changes could not be saved. Please try again.");
+    expect(field(entry, "Areas of concern").value).toBe(`Typed in this tab ${MARKER}`);
+    expect(saveButton(entry)).toBeEnabled();
+    expect(sessions.reload).not.toHaveBeenCalled();
+
+    fireEvent.click(saveButton(entry));
+    await tick(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sessions.reload).toHaveBeenCalledTimes(1);
   });
 });

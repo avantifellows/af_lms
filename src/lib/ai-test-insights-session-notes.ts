@@ -9,7 +9,7 @@
 // the Holistic notes save (`saveHolisticNotes`): one transaction per save,
 // and a revision check on every update.
 //
-// Modes: `draft` (#574) and `submit` (#575); edit (#578) adds its own here.
+// Modes: `draft` (#574), `submit` (#575) and `edit` (#578, the author only).
 // It also lists a Student's submitted sessions for the History timeline (#576).
 // A submit checks its open request key against `ai_test_insight_requests`
 // in its own SQL.
@@ -177,6 +177,16 @@ export type SessionNotesRefusal =
 type DraftSaveResult = { outcome: "saved"; revision: number } | SessionNotesRefusal;
 /** What a submit did. */
 type SubmitResult = { outcome: "submitted"; sessionId: number; revision: number } | SessionNotesRefusal;
+/**
+ * What an edit did: saved (the revision now, and whether anything changed),
+ * not found (no submitted session of this Student by that id), not the
+ * author, or refused (stale, invalid).
+ */
+type EditResult =
+  | { outcome: "saved"; revision: number; changed: boolean }
+  | { outcome: "not_found" }
+  | { outcome: "not_author" }
+  | SessionNotesRefusal;
 
 function isOneDraftConflict(error: unknown): boolean {
   const pgError = error as { code?: string; constraint?: string } | null;
@@ -195,6 +205,7 @@ type SaveBase = {
 };
 type DraftParams = SaveBase & { mode: "draft" };
 type SubmitParams = SaveBase & { mode: "submit"; openRequestKey: string | null };
+type EditParams = SaveBase & { mode: "edit"; sessionId: number };
 
 /**
  * Saves the acting Teacher's Session Notes for a Student, in one transaction.
@@ -223,17 +234,40 @@ type SubmitParams = SaveBase & { mode: "submit"; openRequestKey: string | null }
  * is stored. No draft at that revision (none saved, another revision, already
  * submitted) is stale, so a second press of Submit never makes a second
  * session.
+ *
+ * `edit` mode (the final rule, as a submit): the author's correction of a
+ * `submitted` Insight Session of that Student, by its id, at
+ * `expectedRevision`. The text is trimmed (a blank Other notes is null) and
+ * saved at the next revision with `updated_at`, with one `submitted_edited`
+ * audit row (the acting User and the new revision, no note text). The date of
+ * conversation may change; `submitted_at`, the linked request, the School,
+ * Program, academic year and author are kept. No submitted session of that
+ * Student by that id (a draft's id included) is not found; another author's is
+ * not the author; another revision is stale, with the current one. Notes that
+ * read the same after trim write nothing and keep the revision.
  */
 export async function saveSessionNotes(params: DraftParams): Promise<DraftSaveResult>;
 export async function saveSessionNotes(params: SubmitParams): Promise<SubmitResult>;
-export async function saveSessionNotes(params: DraftParams | SubmitParams): Promise<DraftSaveResult | SubmitResult> {
+export async function saveSessionNotes(params: EditParams): Promise<EditResult>;
+export async function saveSessionNotes(
+  params: DraftParams | SubmitParams | EditParams,
+): Promise<DraftSaveResult | SubmitResult | EditResult> {
   const checked =
-    params.mode === "submit"
-      ? validateSessionNotes(params.notes, "final", getTodayIST())
-      : validateSessionNotes(params.notes, "draft");
+    params.mode === "draft"
+      ? validateSessionNotes(params.notes, "draft")
+      : validateSessionNotes(params.notes, "final", getTodayIST());
   if (!checked.ok) return { outcome: "invalid", field: checked.field, error: checked.error };
   if (params.mode === "submit") return submitDraft(params, checked.notes);
+  if (params.mode === "edit") return editSubmitted(params, checked.notes);
   return saveDraft(params, checked.notes);
+}
+
+/** The three text fields as a submit or an edit stores them: trimmed, a blank one null. */
+function trimmedText(notes: SessionNotesFields): Array<string | null> {
+  return SESSION_NOTES_TEXT_FIELDS.map((field) => {
+    const value = notes[field];
+    return isBlankNote(value) ? null : (value as string).trim();
+  });
 }
 
 async function saveDraft(params: DraftParams, notes: SessionNotesFields): Promise<DraftSaveResult> {
@@ -286,10 +320,7 @@ async function saveDraft(params: DraftParams, notes: SessionNotesFields): Promis
 
 async function submitDraft(params: SubmitParams, notes: SessionNotesFields): Promise<SubmitResult> {
   const { student, actorUserId, expectedRevision, openRequestKey } = params;
-  const text = SESSION_NOTES_TEXT_FIELDS.map((field) => {
-    const value = notes[field];
-    return isBlankNote(value) ? null : (value as string).trim();
-  });
+  const text = trimmedText(notes);
 
   const result = await withTransaction(async (client): Promise<SubmitResult | null> => {
     let insightRequestId: number | null = null;
@@ -346,4 +377,57 @@ async function submitDraft(params: SubmitParams, notes: SessionNotesFields): Pro
     return { outcome: "submitted", sessionId, revision };
   });
   return result ?? stale(student.studentId, actorUserId);
+}
+
+type StoredSubmittedRow = DraftRow & { author_user_id: string | number };
+
+async function editSubmitted(params: EditParams, notes: SessionNotesFields): Promise<EditResult> {
+  const { student, actorUserId, expectedRevision, sessionId } = params;
+  const text = trimmedText(notes);
+
+  return withTransaction(async (client): Promise<EditResult> => {
+    const found = await client.query<StoredSubmittedRow>(
+      `SELECT author_user_id,
+              revision,
+              to_char(session_date, 'YYYY-MM-DD') AS session_date,
+              areas_of_concern,
+              immediate_actions,
+              other_notes
+       FROM ai_test_insight_sessions
+       WHERE id = $1 AND student_id = $2 AND state = 'submitted'
+       FOR UPDATE`,
+      [sessionId, student.studentId],
+    );
+    const stored = found.rows[0];
+    if (!stored) return { outcome: "not_found" };
+    if (Number(stored.author_user_id) !== actorUserId) return { outcome: "not_author" };
+    const currentRevision = Number(stored.revision);
+    if (currentRevision !== expectedRevision) return { outcome: "stale", currentRevision };
+
+    const storedValues = [stored.session_date, stored.areas_of_concern, stored.immediate_actions, stored.other_notes];
+    const unchanged = [notes.sessionDate, ...text].every((value, index) => value === storedValues[index]);
+    if (unchanged) return { outcome: "saved", revision: currentRevision, changed: false };
+
+    const updated = await client.query<{ revision: number }>(
+      `UPDATE ai_test_insight_sessions
+       SET session_date = $5::date,
+           areas_of_concern = $6,
+           immediate_actions = $7,
+           other_notes = $8,
+           revision = revision + 1,
+           updated_at = ${UTC_NOW}
+       WHERE id = $1 AND student_id = $2 AND author_user_id = $3 AND revision = $4 AND state = 'submitted'
+       RETURNING revision`,
+      [sessionId, student.studentId, actorUserId, expectedRevision, notes.sessionDate, ...text],
+    );
+    // The row is locked above, so this only guards the revision check itself.
+    if (!updated.rows[0]) return { outcome: "stale", currentRevision };
+    const revision = Number(updated.rows[0].revision);
+    await client.query(
+      `INSERT INTO ai_test_insight_session_note_audits (session_id, actor_user_id, action, revision, occurred_at, inserted_at)
+       VALUES ($1, $2, 'submitted_edited', $3, ${UTC_NOW}, ${UTC_NOW})`,
+      [sessionId, actorUserId, revision],
+    );
+    return { outcome: "saved", revision, changed: true };
+  });
 }

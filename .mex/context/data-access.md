@@ -1212,3 +1212,27 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   fixture requests have no Item files, so the e2e "From History" specs (inside "AI Summary") use
   requests the fake generator completed for Esha. `next dev` mounts effects twice and aborts the first
   fetch, so a spec that counts reads counts `requestfinished`, not `request`.
+- **Session Notes edit (#551 slice #578, 2026-11-28):** `saveSessionNotes({ mode: "edit", sessionId, … })`
+  in the Session Notes module, one transaction: `SELECT … WHERE id = $1 AND student_id = $2 AND state =
+  'submitted' FOR UPDATE` (none → `not_found`; another `author_user_id` → `not_author`; another revision
+  → `stale` with the current one), then, when the trimmed fields (a blank Other notes is null) differ
+  from the stored ones, `UPDATE … SET` the four fields, `revision + 1`, `updated_at` `WHERE id … AND
+  student_id … AND author_user_id … AND revision = $4 AND state = 'submitted'` and one
+  `submitted_edited` audit row at the new revision (no note text). Unchanged notes write nothing and
+  return the same revision (`changed: false`). `submitted_at`, `insight_request_id`, School, Program,
+  academic year and author are never in the SET. Route `PATCH …/sessions/[sessionId]` (body: the four
+  fields and `expectedRevision` ≥ 1, `parseSessionNotesEditRequest`; the submit parser now builds on
+  it) answers 200 `{ revision }`; ids are parsed by `parseAiTestInsightsId` (exported from the access
+  module, the Student id's rule). `withAiTestInsightsStudent(Write)` now passes the route's `params`
+  and an optional `logIds` (here `session=<id>`, or `invalid`). Page: History's author entries have
+  Edit, which opens `SessionNotesEdit` (four fields through the shared `SessionNotesInputs`, also the
+  form's; "Save changes" under the final rule, no autosave; Cancel; 409 → the other-tab message and
+  "Reload notes"; other failures → `SESSION_NOTES_EDIT_FAILED_MESSAGE`). A save reads the timeline
+  again and Sections calls `router.refresh()`, so the Student card's last date moves; the Session
+  Notes form and draft are untouched. The submit and the edit share `sendSessionNotes` (in
+  `SessionNotesInputs.tsx`); the stale text is `SESSION_NOTES_STALE_MESSAGE` in the rules module (the
+  route helper uses it too). E2E "Session Notes › Edit" uses Bhavya with `addCompletedInsightRequest`
+  and `addSubmittedInsightSession` (new fixture helpers: a spec's completed request with its own Item,
+  and a submitted session by any author, both removed by the existing cleanups). Known limit: an
+  open edit closes, losing its typing, if the timeline is read again for another reason (a submit
+  from the form, the card's request completing).
