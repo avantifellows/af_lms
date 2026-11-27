@@ -49,12 +49,15 @@ import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type U
 // history).
 //
 // - Filled: the application number is upserted into `student_exam_record`
-//   through the DB Service (one record per Student + "JEE Mains" + 2027; an
-//   existing row is updated, never duplicated) with the session(s) applied
-//   for (`sessions_applied`, as the Exams tab stores them; only on the
-//   record, not on the update) and the exam-portal password
-//   as KMS ciphertext (required while the record has none; optional to
-//   replace after), the optional confirmation PDF
+//   through the DB Service (one "JEE Mains" record per Student, as the Exams
+//   tab keeps one row per exam: the 2027 record is updated, else the
+//   Student's older JEE Mains record of any year is taken over and made the
+//   2027 one, else one is created; never a second) with the session(s)
+//   applied for (`sessions_applied`, as the Exams tab stores them; only on
+//   the record, not on the update) and the exam-portal password
+//   as KMS ciphertext (required while the 2027 record has none, and always
+//   for a record taken over; optional to replace after), the optional
+//   confirmation PDF
 //   goes to S3 and `lms_student_documents` through the existing document
 //   upload, and the Student's open "JEE Form Filling (Reminder)" Common
 //   Action Item is ticked done. Saving the same Filled form again adds no
@@ -398,7 +401,8 @@ type ExamRecordRow = {
 };
 
 // What to send the DB Service so the Student has exactly one "JEE Mains"
-// 2027 record holding this application number and these sessions.
+// record, for 2027, holding this application number and these sessions. A
+// patch with `examYear` takes over an older record (see planExamRecordWrite).
 export type ExamRecordPlan =
   | { kind: "none" }
   | { kind: "create" }
@@ -409,11 +413,30 @@ type FilledInput = Extract<JeeFormInput, { status: "filled" }>;
 
 const sameNumber = (a: string | null, b: string) => (a ?? "").trim().toLowerCase() === b.toLowerCase();
 
+// The record a Filled save writes: the Student's JEE Mains 2027 record, else
+// their older JEE Mains record (any other year, or none), whatever number it
+// holds. Until registrations are kept per year (af_lms#568), the form
+// overrides that older registration, as the Exams tab does with its one row
+// per exam, so the Student never ends up with two JEE Mains records. Should
+// there be several older ones, the newest (highest id) is taken: the latest
+// registration, and the one the Exams tab's last save wrote.
+function targetRecord(rows: ExamRecordRow[], examId: number): ExamRecordRow | undefined {
+  const jee = rows.filter((row) => Number(row.exam_id) === examId);
+  const current = jee.find((row) => Number(row.exam_year) === JEE_FORM_EXAM.examYear);
+  if (current) return current;
+  return jee.reduce<ExamRecordRow | undefined>(
+    (newest, row) => (newest === undefined || Number(row.id) > Number(newest.id) ? row : newest),
+    undefined
+  );
+}
+
 // The DB Service's create upserts on (student, application number), not on
 // the exam, so a number the Student already holds on another record would
-// move that record. Such a number is refused instead, except on the
-// Student's yearless "JEE Mains" record (as the Exams tab saves them), which
-// is taken to be this registration and given the year. The Exams tab has its
+// move that record. Such a number is refused instead, whether that record is
+// another exam's or (should there ever be two) another JEE Mains record
+// beside the target: the number is never moved off it and no second JEE
+// Mains record is created. A target of another year is patched to 2027 with
+// the new number (`examYear`). The Exams tab has its
 // own copy of this clash check (`clashingApplicationNumber` in
 // app/api/students/[id]/exam-records/route.ts); af_lms#544 tracks sharing one.
 export function planExamRecordWrite(
@@ -422,10 +445,10 @@ export function planExamRecordWrite(
   applicationNumber: string,
   sessions: readonly number[]
 ): ExamRecordPlan {
-  const isJee = (row: ExamRecordRow) => Number(row.exam_id) === examId;
-  const target = rows.find((row) => isJee(row) && Number(row.exam_year) === JEE_FORM_EXAM.examYear);
-  const holders = rows.filter((row) => sameNumber(row.application_number, applicationNumber));
-  const clash = holders.find((row) => row.id !== target?.id && !(target === undefined && isJee(row) && row.exam_year === null));
+  const target = targetRecord(rows, examId);
+  const clash = rows.find(
+    (row) => Number(row.id) !== Number(target?.id) && sameNumber(row.application_number, applicationNumber)
+  );
   if (clash) {
     const year = clash.exam_year === null ? "" : ` ${clash.exam_year}`;
     return {
@@ -433,18 +456,20 @@ export function planExamRecordWrite(
       message: `This application number is already saved for ${clash.exam_name ?? "another exam"}${year}.`,
     };
   }
-  if (target) {
-    const same = target.application_number === applicationNumber && sameSessions(target.sessions_applied, sessions);
-    return same ? { kind: "none" } : { kind: "patch", id: Number(target.id) };
+  if (!target) return { kind: "create" };
+  if (Number(target.exam_year) !== JEE_FORM_EXAM.examYear) {
+    return { kind: "patch", id: Number(target.id), examYear: JEE_FORM_EXAM.examYear };
   }
-  const yearless = holders.find((row) => isJee(row) && row.exam_year === null);
-  if (yearless) return { kind: "patch", id: Number(yearless.id), examYear: JEE_FORM_EXAM.examYear };
-  return { kind: "create" };
+  const same = target.application_number === applicationNumber && sameSessions(target.sessions_applied, sessions);
+  return same ? { kind: "none" } : { kind: "patch", id: Number(target.id) };
 }
 
 // The plan, the record it writes (null for a create), whether that record
-// already holds a password ciphertext, and the number and sessions the
-// Student's JEE Mains 2027 record held before this save (null without one).
+// already holds a password ciphertext for this registration, and the number
+// and sessions the Student's JEE Mains 2027 record held before this save
+// (null without one). A record taken over from another year counts as
+// holding no password: its ciphertext is the old registration's, so Filled
+// needs a password, as for a new record, and the new ciphertext replaces it.
 type ExamRecordTarget = {
   plan: ExamRecordPlan;
   recordId: number | null;
@@ -463,7 +488,7 @@ function planTarget(rows: ExamRecordRow[], examId: number, plan: ExamRecordPlan)
   return {
     plan,
     recordId: row ? Number(row.id) : null,
-    passwordSaved: Boolean(row?.has_password),
+    passwordSaved: Boolean(row?.has_password) && !(plan.kind === "patch" && plan.examYear !== undefined),
     savedNumber: saved?.application_number ?? null,
     savedSessions: saved ? sortedSessions(saved.sessions_applied) : null,
   };
@@ -497,7 +522,9 @@ async function examRecordPlan(
 // record on its own. It always goes with `application_password: null`,
 // clearing any legacy plaintext as the Exams tab does; a write without a new
 // password (a number or sessions change alone) leaves both password columns
-// as they are, as the Exams tab's "keep" does.
+// as they are, as the Exams tab's "keep" does. Taking over an older record
+// also sends `exam_year`; its other exam details (score, rank, dates) are
+// left as they are, not cleared.
 async function applyExamRecordPlan(
   client: PoolClient,
   target: ExamRecordTarget,

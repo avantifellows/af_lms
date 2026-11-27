@@ -26,12 +26,13 @@ const row = (
 });
 
 // The DB Service's create upserts on (student, application number), so the
-// plan must never let a POST move another record.
+// plan must never let a POST move another record, and the Student must never
+// end up with two JEE Mains records.
 describe("planExamRecordWrite", () => {
-  it("creates a record when the Student has no JEE Mains 2027 record and no record with the number", () => {
+  it("creates a record only when the Student has no JEE Mains record at all", () => {
     expect(planExamRecordWrite([], JEE, "2703", [1])).toEqual({ kind: "create" });
-    expect(planExamRecordWrite([row(5, JEE, 2026, "1111")], JEE, "2703", [1])).toEqual({ kind: "create" });
-    expect(planExamRecordWrite([row(5, JEE, null, "1111")], JEE, "2703", [1])).toEqual({ kind: "create" });
+    // Another exam's record with another number doesn't count.
+    expect(planExamRecordWrite([row(9, 7, 2027, "1111", "JEE Advanced")], JEE, "2703", [1])).toEqual({ kind: "create" });
   });
 
   it("updates the existing 2027 record, or leaves it when it already has the number", () => {
@@ -47,21 +48,52 @@ describe("planExamRecordWrite", () => {
     expect(planExamRecordWrite(saved([2, 1, 2]), JEE, "2703", [1, 2])).toEqual({ kind: "none" });
   });
 
-  it("gives the year to a yearless JEE Mains record holding the number, ignoring case and spaces", () => {
+  it("takes over a yearless JEE Mains record holding another number, giving it the year", () => {
+    expect(planExamRecordWrite([row(5, JEE, null, "1111")], JEE, "2703", [1])).toEqual({ kind: "patch", id: 5, examYear: 2027 });
+  });
+
+  it("takes over a yearless JEE Mains record holding the number, ignoring case and spaces, even with the same sessions", () => {
     expect(planExamRecordWrite([row(5, JEE, null, " ab12 ")], JEE, "AB12", [1])).toEqual({ kind: "patch", id: 5, examYear: 2027 });
   });
 
-  it("refuses a number held by another exam, another year, or another record beside the 2027 one", () => {
+  it("takes over a JEE Mains record of another year, whatever its number", () => {
+    expect(planExamRecordWrite([row(5, JEE, 2026, "1111")], JEE, "2703", [1])).toEqual({ kind: "patch", id: 5, examYear: 2027 });
+    expect(planExamRecordWrite([row(5, JEE, 2026, "2703")], JEE, "2703", [1])).toEqual({ kind: "patch", id: 5, examYear: 2027 });
+  });
+
+  it("takes the newest older JEE Mains record (by id) when there are several", () => {
+    const rows = [row(5, JEE, null, "1111"), row(12, JEE, 2026, "2222"), row(8, JEE, 2025, "3333")];
+    expect(planExamRecordWrite(rows, JEE, "2703", [1])).toEqual({ kind: "patch", id: 12, examYear: 2027 });
+  });
+
+  it("prefers the 2027 record over an older one", () => {
+    const rows = [row(5, JEE, null, "1111"), row(7, JEE, 2027, "2222"), row(9, JEE, 2026, "3333")];
+    expect(planExamRecordWrite(rows, JEE, "2703", [1])).toEqual({ kind: "patch", id: 7 });
+    expect(planExamRecordWrite([row(9, JEE, 2026, "3333"), row(7, JEE, 2027, "2703")], JEE, "2703", [1])).toEqual({ kind: "none" });
+  });
+
+  it("refuses a number held by another exam, with or without a JEE Mains record to take over", () => {
     expect(planExamRecordWrite([row(9, 7, null, "2703", "JEE Advanced")], JEE, "2703", [1])).toEqual({
       kind: "conflict",
       message: "This application number is already saved for JEE Advanced.",
     });
-    expect(planExamRecordWrite([row(5, JEE, 2026, "2703")], JEE, "2703", [1])).toEqual({
+    for (const jee of [row(5, JEE, null, "1111"), row(7, JEE, 2027, "1111")]) {
+      expect(planExamRecordWrite([jee, row(9, 7, 2027, " 2703 ", "JEE Advanced")], JEE, "2703", [1])).toEqual({
+        kind: "conflict",
+        message: "This application number is already saved for JEE Advanced 2027.",
+      });
+    }
+  });
+
+  it("refuses a number held by another JEE Mains record beside the target, never moving it", () => {
+    expect(planExamRecordWrite([row(7, JEE, 2027, "1111"), row(5, JEE, null, "2703")], JEE, "2703", [1])).toEqual({
+      kind: "conflict",
+      message: "This application number is already saved for JEE Mains.",
+    });
+    // Two older records: the newest is the target, the other keeps its number.
+    expect(planExamRecordWrite([row(5, JEE, 2026, "2703"), row(8, JEE, null, "1111")], JEE, "2703", [1])).toEqual({
       kind: "conflict",
       message: "This application number is already saved for JEE Mains 2026.",
-    });
-    expect(planExamRecordWrite([row(7, JEE, 2027, "1111"), row(5, JEE, null, "2703")], JEE, "2703", [1])).toMatchObject({
-      kind: "conflict",
     });
   });
 });

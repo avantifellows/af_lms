@@ -876,9 +876,15 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   Mentor of the active Mapping, never read-only; Blended Learning Admins and LMS admins get 403 and
   see the form view only, with "Change status" disabled as "View only" but "Show password"
   working unless read-only) + `canAccessBlendedStudent`. Filled:
-  `planExamRecordWrite` picks the Student's JEE Mains 2027 `student_exam_record` (PATCH), else a
-  yearless JEE Mains record holding the same number (PATCH + `exam_year`), else POST; a number
-  held by any other record is a 409 (the DB Service's create upserts on student + number). The
+  `planExamRecordWrite` picks the Student's JEE Mains 2027 `student_exam_record` (PATCH), else
+  takes over their older JEE Mains record of any other year or none, whatever number it holds
+  (PATCH + `exam_year: 2027`; the newest by id should there be several; its score/rank/date fields
+  are left as is), else POST only when the Student has no JEE Mains record at all. Until
+  registrations are kept per year (af_lms#568), a new JEE form entry overrides the older
+  registration, as the Exams tab does with one row per exam, so the form never leaves a Student
+  with two JEE Mains records. A number held by any record other than that target (another exam's,
+  or another JEE Mains record should there ever be two) is a 409 and is never moved (the DB
+  Service's create upserts on student + number). The
   PDF (≤ 5 MB) goes through `uploadDocumentPages` + `createDocument` as document type
   `jee_main_confirmation` (labelled in the Documents tab by `documentTypeLabel`, not offered in its
   picker). The update (Mapping's Mentor/program/year, actor as `recorded_by_email`) then either
@@ -923,7 +929,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   line (`JeeStatusDetail`: "Sessions 1, 2"). Status-only (team lead) views never carry them.
 - **Exam-portal password (write-only):** Filled also takes `password`. It is required (422
   `fieldErrors.password`, also checked in the browser through `validateJeeForm(…, { requirePassword })`)
-  while the record being written has no `application_password_ciphertext`; once one is saved, a
+  while the record being written has no `application_password_ciphertext`, and always when the
+  record is an older one taken over (its ciphertext is the old registration's: it counts as no
+  password saved, and the new ciphertext replaces it); once one is saved on the 2027 record, a
   blank password keeps it and a new one replaces it. It is trimmed, ≤ 255, refused (403) for a JNV
   NVS-only Student (`isPmuOnlyStudent`, a safety net), encrypted with Aman's `encryptExamPassword`
   (KMS, bound to the Student) before anything is written, sent as `application_password_ciphertext`
@@ -1013,7 +1021,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `lms_student_documents` as the DB Service does and lists requests at `/__requests`.
   `blended-learning-jee-form.spec.ts` (the tab, the status line and the reminder rule) uses Mentor
   C's `JEE_FORM_MENTEES` (K1–K3, seeded last, with
-  the reminder pushed to them and K2's yearless JEE Mains record). `blended-learning-jee-reminder.spec.ts`
+  the reminder pushed to them and K2's yearless JEE Mains record, which the phone test takes over
+  with a new number). `blended-learning-jee-reminder.spec.ts`
   (a push and Push again to a Filled / Not filled / not-recorded mix; a reminder left open for a
   Filled Student ticked by a re-save; a renamed reminder still ticked while an un-keyed twin with
   its text isn't; a removed reminder created again gets the key) uses `JEE_REMINDER_MENTEES` (L1–L7,
@@ -1021,6 +1030,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `JEE_REMINDER_KEY`) and gives it back, maps them to Mentor C, then removes its Common Action
   Items and ends those Mappings (`ended_by_email` `e2e-cleanup@example.com`). E2E has no S3, so the PDF upload is route-tested only.
 - **Not built:** a write-only encrypted application password (the panel leaves a row for it), other
-  exams, any import or prefill. The Exams tab keeps one record per exam, so a Student with both a
-  yearless and a 2027 JEE Mains record shows only one there.
+  exams, any import or prefill, per-year JEE Mains registrations (af_lms#568: until then the form
+  overrides the older record). The Exams tab keeps one record per exam, so a Student with both a
+  yearless and a 2027 JEE Mains record (which the form no longer creates) shows only one there.
 

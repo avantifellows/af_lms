@@ -35,6 +35,8 @@ const SESSIONS = "Sessions applied";
 const SESSIONS_REQUIRED = "Choose the session the student applied for: Session 1, Session 2 or both.";
 const MENTOR_PASSWORD = "e2e-portal-pass-1";
 const PHONE_PASSWORD = "e2e-portal-pass-2";
+// The number the phone test saves over the yearless record's (JEE_EXISTING_RECORD).
+const PHONE_NUMBER = "E2E-JEE-0102";
 // What an admin tries to save, refused: it must reach neither KMS nor the DB Service.
 const ADMIN_PASSWORD = "e2e-admin-pass-9";
 // What a save whose Mapping ends while it waits tries to save, refused the same way.
@@ -753,7 +755,7 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
   test.use({ viewport: { width: 390, height: 844 } });
   const mentee = JEE_FORM_MENTEES.mobile;
 
-  test("fits the phone and updates the yearless JEE Mains record holding the number, clearing but never reading or showing its legacy password", async ({ page }) => {
+  test("fits the phone and takes over the yearless JEE Mains record holding another number, clearing but never reading or showing its legacy password", async ({ page }) => {
     await fetch(`${STUB}/__requests`, { method: "DELETE" });
     const studentId = studentIds[mentee.key];
     const [existing] = await jeeRecords(studentId);
@@ -772,8 +774,11 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
     await toggle.click();
     const open = row(page, mentee);
     await open.getByRole("radio", { name: "Filled", exact: true }).check();
-    await open.getByLabel("Application number").fill(JEE_EXISTING_RECORD.applicationNumber);
-    // A legacy plaintext password doesn't count as saved: the form asks again.
+    // A new registration's number: it overrides the older record's (af_lms#568
+    // will keep them per year).
+    await open.getByLabel("Application number").fill(PHONE_NUMBER);
+    // A legacy plaintext password doesn't count as saved, nor does anything
+    // on a record of another year: the form asks again.
     await open.getByLabel(PASSWORD_LABEL).fill(PHONE_PASSWORD);
     // The session checkboxes are comfortable tap targets too.
     const session2 = open.getByRole("group", { name: SESSIONS }).getByText("Session 2", { exact: true });
@@ -789,14 +794,15 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
     for (const secret of [JEE_EXISTING_RECORD.password, PHONE_PASSWORD]) expect(savedText).not.toContain(secret);
     expect(savedText).not.toMatch(/application_password|ciphertext/i);
     expect((await saved.json()).form.passwordSaved).toBe(true);
-    await expect(rowToggle(page, mentee)).toContainText(JEE_EXISTING_RECORD.applicationNumber);
+    await expect(rowToggle(page, mentee)).toContainText(PHONE_NUMBER);
+    await expect(rowToggle(page, mentee)).not.toContainText(JEE_EXISTING_RECORD.applicationNumber);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     expect(await stubRequests()).toEqual([
       {
         method: "PATCH",
         path: `/api/student-exam-record/${existing.id}`,
         body: {
-          application_number: JEE_EXISTING_RECORD.applicationNumber,
+          application_number: PHONE_NUMBER,
           exam_year: 2027,
           sessions_applied: [2],
           application_password: null,
@@ -804,13 +810,14 @@ test.describe("Blended Learning JEE Form tab — Mentor, phone 390", () => {
         },
       },
     ]);
-    // Still one record, now for 2027, with the ciphertext; the legacy column
-    // was never read, and is now cleared, as the Exams tab clears it.
+    // Still one record, now for 2027 with the new number and the ciphertext;
+    // the legacy column was never read, and is now cleared, as the Exams tab
+    // clears it.
     expect(await jeeRecords(studentId)).toEqual([
       {
         id: existing.id,
         exam_year: 2027,
-        application_number: JEE_EXISTING_RECORD.applicationNumber,
+        application_number: PHONE_NUMBER,
         sessions_applied: [2],
         legacy_cleared: true,
         ciphertext_saved: true,

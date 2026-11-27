@@ -435,8 +435,31 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
     ]);
   });
 
-  it("gives the year to a yearless JEE Mains record holding the same number (as the Exams tab saves them)", async () => {
-    examRecords = [{ id: 55, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: null, application_number: "270310000001" }];
+  it("takes over a yearless JEE Mains record holding another number: one record, now 2027 with the new number", async () => {
+    examRecords = [{ id: 55, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: null, application_number: "240310000042" }];
+    signedInAs(MENTOR_A);
+
+    const res = await record("501", FILLED);
+    expect(res.status).toBe(201);
+    expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
+      [
+        "PATCH",
+        "http://db-service.test/api/student-exam-record/55",
+        JSON.stringify({
+          application_number: "270310000001",
+          exam_year: 2027,
+          sessions_applied: [1],
+          application_password: null,
+          application_password_ciphertext: CIPHERTEXT,
+        }),
+      ],
+    ]);
+    expect(res.body.form.current).toMatchObject({ status: "filled", applicationNumber: "270310000001" });
+    expect(res.body.form.passwordSaved).toBe(true);
+  });
+
+  it("takes over a yearless JEE Mains record holding the same number (as the Exams tab saves them)", async () => {
+    examRecords = [{ id: 55, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: null, application_number: "270310000001", sessions_applied: [1] }];
     signedInAs(MENTOR_A);
 
     expect((await record("501", FILLED)).status).toBe(201);
@@ -453,6 +476,53 @@ describe("POST /api/blended-learning/students/[id]/jee-form: filled", () => {
         }),
       ],
     ]);
+  });
+
+  describe("taking over an older JEE Mains record that holds a password", () => {
+    const OLD_CIPHERTEXT = Buffer.from("kms-ciphertext-of-an-old-registration").toString("base64");
+
+    beforeEach(() => {
+      examRecords = [
+        { id: 55, exam_id: JEE_EXAM_ID, exam_name: "JEE Mains", exam_year: 2026, application_number: "260310000042", sessions_applied: [2], has_password: true },
+      ];
+      storedCiphertext = OLD_CIPHERTEXT;
+      signedInAs(MENTOR_A);
+    });
+
+    it("requires a password (422): the old registration's doesn't count, and nothing is written", async () => {
+      const res = await record("501", FILLED_KEEP);
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ password: expect.any(String) });
+      expect(fetchCalls).toEqual([]);
+      expect(kms.commandCalls(EncryptCommand)).toEqual([]);
+      expect(txWrites).toEqual([]);
+      expect(txOutcomes).toEqual(["rolled back"]);
+      expect(storedCiphertext).toBe(OLD_CIPHERTEXT);
+    });
+
+    it("replaces the old ciphertext with the new one, clearing the legacy column, on the record made 2027", async () => {
+      const res = await record("501", FILLED);
+      expect(res.status).toBe(201);
+      expect(fetchCalls.map((call) => [call.method, call.url, call.body])).toEqual([
+        [
+          "PATCH",
+          "http://db-service.test/api/student-exam-record/55",
+          JSON.stringify({
+            application_number: "270310000001",
+            exam_year: 2027,
+            sessions_applied: [1],
+            application_password: null,
+            application_password_ciphertext: CIPHERTEXT,
+          }),
+        ],
+      ]);
+      expect(storedCiphertext).toBe(CIPHERTEXT);
+      expect(kms.commandCalls(EncryptCommand)).toHaveLength(1);
+      expect(writesTo("INSERT INTO blended_learning_jee_form_updates")).toHaveLength(1);
+      expect(res.text).not.toContain(OLD_CIPHERTEXT);
+      expect(res.text).not.toContain(CIPHERTEXT);
+      expect(res.body.form.passwordSaved).toBe(true);
+    });
   });
 
   it("sends nothing to the DB Service when the stored 2027 record already has the number and a password", async () => {
