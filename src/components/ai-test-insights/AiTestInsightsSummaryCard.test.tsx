@@ -604,8 +604,9 @@ describe("AiTestInsightsSummaryCard polling", () => {
   it.each([
     ["no_data", "missing_category_for_cutoff", "This student has no category on record. Add it in Edit Student, then try again."],
     ["failed", "interrupted", "The run was interrupted."],
+    ["failed", "timed_out", "The AI Summary took too long and was stopped."],
     ["completed", null, null],
-  ] as const)("stops polling once the request is %s", async (state, outcomeCode, message) => {
+  ] as const)("stops polling once the request is %s (%s)", async (state, outcomeCode, message) => {
     vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
     const fetchMock = answerPolls(request({ state, outcomeCode, finishedAt: "2026-11-27T05:34:00Z" }));
     renderWith(request({ state: "running" }));

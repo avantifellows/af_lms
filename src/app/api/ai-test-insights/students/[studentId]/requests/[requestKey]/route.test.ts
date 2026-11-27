@@ -63,13 +63,15 @@ const KEY = "4b0f5c1e-1111-4222-8333-944455556666";
 const OTHER_STUDENT_KEY = "9c0f5c1e-2222-4222-8333-944455557777";
 
 /**
- * A stored request: its view columns, as Postgres returns them, plus the
- * Student it belongs to and how many seconds ago its `updated_at` was.
+ * A stored request: its view columns, as Postgres returns them (`read_at` is
+ * the database's UTC clock at the read, one minute after the request was
+ * made), plus the Student it belongs to and how many seconds ago its
+ * `updated_at` was.
  */
 type Stored = Record<string, unknown> & { student_id: number; updatedSecondsAgo: number };
 
 /** The columns the mock stores that the view read does not return. */
-const STORE_ONLY = new Set(["student_id", "updatedSecondsAgo"]);
+const STORE_ONLY = new Set(["student_id", "updatedSecondsAgo", "stalled"]);
 
 const stored = (overrides: Partial<Stored> = {}): Stored => ({
   request_key: KEY,
@@ -79,6 +81,7 @@ const stored = (overrides: Partial<Stored> = {}): Stored => ({
   requested_at: "2026-11-27T05:30:00Z",
   requested_by_name: "Asha Teacher",
   finished_at: null,
+  read_at: "2026-11-27T05:31:00Z",
   student_id: 1001,
   updatedSecondsAgo: 45,
   ...overrides,
@@ -174,10 +177,12 @@ beforeEach(() => {
     }
     if (/UPDATE ai_test_insight_requests/.test(sql)) {
       // The re-delivery claim: `updated_at` to now, only for a queued request
-      // last updated at least 30 seconds ago.
+      // last updated at least 30 seconds ago and made under 20 minutes ago
+      // (the stored `stalled` flag says whether it was made 20 minutes ago or more).
       const target = requests.get(String(params[0]));
-      const guarded = /state = 'queued'/.test(sql) && /interval '30 seconds'/.test(sql);
-      if (!target || !guarded || target.state !== "queued" || target.updatedSecondsAgo < 30) return [];
+      const guarded =
+        /state = 'queued'/.test(sql) && /interval '30 seconds'/.test(sql) && /interval '20 minutes'/.test(sql);
+      if (!target || !guarded || target.state !== "queued" || target.updatedSecondsAgo < 30 || target.stalled) return [];
       target.updatedSecondsAgo = 0;
       return [{ request_key: target.request_key }];
     }
@@ -315,6 +320,29 @@ describe("GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]",
       expect((await get("1001", KEY)).status).toBe(200);
       expect(mockFetch).not.toHaveBeenCalled();
       expect(updates()).toHaveLength(0);
+    });
+
+    it.each(["queued", "running"])(
+      "answers a %s request made 20 minutes ago as failed with timed_out, with no wake or enqueue call and no row changed",
+      async (state) => {
+        Object.assign(requests.get(KEY)!, { state, read_at: "2026-11-27T05:50:00Z", updatedSecondsAgo: 600, stalled: true });
+
+        const response = await get("1001", KEY);
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ request: { ...VIEW, state: "failed", outcomeCode: "timed_out" } });
+        expect(mockFetch).not.toHaveBeenCalled();
+        expect(updates()).toHaveLength(0);
+      },
+    );
+
+    it("makes no delivery call when the request stalls between the read and the claim", async () => {
+      // Read one second under 20 minutes, so it still reads queued; by the
+      // claim, the database's clock has passed the limit.
+      Object.assign(requests.get(KEY)!, { read_at: "2026-11-27T05:49:59Z", updatedSecondsAgo: 600, stalled: true });
+
+      expect((await get("1001", KEY)).status).toBe(200);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it.each([...VIEW_ONLY_ROLES])("never re-delivers on a poll by %s, a viewer", async (role) => {

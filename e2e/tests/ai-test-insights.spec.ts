@@ -14,6 +14,7 @@ import {
   AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
+  backdateInsightRequest,
   backdateInsightRequestUpdate,
   endInsightRequestWithoutSummary,
   markInsightRequestRunning,
@@ -857,6 +858,113 @@ test.describe("AI Test Insights tab", () => {
             expect(Math.abs((row.finishedAt as number) - nowSeconds)).toBeLessThan(90);
             expect(Math.abs((row.startedAt as number) - nowSeconds)).toBeLessThan(90);
           }
+        });
+      });
+
+      // A stalled request (#566): one still queued or running 20 minutes after
+      // it was made reads as failed with timed_out. A read leaves the row as
+      // it is; the next Generate ("Try again") closes it. Requests are
+      // back-dated, so as not to wait 20 minutes.
+      test.describe("A request that stalled", () => {
+        const WRITING = "Writing the AI Summary. This usually takes about 4 minutes.";
+        const TIMED_OUT = "The AI Summary took too long and was stopped.";
+        // Up to two 10-second polls.
+        const POLLED = { timeout: 25_000 };
+        const statusPath = (requestKey: string) =>
+          `/api/ai-test-insights/students/${ids.studentIds.esha}/requests/${requestKey}`;
+
+        test("shows a request 20 minutes old as failed with Try again, after a reload too, and Try again closes it and makes one new request", async ({
+          page,
+        }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "hold" });
+          const summary = await generateForEsha(page);
+          const tryAgain = summary.getByRole("button", { name: "Try again" });
+          await expect(summary.getByText(WRITING)).toBeVisible(POLLED);
+          const [stalled] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(stalled).toMatchObject({ state: "running", selectedTestIds: ["T9"] });
+
+          // The page is still following it: the next poll reads it as failed,
+          // and the card stops polling.
+          await backdateInsightRequest(pool, stalled.requestKey, 20);
+          await expect(summary.getByText(TIMED_OUT, { exact: true })).toBeVisible(POLLED);
+          await expect(tryAgain).toBeVisible();
+          await expect(summary.getByText(WRITING)).toHaveCount(0);
+          let polls = 0;
+          page.on("request", (request) => {
+            if (new URL(request.url()).pathname === statusPath(stalled.requestKey)) polls += 1;
+          });
+          await page.waitForTimeout(12_000);
+          expect(polls).toBe(0);
+
+          // A reload shows the same, and no read changed the row.
+          await page.reload();
+          await expect(summary.getByText(TIMED_OUT, { exact: true })).toBeVisible();
+          await expect(tryAgain).toBeVisible();
+          expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([
+            expect.objectContaining({ requestKey: stalled.requestKey, state: "running", outcomeCode: null, finishedAt: null }),
+          ]);
+
+          // Try again: the stalled row ends failed with timed_out, and exactly
+          // one new row is made with the same tests.
+          await steerFakeAiMentorshipGuide({ enqueue: "accept" });
+          await tryAgain.click();
+          await expect(summary.getByText("Waiting to start. This can take about 2 minutes if the server was asleep.")).toBeVisible();
+          await expect(tryAgain).toHaveCount(0);
+          const nowSeconds = Date.now() / 1000;
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows).toHaveLength(2);
+          expect(rows[0]).toMatchObject({ requestKey: stalled.requestKey, state: "failed", outcomeCode: "timed_out" });
+          expect(Math.abs((rows[0].finishedAt as number) - nowSeconds)).toBeLessThan(60);
+          expect(Math.abs(rows[0].updatedAt - nowSeconds)).toBeLessThan(60);
+          expect(rows[1].requestKey).not.toBe(stalled.requestKey);
+          expect(rows[1]).toMatchObject({ state: "queued", outcomeCode: null, selectedTestIds: ["T9"] });
+        });
+
+        test("re-delivers nothing on a Teacher's poll of a stalled queued request", async ({ page }) => {
+          await steerFakeAiMentorshipGuide({ enqueue: "asleep" });
+          const summary = await generateForEsha(page);
+          await expect(summary.getByText("Waiting to start. This can take about 2 minutes if the server was asleep.")).toBeVisible();
+          const [stalled] = await readInsightRequests(pool, ids.studentIds.esha);
+          await page.goto("about:blank");
+          // Last touched long enough ago for a re-delivery, and made 20 minutes ago.
+          await backdateInsightRequestUpdate(pool, stalled.requestKey, 60);
+          await backdateInsightRequest(pool, stalled.requestKey, 20);
+          await resetFakeAiMentorshipGuide();
+
+          const response = await page.request.get(statusPath(stalled.requestKey));
+
+          expect(response.status()).toBe(200);
+          expect((await response.json()).request).toMatchObject({
+            requestKey: stalled.requestKey,
+            state: "failed",
+            outcomeCode: "timed_out",
+          });
+          expect(await fakeAiMentorshipGuideCalls()).toEqual([]);
+          const [row] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(row).toMatchObject({ state: "queued", outcomeCode: null, finishedAt: null });
+        });
+
+        test("shows the AI Summary when the generator finishes a stalled request nobody retried", async ({ page }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "hold" });
+          const summary = await generateForEsha(page);
+          await expect(summary.getByText(WRITING)).toBeVisible(POLLED);
+          const [stalled] = await readInsightRequests(pool, ids.studentIds.esha);
+          await backdateInsightRequest(pool, stalled.requestKey, 20);
+          await page.reload();
+          await expect(summary.getByText(TIMED_OUT, { exact: true })).toBeVisible();
+
+          // The generator finishes it late; nobody pressed Try again.
+          await endFakeAiMentorshipGuideRequest(stalled.requestKey, { state: "completed" });
+          await page.reload();
+          const text = summary.getByRole("article", { name: "AI Summary text" });
+          await expect(text.getByRole("heading", { name: "Where the student stands" })).toBeVisible();
+          await expect(summary.getByText(TIMED_OUT, { exact: true })).toHaveCount(0);
+          await expect(summary.getByRole("link", { name: "Download PDF" })).toBeVisible();
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ requestKey: stalled.requestKey, state: "completed", outcomeCode: null });
         });
       });
 

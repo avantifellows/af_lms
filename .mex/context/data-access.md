@@ -1027,7 +1027,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   no layer reads the UTC `timestamp(0)` as local time) and `requestedByName` (the requester
   `user`'s name, else their email). `createRequest` keeps the PRD's step order in comments: (1) a
   `queued`/`running` request → `already_running` with it; (2, 3: later) same tests / not
-  configured; (4) `withTransaction` insert (later: close a stalled request first) — a `23505` on
+  configured; (4) `withTransaction`: close a stalled request (#566), then insert — a `23505` on
   `ati_requests_active_student_unique` returns `already_running` with the winner; (5: later)
   deliver. The insert writes a server `randomUUID()` key, the Student context's `school.id` and
   `programId` (the page's `centre` if it lists the Student, else the lowest centre),
@@ -1038,6 +1038,24 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `getAcademicMentorshipActorUserId`); neither → 409 `no_linked_user`. The Student page reads
   `latestRequest` on the server (no "page data" route). E2E: `readInsightRequests` and
   `markInsightRequestRunning` in `e2e/helpers/ai-test-insights-fixtures.ts`.
+- **Stall rule (#566):** a `queued` or `running` request whose `requested_at` is 20 minutes old or
+  more is shown as `failed` with `outcomeCode: "timed_out"`. The rule lives in one place,
+  `insightRequestAsShown(view, nowUtc)` in `src/lib/ai-test-insights-requests.ts`, and `toView`
+  applies it to every read (`latestRequest`, `requestByKey`, the already-running check), so every
+  route and the Student page agree. The clock is the database's: each view read also selects
+  `read_at` = `(now() AT TIME ZONE 'UTC')::timestamp(0)`, rounded to the second as the
+  `timestamp(0)` `requested_at` is stored (`to_char` truncates, the column rounds; a truncated
+  clock read a request made in the same second as one second in the future, so a request
+  back-dated by exactly 20 minutes still read in progress). A read never changes the row. Only the
+  next Generate closes a stalled row: `createRequest` counts only a fresh in-progress request as
+  `already_running`; otherwise, in the insert's transaction, it runs `UPDATE … SET state =
+  'failed', outcome_code = 'timed_out', finished_at, updated_at (UTC) WHERE student_id = $1 AND
+  state IN ('queued', 'running') AND requested_at <= <rounded UTC now> - interval '20 minutes'`
+  before the insert. The re-delivery claim adds `AND NOT (<same stall condition>)`, so a stalled
+  request is never woken or enqueued again (the status route also sees it as `failed`). A late
+  generator result on a stalled row nobody retried is accepted (AI Mentorship Guide updates `WHERE
+  state IN ('queued', 'running')`), so the row reads `completed`. E2E `backdateInsightRequest`
+  moves `requested_at` back by N minutes.
 - **Requests ended without an AI Summary (#561):** `no_data` and `failed` rows carry
   `outcome_code`; the card turns it into words with `outcomeMessage(code)` in the client-safe
   `src/lib/ai-test-insights-outcomes.ts` (the PRD table; any other code, or none, reads "Something
@@ -1051,8 +1069,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   reads `requestByKey` after Student access (a read), so another Student's key is 404, and answers
   `{ request }` (`AiTestInsightsRequestStatusResponse`). It is the one read with a side effect: for
   `student.canEdit` and a `queued` request it calls `redeliver(requestKey)`, one of the three updates the PRD lets
-  the LMS make after insert (with `enqueue_rejected` and, later, the stall close): `UPDATE … SET
-  updated_at = now() AT TIME ZONE 'UTC' WHERE request_key = $1 AND state = 'queued' AND updated_at
+  the LMS make after insert (with `enqueue_rejected` and the stall close): `UPDATE … SET
+  updated_at = now() AT TIME ZONE 'UTC' WHERE request_key = $1 AND state = 'queued' AND not stalled (#566) AND updated_at
   <= now() AT TIME ZONE 'UTC' - interval '30 seconds' RETURNING request_key`. Only a returned row
   delivers (5 s per call), so two polls inside 30 s make one enqueue call; a rejection marks
   `enqueue_rejected` with the same `state = 'queued'` guard. Not configured → no claim. The route

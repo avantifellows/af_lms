@@ -17,7 +17,10 @@ import {
 // `not_configured` when this environment has no delivery settings (#562), with
 // no row written. A created request has been delivered to AI Mentorship Guide
 // and is returned as it reads after delivery: `failed` with `enqueue_rejected`
-// if the generator refused it.
+// if the generator refused it. A request still `queued` or `running` 20
+// minutes after it was made has stalled: it does not count as already
+// running, and this Generate closes it (`failed`, `timed_out`) in the same
+// transaction as the new insert.
 //
 // An optional `centre` query value, as on the Student page, picks the centre
 // whose School and Program the request records.

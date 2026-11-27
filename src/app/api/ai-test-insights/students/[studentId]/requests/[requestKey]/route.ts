@@ -16,6 +16,8 @@ import type { AiTestInsightsRequestStatusResponse } from "@/lib/ai-test-insights
 // missed while the generator booted is not lost. A viewer's poll never
 // re-delivers. The answer is `{ request }` either way, as the request reads
 // after any re-delivery; a failed re-delivery is logged and never changes it.
+// A request made 20 minutes ago or more reads `failed` with `timed_out` (the
+// stall rule) and is never delivered again; the poll leaves its row as it is.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ studentId: string; requestKey: string }> },

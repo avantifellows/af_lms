@@ -9,11 +9,21 @@ import { randomUUID } from "node:crypto";
 
 import type { AiTestInsightsStudentContext } from "@/lib/ai-test-insights-access";
 import { aiTestInsightsDeliverySettings, deliverInsightRequest } from "@/lib/ai-test-insights-delivery";
-import type { AiTestInsightsRequestState, InsightRequestView } from "@/lib/ai-test-insights-shared";
+import {
+  isInsightRequestInProgress,
+  type AiTestInsightsRequestState,
+  type InsightRequestView,
+} from "@/lib/ai-test-insights-shared";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { query, withTransaction } from "@/lib/db";
 
 const UTC_NOW = "(now() AT TIME ZONE 'UTC')";
+/**
+ * The UTC clock rounded to the second, as `requested_at` (`timestamp(0)`) is
+ * stored. The stall rule compares with this, in the reads and in the guards,
+ * so a request is never read as made in the future and both agree.
+ */
+const UTC_NOW_SECONDS = `${UTC_NOW}::timestamp(0)`;
 /** A stored UTC timestamp as ISO 8601 with a `Z`, so no layer reads it as local time. */
 const isoUtc = (column: string) => `to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
 /** The unique index that allows one `queued` or `running` request per Student. */
@@ -22,6 +32,15 @@ const ACTIVE_STUDENT_INDEX = "ati_requests_active_student_unique";
 const GENERATE_DELIVERY_TIMEOUT_MS = 10_000;
 /** Each delivery call's limit when a status poll re-delivers a request. */
 const REDELIVERY_TIMEOUT_MS = 5_000;
+/**
+ * The stall limit: a `queued` or `running` request this old or older, counted
+ * from `requested_at`, has stalled. Not a setting.
+ */
+const STALL_MINUTES = 20;
+/** SQL: the request was made at least the stall limit ago. */
+const STALLED = `requested_at <= ${UTC_NOW_SECONDS} - interval '${STALL_MINUTES} minutes'`;
+/** The outcome code of a request shown, and at the next Generate closed, as stalled. */
+const TIMED_OUT = "timed_out";
 
 type RequestRow = {
   request_key: string;
@@ -31,6 +50,8 @@ type RequestRow = {
   requested_at: string;
   requested_by_name: string | null;
   finished_at: string | null;
+  /** The database's UTC clock at the read, which the stall rule compares with. */
+  read_at: string;
 };
 
 /** The view columns of a request row `r` joined to its requester `u`. */
@@ -40,18 +61,37 @@ const VIEW_COLUMNS = `r.request_key,
        r.selected_test_ids,
        ${isoUtc("r.requested_at")} AS requested_at,
        COALESCE(NULLIF(BTRIM(CONCAT_WS(' ', BTRIM(u.first_name), BTRIM(u.last_name))), ''), u.email) AS requested_by_name,
-       ${isoUtc("r.finished_at")} AS finished_at`;
+       ${isoUtc("r.finished_at")} AS finished_at,
+       ${isoUtc(UTC_NOW_SECONDS)} AS read_at`;
 
+/**
+ * The stall rule, the one place that decides how a request is shown: a
+ * `queued` or `running` request whose `requestedAt` is 20 minutes or more
+ * before `nowUtc` reads `failed` with `timed_out`. Any other request is shown
+ * as stored. Only the shown copy changes; the row is closed by the next
+ * Generate (`createRequest`), and nothing else closes it.
+ */
+export function insightRequestAsShown(request: InsightRequestView, nowUtc: Date): InsightRequestView {
+  if (request.state !== "queued" && request.state !== "running") return request;
+  const age = nowUtc.getTime() - Date.parse(request.requestedAt);
+  if (!(age >= STALL_MINUTES * 60_000)) return request;
+  return { ...request, state: "failed", outcomeCode: TIMED_OUT };
+}
+
+/** A row as every read shows it: the stall rule applied against the database's UTC clock at the read. */
 function toView(row: RequestRow): InsightRequestView {
-  return {
-    requestKey: row.request_key,
-    state: row.state,
-    outcomeCode: row.outcome_code,
-    selectedTestIds: row.selected_test_ids,
-    requestedAt: row.requested_at,
-    requestedByName: row.requested_by_name ?? "",
-    finishedAt: row.finished_at,
-  };
+  return insightRequestAsShown(
+    {
+      requestKey: row.request_key,
+      state: row.state,
+      outcomeCode: row.outcome_code,
+      selectedTestIds: row.selected_test_ids,
+      requestedAt: row.requested_at,
+      requestedByName: row.requested_by_name ?? "",
+      finishedAt: row.finished_at,
+    },
+    new Date(row.read_at),
+  );
 }
 
 /** The Student's newest request by `requested_at`, then id; null when there is none. */
@@ -120,17 +160,19 @@ function isActiveStudentConflict(error: unknown): boolean {
 
 /**
  * Asks for an AI Summary of the Student's ticked tests. The PRD's steps, in
- * order; this slice has steps 1 and 4 (later slices fill in the rest):
+ * order (step 2 arrives with a later slice):
  *
- * 1. A `queued` or `running` request exists for the Student: `already_running`
- *    with it.
+ * 1. A fresh (not stalled) `queued` or `running` request exists for the
+ *    Student: `already_running` with it.
  * 2. (Later: a `completed` request with the same tests and no `generateAgain`
  *    returns `existing`.)
  * 3. Generation is not configured (`@/lib/ai-test-insights-delivery`):
  *    `not_configured`, and nothing is written.
- * 4. In one transaction, (later: close a stalled request, then) insert the new
- *    row. A unique violation on the one-running-request index is not an
- *    error: `already_running` with the row that won.
+ * 4. In one transaction, close the Student's stalled request (`failed`,
+ *    `timed_out`; it still holds the one running slot), then insert the new
+ *    row. This is the only place a stalled request is closed. A unique
+ *    violation on the one-running-request index is not an error:
+ *    `already_running` with the row that won.
  * 5. Deliver to AI Mentorship Guide, then return `created` with the row as it
  *    reads after delivery.
  */
@@ -144,19 +186,28 @@ export async function createRequest(params: {
 }): Promise<CreateRequestResult> {
   const { student, actorUserId, selectedTestIds } = params;
 
-  // 1. One running request per Student.
+  // 1. One running request per Student. A stalled one reads `failed`, so it
+  //    does not count.
   const running = await inProgressRequest(student.studentId);
-  if (running) return { outcome: "already_running", request: running };
+  if (running && isInsightRequestInProgress(running)) return { outcome: "already_running", request: running };
 
   // 3. Generation must be configured before anything is written.
   const delivery = aiTestInsightsDeliverySettings();
   if (!delivery) return { outcome: "not_configured" };
 
-  // 4. Insert.
+  // 4. Close a stalled request, then insert.
   const requestKey = randomUUID();
   let inserted: RequestRow;
   try {
     inserted = await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE ai_test_insight_requests
+         SET state = 'failed', outcome_code = '${TIMED_OUT}', finished_at = ${UTC_NOW}, updated_at = ${UTC_NOW}
+         WHERE student_id = $1
+           AND state IN ('queued', 'running')
+           AND ${STALLED}`,
+        [student.studentId],
+      );
       const result = await client.query<RequestRow>(
         `WITH r AS (
            INSERT INTO ai_test_insight_requests
@@ -214,8 +265,9 @@ async function markEnqueueRejected(requestKey: string): Promise<void> {
  * request belongs to the Student.
  *
  * At most once every 30 seconds per request: one conditional update stamps
- * `updated_at` where the request is `queued` and `updated_at` is at least 30
- * seconds old, and only the caller whose update changed the row delivers.
+ * `updated_at` where the request is `queued`, not stalled, and `updated_at`
+ * is at least 30 seconds old, and only the caller whose update changed the
+ * row delivers. A stalled request is never delivered again.
  * The outcome is handled as on Generate, each call limited to 5 seconds.
  * Returns whether this call delivered. Not configured: nothing happens.
  */
@@ -228,6 +280,7 @@ export async function redeliver(requestKey: string): Promise<boolean> {
      SET updated_at = ${UTC_NOW}
      WHERE request_key = $1
        AND state = 'queued'
+       AND NOT (${STALLED})
        AND updated_at <= ${UTC_NOW} - interval '30 seconds'
      RETURNING request_key`,
     [requestKey],

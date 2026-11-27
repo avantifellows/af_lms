@@ -66,7 +66,8 @@ const NO_FEATURE_ROLES = ROLES.filter(
   (role) => role !== "teacher" && !(VIEW_ONLY_ROLES as readonly string[]).includes(role),
 );
 
-// A request row as Postgres returns the view read.
+// A request row as Postgres returns the view read: `read_at` is the
+// database's UTC clock at the read, one minute after the request was made.
 const viewRow = (overrides: Record<string, unknown> = {}) => ({
   request_key: "4b0f5c1e-1111-4222-8333-944455556666",
   state: "queued",
@@ -75,6 +76,7 @@ const viewRow = (overrides: Record<string, unknown> = {}) => ({
   requested_at: "2026-11-27T05:30:00Z",
   requested_by_name: "Asha Teacher",
   finished_at: null,
+  read_at: "2026-11-27T05:31:00Z",
   ...overrides,
 });
 
@@ -280,6 +282,69 @@ describe("POST /api/ai-test-insights/students/[studentId]/requests", () => {
         },
       });
       expect(inserts()).toHaveLength(0);
+    });
+
+    it.each(["queued", "running"])(
+      "answers already_running for a %s request made one second under 20 minutes ago, and writes nothing",
+      async (state) => {
+        openRequest = viewRow({ request_key: "fresh-key", state, read_at: "2026-11-27T05:49:59Z" });
+
+        const response = await post("1001", { selectedTestIds: ["T9"] });
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ outcome: "already_running", request: { requestKey: "fresh-key", state } });
+        expect(mockClientQuery).not.toHaveBeenCalled();
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["queued", "running"])(
+      "closes a %s request made 20 minutes ago as timed_out and records the new one, in one transaction",
+      async (state) => {
+        openRequest = viewRow({ request_key: "stalled-key", state, read_at: "2026-11-27T05:50:00Z" });
+        const closed: string[] = [];
+        const base = mockClientQuery.getMockImplementation()!;
+        mockClientQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
+          if (/UPDATE ai_test_insight_requests/.test(sql)) {
+            // Postgres closes the Student's stalled request only where the guard holds.
+            const guarded =
+              sql.includes("state IN ('queued', 'running')") && sql.includes("interval '20 minutes'");
+            if (params[0] === 1001 && guarded && openRequest) closed.push(String(openRequest.request_key));
+            return { rows: [] };
+          }
+          return base(sql, params);
+        });
+
+        const response = await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+        expect(response.status).toBe(201);
+        const body = await response.json();
+        expect(body.outcome).toBe("created");
+        expect(body.request).toMatchObject({ state: "queued", selectedTestIds: ["T9", "T4"] });
+        expect(body.request.requestKey).not.toBe("stalled-key");
+        expect(closed).toEqual(["stalled-key"]);
+        // Both statements ran on the transaction's client, the close first.
+        const statements = mockClientQuery.mock.calls.map(([sql]) => sql as string);
+        expect(statements).toHaveLength(2);
+        expect(statements[0]).toMatch(/UPDATE ai_test_insight_requests/);
+        expect(statements[1]).toMatch(/INSERT INTO ai_test_insight_requests/);
+        expect(enqueueCalls()).toHaveLength(1);
+      },
+    );
+
+    it("closes the stalled request as failed with timed_out, finished_at and updated_at in UTC", async () => {
+      openRequest = viewRow({ request_key: "stalled-key", state: "running", read_at: "2026-11-27T06:30:00Z" });
+
+      await post("1001", { selectedTestIds: ["T9"] });
+
+      const [[sql, params]] = mockClientQuery.mock.calls.filter(([text]) => /UPDATE ai_test_insight_requests/.test(text));
+      expect(params).toEqual([1001]);
+      expect(sql).toContain("state = 'failed'");
+      expect(sql).toContain("outcome_code = 'timed_out'");
+      expect(sql).toContain("finished_at = (now() AT TIME ZONE 'UTC')");
+      expect(sql).toContain("updated_at = (now() AT TIME ZONE 'UTC')");
+      expect(sql).toContain("state IN ('queued', 'running')");
+      expect(sql).not.toMatch(/now\(\)(?! AT TIME ZONE 'UTC')/);
     });
 
     it("answers already_running with the row that won when the insert hits the one-running-request index", async () => {

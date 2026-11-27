@@ -454,6 +454,19 @@ export async function backdateInsightRequestUpdate(pool: Pool, requestKey: strin
   if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no request to back-date");
 }
 
+/**
+ * Moves a request's `requested_at` back by this many minutes, so a spec need
+ * not wait out the 20 minutes after which a request in progress has stalled.
+ * Only `requested_at` moves: the row is otherwise as it was.
+ */
+export async function backdateInsightRequest(pool: Pool, requestKey: string, minutes: number): Promise<void> {
+  const result = await pool.query(
+    `UPDATE ai_test_insight_requests SET requested_at = requested_at - make_interval(mins => $2) WHERE request_key = $1`,
+    [requestKey, minutes],
+  );
+  if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no request to back-date");
+}
+
 /** Moves a `queued` request to `running`, as AI Mentorship Guide does when it claims it. */
 export async function markInsightRequestRunning(pool: Pool, requestKey: string): Promise<void> {
   const result = await pool.query(
