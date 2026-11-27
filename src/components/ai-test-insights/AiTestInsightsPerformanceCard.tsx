@@ -6,7 +6,8 @@
 // graph and per-test table, nothing else: no chapter sections, no
 // predicted-level header, no new chart. Every test the report lists shows,
 // Part tests and missed ones included. Its failures stay inside the card.
-import { Button, Card } from "@/components/ui";
+import { Card } from "@/components/ui";
+import { RetryAlert } from "@/components/ui/RetryAlert";
 import { ScoreGraph } from "@/components/performance/student-support/chips";
 import { TestHistory } from "@/components/performance/student-support/StudentReport";
 import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
@@ -40,14 +41,7 @@ function CardBody({ state, retry }: { state: LoadState; retry: () => void }) {
     return <p className="py-6 text-center text-sm text-text-muted">No test results yet</p>;
   }
   if (state.status === "failed") {
-    return (
-      <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-danger bg-danger-bg p-4">
-        <p className="text-sm text-text-primary">Test results could not be loaded. Please try again.</p>
-        <Button variant="secondary" onClick={retry}>
-          Retry
-        </Button>
-      </div>
-    );
+    return <RetryAlert onRetry={retry}>Test results could not be loaded. Please try again.</RetryAlert>;
   }
   return (
     <div className="space-y-4">

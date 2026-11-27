@@ -7,7 +7,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button, Card, Input, Select } from "@/components/ui";
+import { Card, Input, Select } from "@/components/ui";
+import { RetryAlert } from "@/components/ui/RetryAlert";
 import {
   aiTestInsightsListUrl,
   aiTestInsightsStudentPageUrl,
@@ -162,14 +163,7 @@ export default function AiTestInsightsTab({
   }
 
   if (state.status === "failed") {
-    return (
-      <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-danger bg-danger-bg p-4">
-        <p className="text-sm text-text-primary">Couldn&apos;t load AI Test Insights. Please try again.</p>
-        <Button variant="secondary" onClick={() => void retry()}>
-          Retry
-        </Button>
-      </div>
-    );
+    return <RetryAlert onRetry={() => void retry()}>Couldn&apos;t load AI Test Insights. Please try again.</RetryAlert>;
   }
 
   return (

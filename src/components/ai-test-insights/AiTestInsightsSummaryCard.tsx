@@ -57,6 +57,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import TestInsightText from "@/components/ai-test-insights/TestInsightText";
 import { Button, Card, Modal } from "@/components/ui";
+import { RetryAlert } from "@/components/ui/RetryAlert";
 import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
 import {
   aiTestInsightsRequestPdfUrl,
@@ -211,14 +212,7 @@ function CompletedSummary({
       {state.status === "loading" && (
         <p className="py-6 text-center text-sm text-text-muted">Loading the AI Summary…</p>
       )}
-      {state.status === "failed" && (
-        <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-danger bg-danger-bg p-4">
-          <p className="text-sm text-text-primary">The AI Summary could not be loaded</p>
-          <Button variant="secondary" onClick={retry}>
-            Retry
-          </Button>
-        </div>
-      )}
+      {state.status === "failed" && <RetryAlert onRetry={retry}>The AI Summary could not be loaded</RetryAlert>}
       {state.status === "loaded" && <TestInsightText markdown={state.markdown} />}
       <a
         href={aiTestInsightsRequestPdfUrl(requestsUrl, request.requestKey)}
@@ -425,12 +419,7 @@ function CardBody({
   if (tests.status === "failed") {
     return (
       <>
-        <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-danger bg-danger-bg p-4">
-          <p className="text-sm text-text-primary">Tests could not be loaded</p>
-          <Button variant="secondary" onClick={onRetry}>
-            Retry
-          </Button>
-        </div>
+        <RetryAlert onRetry={onRetry}>Tests could not be loaded</RetryAlert>
         {generateOff}
       </>
     );
