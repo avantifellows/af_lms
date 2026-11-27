@@ -43,7 +43,9 @@
 //
 // It also offers "Download PDF" (#565): a link to the PDF route, which
 // answers with the PDF the generator made. The link stays whether the text
-// loads, is loading or failed. Viewers download it too.
+// loads, is loading or failed. Viewers download it too. A click asks the
+// route first, so a route that cannot redirect (404, 502, 503) leaves the
+// Student page in place with a message and Retry.
 //
 // The same tests again (#567): while the ticked tests are the shown
 // completed request's tests, Generate reads "Generate again" and opens a
@@ -54,7 +56,7 @@
 // shows that request with the note "An AI Summary for these tests already
 // exists", and the ticked tests now match it, so "Generate again" is offered.
 // Viewers never see Generate or "Generate again".
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore, type MouseEvent } from "react";
 
 import TestInsightText from "@/components/ai-test-insights/TestInsightText";
 import { Button, Card, Modal } from "@/components/ui";
@@ -192,6 +194,75 @@ function madeFrom(selectedTestIds: string[], tests: AiTestInsightsTestsState): s
   return selectedTestIds.map((id) => names.get(id) ?? "an earlier test").join(", ");
 }
 
+const PDF_NOT_CONFIGURED_MESSAGE =
+  "The PDF can't be downloaded here: AI Summary reading is not set up in this environment.";
+const PDF_NOT_FOUND_MESSAGE = "The PDF of this AI Summary could not be found.";
+const PDF_FAILED_MESSAGE = "The PDF could not be downloaded. Please try again.";
+
+/**
+ * Asks the PDF route without following its redirect. A redirect (an opaque
+ * one, as `redirect: "manual"` gives it) means the PDF is there; otherwise
+ * the message to show: the route answers JSON for 404 (no PDF), 503 (reading
+ * not set up) and 502 (unreadable).
+ */
+async function askForPdf(url: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const response = await fetch(url, { redirect: "manual", cache: "no-store" });
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) return { ok: true };
+    const body = (await response.json().catch(() => null)) as { code?: string } | null;
+    if (response.status === 503 && body?.code === NOT_CONFIGURED_CODE) return { ok: false, message: PDF_NOT_CONFIGURED_MESSAGE };
+    if (response.status === 404) return { ok: false, message: PDF_NOT_FOUND_MESSAGE };
+  } catch {
+    // A network failure reads as any other failure.
+  }
+  return { ok: false, message: PDF_FAILED_MESSAGE };
+}
+
+/**
+ * "Download PDF" (#565). A plain click asks the route first, so an answer
+ * that is not a redirect keeps the Student page and shows a message with
+ * Retry (PR #573 review: the bare link replaced the page with the JSON). On a
+ * redirect the browser goes to the route itself, which redirects again to a
+ * fresh 60-second URL that the store answers as a download (named
+ * `ai-summary-<student.id>-<date>.pdf`), so the page stays. Each ask signs a
+ * URL; nothing is written. A click that opens a new tab or window is left to
+ * the browser.
+ */
+function DownloadPdf({ url }: { url: string }) {
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function download() {
+    if (asking) return;
+    setAsking(true);
+    setError(null);
+    const result = await askForPdf(url);
+    setAsking(false);
+    if (result.ok) window.location.assign(url);
+    else setError(result.message);
+  }
+
+  function onClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void download();
+  }
+
+  return (
+    <>
+      <a
+        href={url}
+        onClick={onClick}
+        aria-busy={asking || undefined}
+        className="inline-flex text-sm font-medium text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        Download PDF
+      </a>
+      {error && <RetryAlert onRetry={() => void download()}>{error}</RetryAlert>}
+    </>
+  );
+}
+
 /** A `completed` request: its AI Summary text, its PDF, the tests it was made from, who asked for it and when. */
 function CompletedSummary({
   request,
@@ -215,12 +286,7 @@ function CompletedSummary({
       )}
       {state.status === "failed" && <RetryAlert onRetry={retry}>The AI Summary could not be loaded</RetryAlert>}
       {state.status === "loaded" && <TestInsightText markdown={state.markdown} />}
-      <a
-        href={aiTestInsightsRequestPdfUrl(requestsUrl, request.requestKey)}
-        className="inline-flex text-sm font-medium text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      >
-        Download PDF
-      </a>
+      <DownloadPdf url={aiTestInsightsRequestPdfUrl(requestsUrl, request.requestKey)} />
       <div className="space-y-1 text-xs text-text-muted">
         <p>Made from: {madeFrom(request.selectedTestIds, tests)}</p>
         <p>

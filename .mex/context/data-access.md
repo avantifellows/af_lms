@@ -1127,3 +1127,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   name). Answers 302 with `Cache-Control: no-store` and the same `Content-Disposition`; 503
   `not_configured`; 502 when signing throws. No bytes pass through the LMS, nothing is written, no wake
   or enqueue. Logs: request key, `student.id`, reason, error name — never a key, the URL or a name.
+  The card's link (`DownloadPdf` in `AiTestInsightsSummaryCard.tsx`, PR #573 review) handles a plain
+  click in script: it asks the route with `fetch(url, { redirect: "manual" })` first. An opaque
+  redirect means the PDF is there, and the browser then goes to the route itself (a second signing,
+  so a fresh 60-second URL), which the store answers as a download, so the page stays. Any other
+  answer keeps the Student page and shows a `RetryAlert`: 503 `not_configured` → "The PDF can't be
+  downloaded here: AI Summary reading is not set up in this environment.", 404 → "The PDF of this AI
+  Summary could not be found.", anything else or a network error → "The PDF could not be downloaded.
+  Please try again.". A modified click (new tab or window) is left to the browser. E2E moves the
+  `report_pdf` key out of the Item folder (502) and back, then Retry downloads.

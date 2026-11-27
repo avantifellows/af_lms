@@ -1071,6 +1071,45 @@ test.describe("AI Test Insights tab", () => {
           expect(await enqueueOrWakeCalls()).toBe(callsBefore);
         });
 
+        // Review finding 2 (#573): a PDF route answer that is not a redirect
+        // keeps the Student page and says so, with Retry.
+        test("keeps the Student page when the PDF cannot be read, and Retry downloads it once it can", async ({ page }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          const summary = await generateForEsha(page);
+          await expectFixedText(summary, POLLED);
+          const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+          const studentPage = page.url();
+          // The PDF's key now lies outside the Item's folder: the route answers 502.
+          const moveKey = (sql: string) =>
+            pool.query(
+              `UPDATE acad_mentorship_inference_item_files f SET s3_key = ${sql}
+               FROM ai_test_insight_requests r
+               WHERE r.request_key = $1 AND f.item_id = r.inference_item_id AND f.file_kind = 'report_pdf'`,
+              [request.requestKey],
+            );
+          await moveKey(`'elsewhere/' || f.s3_key`);
+
+          await summary.getByRole("link", { name: "Download PDF" }).click();
+
+          const alert = summary.getByRole("alert");
+          await expect(alert).toHaveText(/The PDF could not be downloaded\. Please try again\./);
+          expect(page.url()).toBe(studentPage);
+          await expectFixedText(summary);
+
+          // Back in the folder: drop the 10-character "elsewhere/".
+          await moveKey("substring(f.s3_key from 11)");
+          const [download] = await Promise.all([
+            page.waitForEvent("download"),
+            alert.getByRole("button", { name: "Retry" }).click(),
+          ]);
+          expect(download.suggestedFilename()).toMatch(new RegExp(`^ai-summary-${ids.studentIds.esha}-\\d{4}-\\d{2}-\\d{2}\\.pdf$`));
+          const bytes = await readFile((await download.path())!);
+          expect(bytes.equals(Buffer.from(FAKE_TEST_INSIGHT.pdf, "latin1"))).toBe(true);
+          await expect(summary.getByRole("alert")).toHaveCount(0);
+          expect(page.url()).toBe(studentPage);
+        });
+
         test("shows a Program Manager, Program Admin and Admin the AI Summary and its PDF, with no Generate", async ({
           browser,
           pmPage,

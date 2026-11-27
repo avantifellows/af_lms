@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import AiTestInsightsSummaryCard from "./AiTestInsightsSummaryCard";
@@ -905,6 +905,103 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
 
     expect(pdfLink()).toHaveAttribute("href", PDF_URL);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([SUMMARY_URL]);
+  });
+
+  // Review finding 2 (#573): the PDF route answers JSON when it cannot
+  // redirect (404, 502, 503). A click asks the route first without following
+  // the redirect, so a failure stays on the Student page as a message with
+  // Retry; a redirect is followed by the browser, which downloads the file.
+  describe("Download PDF click", () => {
+    const assign = vi.fn();
+    const SUMMARY_OK = { ok: true, status: 200, type: "basic", json: () => Promise.resolve({ markdown: MARKDOWN }) };
+    const REDIRECT = { ok: false, status: 0, type: "opaqueredirect", json: () => Promise.reject(new SyntaxError("opaque")) };
+    const failure = (status: number, body: unknown = {}) => ({
+      ok: false,
+      status,
+      type: "basic",
+      json: () => Promise.resolve(body),
+    });
+
+    /** The summary read answers the text; each PDF ask answers the next of these (`null`: a network error). */
+    function answerPdf(...answers: Array<unknown>) {
+      const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>((url) => {
+        if (url === SUMMARY_URL) return Promise.resolve(SUMMARY_OK);
+        const next = answers.length > 1 ? answers.shift() : answers[0];
+        return next === null ? Promise.reject(new TypeError("fetch failed")) : Promise.resolve(next);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("location", { ...window.location, assign });
+      return fetchMock;
+    }
+    const pdfAsks = (fetchMock: ReturnType<typeof answerPdf>) =>
+      fetchMock.mock.calls.filter(([url]) => url === PDF_URL);
+
+    beforeEach(() => {
+      assign.mockReset();
+    });
+
+    it("asks the PDF route without following its redirect, then lets the browser download the file", async () => {
+      const user = userEvent.setup();
+      const fetchMock = answerPdf(REDIRECT);
+      renderWith(completed());
+      await summaryText();
+
+      await user.click(pdfLink());
+
+      await waitFor(() => expect(assign).toHaveBeenCalledWith(PDF_URL));
+      expect(pdfAsks(fetchMock)).toHaveLength(1);
+      expect(pdfAsks(fetchMock)[0][1]).toMatchObject({ redirect: "manual" });
+      expect(within(card()).queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ["503 not_configured", failure(503, { code: "not_configured" }), "The PDF can't be downloaded here: AI Summary reading is not set up in this environment."],
+      ["404", failure(404, { error: "AI Summary PDF not found" }), "The PDF of this AI Summary could not be found."],
+      ["502", failure(502, { error: "AI Summary PDF could not be read" }), "The PDF could not be downloaded. Please try again."],
+      ["a network error", null, "The PDF could not be downloaded. Please try again."],
+    ] as const)("stays on the page after %s and says so, with Retry", async (_label, answer, message) => {
+      const user = userEvent.setup();
+      answerPdf(answer);
+      renderWith(completed());
+      await summaryText();
+
+      await user.click(pdfLink());
+
+      const alert = await within(card()).findByRole("alert");
+      expect(alert).toHaveTextContent(message);
+      expect(within(alert).getByRole("button", { name: "Retry" })).toBeEnabled();
+      expect(assign).not.toHaveBeenCalled();
+      // The text and the link are still there.
+      expect(await summaryText()).toHaveTextContent("Where Asha stands");
+      expect(pdfLink()).toHaveAttribute("href", PDF_URL);
+    });
+
+    it("Retry asks again and downloads once the route redirects", async () => {
+      const user = userEvent.setup();
+      const fetchMock = answerPdf(failure(502), REDIRECT);
+      renderWith(completed());
+      await summaryText();
+
+      await user.click(pdfLink());
+      const alert = await within(card()).findByRole("alert");
+      await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(assign).toHaveBeenCalledWith(PDF_URL));
+      expect(pdfAsks(fetchMock)).toHaveLength(2);
+      expect(within(card()).queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("leaves a click that opens a new tab to the browser", async () => {
+      answerPdf(REDIRECT);
+      renderWith(completed());
+      await summaryText();
+
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true });
+      pdfLink().dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(assign).not.toHaveBeenCalled();
+    });
   });
 
   it.each(["queued", "running", "no_data", "failed"] as const)("has no Download PDF link for a %s request", (state) => {
