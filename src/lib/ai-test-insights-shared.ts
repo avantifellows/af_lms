@@ -148,6 +148,9 @@ export interface AiTestInsightsCreateRequestResponse {
 /** The 409 code of a login whose permission links no User and no User has its email. */
 export const NO_LINKED_USER_CODE = "no_linked_user";
 
+/** The 503 code of Generate in an environment without the delivery settings. */
+export const NOT_CONFIGURED_CODE = "not_configured";
+
 /** The create route for a Student (`student.id`); a centre the page named carries over. */
 export function aiTestInsightsRequestsUrl(studentId: number, centreId?: number | null): string {
   const base = `/api/ai-test-insights/students/${studentId}/requests`;

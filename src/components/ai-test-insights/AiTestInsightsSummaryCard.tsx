@@ -20,6 +20,11 @@
 // words of `@/lib/ai-test-insights-outcomes`, and for an editor "Try again",
 // which posts that request's tests again with no confirmation; the picker and
 // Generate stay usable beneath it.
+//
+// Generate delivers the request to AI Mentorship Guide (#562). A request the
+// generator refused comes back `failed` (`enqueue_rejected`) and shows as any
+// failed request. An environment without the delivery settings answers 503
+// `not_configured`, and the card says so in plain words.
 import { useState, useSyncExternalStore } from "react";
 
 import { Button, Card } from "@/components/ui";
@@ -27,6 +32,7 @@ import {
   formatInsightSessionDate,
   isInsightRequestInProgress,
   NO_LINKED_USER_CODE,
+  NOT_CONFIGURED_CODE,
   type AiTestInsightsCreateRequestResponse,
   type AiTestInsightsTest,
   type AiTestInsightsTestFormat,
@@ -49,6 +55,7 @@ const IN_PROGRESS_MESSAGES = {
 } as const;
 
 const NO_LINKED_USER_MESSAGE = "Your login is not linked to a user record. Contact your program admin.";
+const NOT_CONFIGURED_MESSAGE = "AI Summary generation is not set up in this environment.";
 const REQUEST_FAILED_MESSAGE = "The AI Summary could not be requested. Try again.";
 
 /** `65_000` → `1 min 5 s`; under a minute, seconds only. */
@@ -314,6 +321,7 @@ async function postGenerate(
       | null;
     if (response.ok && body?.request) return { request: body.request };
     if (response.status === 409 && body?.code === NO_LINKED_USER_CODE) return { error: NO_LINKED_USER_MESSAGE };
+    if (response.status === 503 && body?.code === NOT_CONFIGURED_CODE) return { error: NOT_CONFIGURED_MESSAGE };
   } catch {
     // A network failure reads as any other failure.
   }

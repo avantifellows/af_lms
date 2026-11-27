@@ -2,14 +2,22 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
 import { createRequest, resolveActorUserId } from "@/lib/ai-test-insights-requests";
-import { NO_LINKED_USER_CODE, type AiTestInsightsCreateRequestResponse } from "@/lib/ai-test-insights-shared";
+import {
+  NO_LINKED_USER_CODE,
+  NOT_CONFIGURED_CODE,
+  type AiTestInsightsCreateRequestResponse,
+} from "@/lib/ai-test-insights-shared";
 
 // Generate on the AI Summary card (#550, physical centres only): records an
 // Insight Request for the Student's ticked tests. Student access gates first,
 // as a write: 401 no session, 422 bad id, 403 no `ai_test_insights` view, 403
 // access not `edit` (before the Student lookup reveals anything), 404 Student
 // missing, not listed or out of scope. Then the body (422), then the actor's
-// User (409 `no_linked_user`). 201 created, 200 already running.
+// User (409 `no_linked_user`). 201 created, 200 already running, 503
+// `not_configured` when this environment has no delivery settings (#562), with
+// no row written. A created request has been delivered to AI Mentorship Guide
+// and is returned as it reads after delivery: `failed` with `enqueue_rejected`
+// if the generator refused it.
 //
 // An optional `centre` query value, as on the Student page, picks the centre
 // whose School and Program the request records.
@@ -56,6 +64,12 @@ export async function POST(
     }
 
     const result = await createRequest({ student, actorUserId, ...body });
+    if (result.outcome === "not_configured") {
+      return NextResponse.json(
+        { error: "AI Summary generation is not set up in this environment.", code: NOT_CONFIGURED_CODE },
+        { status: 503 },
+      );
+    }
     const response: AiTestInsightsCreateRequestResponse = result;
     return NextResponse.json(response, { status: result.outcome === "created" ? 201 : 200 });
   } catch (error) {

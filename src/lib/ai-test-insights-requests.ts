@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { AiTestInsightsStudentContext } from "@/lib/ai-test-insights-access";
+import { aiTestInsightsDeliverySettings, deliverInsightRequest } from "@/lib/ai-test-insights-delivery";
 import type { AiTestInsightsRequestState, InsightRequestView } from "@/lib/ai-test-insights-shared";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { query, withTransaction } from "@/lib/db";
@@ -17,6 +18,8 @@ const UTC_NOW = "(now() AT TIME ZONE 'UTC')";
 const isoUtc = (column: string) => `to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
 /** The unique index that allows one `queued` or `running` request per Student. */
 const ACTIVE_STUDENT_INDEX = "ati_requests_active_student_unique";
+/** Each delivery call's limit when a Teacher presses Generate. */
+const GENERATE_DELIVERY_TIMEOUT_MS = 10_000;
 
 type RequestRow = {
   request_key: string;
@@ -105,7 +108,8 @@ export async function resolveActorUserId(actor: { email: string; linkedUserId: n
 
 export type CreateRequestResult =
   | { outcome: "created"; request: InsightRequestView }
-  | { outcome: "already_running"; request: InsightRequestView };
+  | { outcome: "already_running"; request: InsightRequestView }
+  | { outcome: "not_configured" };
 
 function isActiveStudentConflict(error: unknown): boolean {
   const pgError = error as { code?: string; constraint?: string } | null;
@@ -120,11 +124,13 @@ function isActiveStudentConflict(error: unknown): boolean {
  *    with it.
  * 2. (Later: a `completed` request with the same tests and no `generateAgain`
  *    returns `existing`.)
- * 3. (Later: generation not configured returns `not_configured`.)
+ * 3. Generation is not configured (`@/lib/ai-test-insights-delivery`):
+ *    `not_configured`, and nothing is written.
  * 4. In one transaction, (later: close a stalled request, then) insert the new
  *    row. A unique violation on the one-running-request index is not an
  *    error: `already_running` with the row that won.
- * 5. (Later: deliver to AI Mentorship Guide.) Return `created`.
+ * 5. Deliver to AI Mentorship Guide, then return `created` with the row as it
+ *    reads after delivery.
  */
 export async function createRequest(params: {
   student: AiTestInsightsStudentContext;
@@ -140,10 +146,15 @@ export async function createRequest(params: {
   const running = await inProgressRequest(student.studentId);
   if (running) return { outcome: "already_running", request: running };
 
+  // 3. Generation must be configured before anything is written.
+  const delivery = aiTestInsightsDeliverySettings();
+  if (!delivery) return { outcome: "not_configured" };
+
   // 4. Insert.
   const requestKey = randomUUID();
+  let inserted: RequestRow;
   try {
-    const inserted = await withTransaction(async (client) => {
+    inserted = await withTransaction(async (client) => {
       const result = await client.query<RequestRow>(
         `WITH r AS (
            INSERT INTO ai_test_insight_requests
@@ -167,11 +178,29 @@ export async function createRequest(params: {
       );
       return result.rows[0];
     });
-    return { outcome: "created", request: toView(inserted) };
   } catch (error) {
     if (!isActiveStudentConflict(error)) throw error;
     const winner = await inProgressRequest(student.studentId);
     if (!winner) throw error;
     return { outcome: "already_running", request: winner };
   }
+
+  // 5. Deliver. A rejected request will never run, so it ends `failed`.
+  const outcome = await deliverInsightRequest(delivery, requestKey, GENERATE_DELIVERY_TIMEOUT_MS);
+  if (outcome === "rejected") await markEnqueueRejected(requestKey);
+  const current = await requestByKey(student.studentId, requestKey);
+  return { outcome: "created", request: current ?? toView(inserted) };
+}
+
+/**
+ * Ends a request the generator refused (`enqueue_rejected`). Guarded by
+ * `state = 'queued'`, so a request the generator already claimed is left alone.
+ */
+async function markEnqueueRejected(requestKey: string): Promise<void> {
+  await query(
+    `UPDATE ai_test_insight_requests
+     SET state = 'failed', outcome_code = 'enqueue_rejected', finished_at = ${UTC_NOW}, updated_at = ${UTC_NOW}
+     WHERE request_key = $1 AND state = 'queued'`,
+    [requestKey],
+  );
 }

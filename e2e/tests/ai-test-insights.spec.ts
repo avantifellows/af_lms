@@ -16,9 +16,15 @@ import {
   markInsightRequestRunning,
   readInsightRequests,
   removeAiTestInsightsFixture,
+  removeInsightRequestsMadeBySpecs,
   seedAiTestInsightsFixture,
   type AiTestInsightsFixtureIds,
 } from "../helpers/ai-test-insights-fixtures";
+import {
+  fakeAiMentorshipGuideCalls,
+  resetFakeAiMentorshipGuide,
+  steerFakeAiMentorshipGuide,
+} from "../helpers/fake-ai-mentorship-guide";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "../../src/lib/constants";
 
 const TAB = "AI Test Insights";
@@ -656,6 +662,92 @@ test.describe("AI Test Insights tab", () => {
         await expect(viewerSummary.getByText(GENERAL, { exact: true })).toBeVisible();
         await expect(viewerSummary.getByRole("button", { name: "Try again" })).toHaveCount(0);
         await expect(viewerSummary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+      });
+    });
+
+    // Delivery to AI Mentorship Guide (#562): after the row is written the
+    // LMS wakes the generator and enqueues the request. The fake generator
+    // stands in for it; Esha has no request, and each test removes the ones it
+    // made.
+    test.describe("Delivery to AI Mentorship Guide", () => {
+      const WAITING = "Waiting to start. This can take about 2 minutes if the server was asleep.";
+      const GENERAL = "Something went wrong while writing the AI Summary.";
+      // The fake's settings, written by hand (fake-ai-mentorship-guide.json).
+      const BEARER = "Bearer e2e-fake-ai-test-insights-enqueue-secret";
+      const BODY = '{"environment":"staging"}';
+
+      test.beforeEach(async () => {
+        await resetFakeAiMentorshipGuide();
+      });
+
+      test.afterEach(async () => {
+        await resetFakeAiMentorshipGuide();
+        await removeInsightRequestsMadeBySpecs(pool, ids.studentIds.esha);
+      });
+
+      /** Opens Esha's page as the Teacher with the picker answered, and presses Generate. */
+      async function generateForEsha(page: Page) {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await answerTestPicker(page, 200, { tests: PICKER_TESTS });
+        await page.goto(studentUrl("esha"));
+        const summary = page.getByRole("region", { name: "AI Summary" });
+        await expect(summary.getByRole("checkbox", { name: /Mock Test 1/ })).toBeChecked();
+        await summary.getByRole("button", { name: "Generate" }).click();
+        return summary;
+      }
+
+      test("wakes the generator and enqueues the request once, with the secret and the environment, and it stays queued", async ({
+        page,
+      }) => {
+        const summary = await generateForEsha(page);
+        await expect(summary.getByText(WAITING)).toBeVisible();
+
+        const rows = await readInsightRequests(pool, ids.studentIds.esha);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ state: "queued", outcomeCode: null, finishedAt: null });
+        expect(await fakeAiMentorshipGuideCalls()).toEqual([
+          { kind: "wake", requestKey: null, authorization: null, body: "", status: 202 },
+          { kind: "enqueue", requestKey: rows[0].requestKey, authorization: BEARER, body: BODY, status: 202 },
+        ]);
+      });
+
+      test("keeps the request queued and waiting while the generator is asleep, after a reload too", async ({ page }) => {
+        await steerFakeAiMentorshipGuide({ enqueue: "asleep" });
+
+        const summary = await generateForEsha(page);
+        await expect(summary.getByText(WAITING)).toBeVisible();
+        const rows = await readInsightRequests(pool, ids.studentIds.esha);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ state: "queued", outcomeCode: null });
+        const enqueues = (await fakeAiMentorshipGuideCalls()).filter((call) => call.kind === "enqueue");
+        expect(enqueues).toEqual([
+          { kind: "enqueue", requestKey: rows[0].requestKey, authorization: BEARER, body: BODY, status: 503 },
+        ]);
+
+        await page.reload();
+        await expect(summary.getByText(WAITING)).toBeVisible();
+        await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+        expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual(rows);
+      });
+
+      test("marks a request the generator rejects failed, and the card offers Try again", async ({ page }) => {
+        await steerFakeAiMentorshipGuide({ enqueue: "reject", status: 422 });
+
+        const summary = await generateForEsha(page);
+        await expect(summary.getByText(GENERAL, { exact: true })).toBeVisible();
+        await expect(summary.getByRole("button", { name: "Try again" })).toBeVisible();
+        await expect(summary.getByText(WAITING)).toHaveCount(0);
+
+        const nowSeconds = Date.now() / 1000;
+        const rows = await readInsightRequests(pool, ids.studentIds.esha);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ state: "failed", outcomeCode: "enqueue_rejected" });
+        expect(Math.abs((rows[0].finishedAt as number) - nowSeconds)).toBeLessThan(60);
+        expect(Math.abs(rows[0].updatedAt - nowSeconds)).toBeLessThan(60);
+
+        await page.reload();
+        await expect(summary.getByText(GENERAL, { exact: true })).toBeVisible();
+        await expect(summary.getByRole("button", { name: "Try again" })).toBeVisible();
       });
     });
 

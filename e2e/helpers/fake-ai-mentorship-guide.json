@@ -1,0 +1,5 @@
+{
+  "port": 3051,
+  "enqueueSecret": "e2e-fake-ai-test-insights-enqueue-secret",
+  "environment": "staging"
+}

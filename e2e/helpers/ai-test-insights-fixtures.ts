@@ -500,6 +500,17 @@ async function insertInsightRows(
   }
 }
 
+/**
+ * Removes the Insight Requests a spec made for a Student (those whose key the
+ * fixture did not write), so the next spec finds the Student as seeded.
+ */
+export async function removeInsightRequestsMadeBySpecs(pool: Pool, studentId: number): Promise<void> {
+  await pool.query(
+    `DELETE FROM ai_test_insight_requests WHERE student_id = $1 AND request_key NOT LIKE $2`,
+    [studentId, `${REQUEST_KEY_PREFIX}%`],
+  );
+}
+
 /** Remove everything {@link seedAiTestInsightsFixture} added. */
 export async function removeAiTestInsightsFixture(pool: Pool): Promise<void> {
   const users = await pool.query<{ id: number }>(`SELECT id FROM "user" WHERE email = ANY($1)`, [ALL_EMAILS]);

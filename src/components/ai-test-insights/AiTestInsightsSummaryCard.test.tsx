@@ -289,6 +289,41 @@ describe("AiTestInsightsSummaryCard", () => {
       expect(generate()).toBeEnabled();
     });
 
+    it("says in plain words that generation is not set up in this environment", async () => {
+      const user = userEvent.setup();
+      answerPost(503, { error: "AI Summary generation is not set up in this environment.", code: "not_configured" });
+      render(<AiTestInsightsSummaryCard tests={LOADED} canEdit onRetry={() => {}} requestsUrl={URL} />);
+
+      await user.click(generate()!);
+
+      expect(await within(card()).findByRole("alert")).toHaveTextContent(
+        "AI Summary generation is not set up in this environment.",
+      );
+      expect(within(card()).queryByText(/Waiting to start/)).not.toBeInTheDocument();
+    });
+
+    it("shows a request the generator refused as failed, with the general message and Try again", async () => {
+      const user = userEvent.setup();
+      answerPost(201, {
+        outcome: "created",
+        request: {
+          requestKey: "key-rejected",
+          state: "failed",
+          outcomeCode: "enqueue_rejected",
+          selectedTestIds: ["T9"],
+          requestedAt: "2026-11-27T05:30:00Z",
+          requestedByName: "Asha Teacher",
+          finishedAt: "2026-11-27T05:30:02Z",
+        },
+      });
+      render(<AiTestInsightsSummaryCard tests={LOADED} canEdit onRetry={() => {}} requestsUrl={URL} />);
+
+      await user.click(generate()!);
+
+      expect(await within(card()).findByText("Something went wrong while writing the AI Summary.")).toBeInTheDocument();
+      expect(within(card()).getByRole("button", { name: "Try again" })).toBeEnabled();
+    });
+
     it("says the request failed when the server cannot record it, and Generate stays", async () => {
       const user = userEvent.setup();
       answerPost(500, { error: "The AI Summary could not be requested" });

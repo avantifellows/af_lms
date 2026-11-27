@@ -6,7 +6,11 @@ import { NextRequest } from "next/server";
 // module. The session and the Postgres boundary (`query()` and
 // `withTransaction`) are stubbed: Postgres answers the permission row, centre
 // seats, the listed-Student rows of one Student, the actor's User by email,
-// the Student's open request and the inserted row, as declared here.
+// the Student's open request and the inserted row, as declared here. The
+// requests the route inserts are kept, so the read after delivery (#562) and
+// the guarded `enqueue_rejected` update see them. `fetch` stands in for AI
+// Mentorship Guide's wake and enqueue endpoints, and `vi.stubEnv` for the
+// delivery settings.
 const { mockQuery, mockClientQuery, mockGetServerSession } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockClientQuery: vi.fn(),
@@ -77,6 +81,37 @@ const viewRow = (overrides: Record<string, unknown> = {}) => ({
 let permissionRow: Record<string, unknown> | null;
 let usersByEmail: Array<Record<string, unknown>>;
 let openRequest: Record<string, unknown> | null;
+/** The requests the route inserted, by request key, as Postgres holds them. */
+let stored: Map<string, Record<string, unknown>>;
+
+// The delivery settings of a configured environment, written by hand.
+const ENQUEUE_URL = "https://guide.example.test/api/internal/insight-requests";
+const ENQUEUE_SECRET = "enqueue-secret-e2e-1";
+const WAKE_URL = "https://wake.example.test";
+const mockFetch = vi.fn();
+
+function configureDelivery(overrides: Record<string, string> = {}) {
+  const settings: Record<string, string> = {
+    AI_TEST_INSIGHTS_ENQUEUE_URL: ENQUEUE_URL,
+    AI_TEST_INSIGHTS_ENQUEUE_SECRET: ENQUEUE_SECRET,
+    AI_TEST_INSIGHTS_WAKE_URL: WAKE_URL,
+    APP_ENV: "staging",
+    ...overrides,
+  };
+  for (const [name, value] of Object.entries(settings)) vi.stubEnv(name, value);
+}
+
+/** The calls `fetch` received, as [url, init]. */
+const fetchCalls = () => mockFetch.mock.calls as Array<[string, RequestInit]>;
+const enqueueCalls = () => fetchCalls().filter(([url]) => url.endsWith("/enqueue"));
+const wakeCalls = () => fetchCalls().filter(([url]) => url.endsWith("/start"));
+
+/** Answers the enqueue call with this status and the wake call with 200. */
+function guideAnswers(enqueueStatus: number) {
+  mockFetch.mockImplementation(async (url: string) =>
+    url.endsWith("/enqueue") ? new Response(null, { status: enqueueStatus }) : new Response(null, { status: 200 }),
+  );
+}
 
 function row(role: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -101,23 +136,40 @@ beforeEach(() => {
   vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.unstubAllEnvs();
+  vi.stubGlobal("fetch", mockFetch);
+  configureDelivery();
+  guideAnswers(202);
   permissionRow = row("teacher");
   usersByEmail = [];
   openRequest = null;
+  stored = new Map();
   mockGetServerSession.mockResolvedValue({ user: { email } });
   mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     if (sql.includes("FROM user_permission")) return permissionRow ? [permissionRow] : [];
     if (sql.includes("FROM centre_positions")) return [];
     if (sql.includes("centre_students")) return LISTED[String(params[0])] ?? [];
     if (sql.includes('FROM "user"') && sql.includes("LOWER(email)")) return usersByEmail;
+    if (/UPDATE ai_test_insight_requests/.test(sql) && sql.includes("'enqueue_rejected'")) {
+      // Postgres applies the update only where its guard holds.
+      const target = stored.get(String(params[0]));
+      const guarded = /state = 'queued'/.test(sql);
+      if (!target || (guarded && target.state !== "queued")) return [];
+      Object.assign(target, { state: "failed", outcome_code: "enqueue_rejected", finished_at: "2026-11-27T05:30:02Z" });
+      return [target];
+    }
+    if (sql.includes("ai_test_insight_requests") && sql.includes("r.request_key = $2")) {
+      const found = stored.get(String(params[1]));
+      return found ? [found] : [];
+    }
     if (sql.includes("ai_test_insight_requests")) return openRequest ? [openRequest] : [];
     return [];
   });
   mockClientQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     if (/INSERT INTO ai_test_insight_requests/.test(sql)) {
-      return {
-        rows: [viewRow({ request_key: params[0], selected_test_ids: JSON.parse(String(params[6])) })],
-      };
+      const inserted = viewRow({ request_key: params[0], selected_test_ids: JSON.parse(String(params[6])) });
+      stored.set(String(params[0]), { ...inserted });
+      return { rows: [inserted] };
     }
     return { rows: [] };
   });
@@ -275,6 +327,262 @@ describe("POST /api/ai-test-insights/students/[studentId]/requests", () => {
       expect(logged).toContain("1001");
       expect(logged).not.toContain("T9");
       expect(logged).not.toContain(email);
+    });
+  });
+
+  describe("generation not configured", () => {
+    const NOT_CONFIGURED = { code: "not_configured" };
+
+    it.each([
+      ["no enqueue URL", { AI_TEST_INSIGHTS_ENQUEUE_URL: "" }],
+      ["a whitespace-only enqueue URL", { AI_TEST_INSIGHTS_ENQUEUE_URL: "   " }],
+      ["no enqueue secret", { AI_TEST_INSIGHTS_ENQUEUE_SECRET: "" }],
+      ["a whitespace-only enqueue secret", { AI_TEST_INSIGHTS_ENQUEUE_SECRET: " \t " }],
+      ["no APP_ENV", { APP_ENV: "" }],
+      ["a whitespace-only APP_ENV", { APP_ENV: "  " }],
+      ["APP_ENV development", { APP_ENV: "development" }],
+      ["APP_ENV testing", { APP_ENV: "testing" }],
+    ])("answers 503 not_configured with %s, writing no row and calling nothing", async (_label, overrides) => {
+      configureDelivery(overrides);
+
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject(NOT_CONFIGURED);
+      expect(inserts()).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("answers already_running before saying generation is not configured", async () => {
+      configureDelivery({ AI_TEST_INSIGHTS_ENQUEUE_URL: "" });
+      openRequest = viewRow({ request_key: "running-key", state: "running" });
+
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).outcome).toBe("already_running");
+    });
+
+    it("checks the Teacher's access before saying generation is not configured", async () => {
+      configureDelivery({ AI_TEST_INSIGHTS_ENQUEUE_URL: "" });
+      permissionRow = row("program_manager");
+
+      expect((await post("1001", { selectedTestIds: ["T9"] })).status).toBe(403);
+    });
+
+    it.each(["staging", "production"])("is configured with APP_ENV %s", async (environment) => {
+      configureDelivery({ APP_ENV: environment });
+
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(201);
+      expect(enqueueCalls()[0][1].body).toBe(JSON.stringify({ environment }));
+    });
+
+    it("is configured without a wake URL", async () => {
+      configureDelivery({ AI_TEST_INSIGHTS_WAKE_URL: "" });
+
+      expect((await post("1001", { selectedTestIds: ["T9"] })).status).toBe(201);
+    });
+  });
+
+  describe("delivery to AI Mentorship Guide", () => {
+    it("wakes the generator and enqueues the new request with the bearer secret and APP_ENV", async () => {
+      const response = await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+      expect(response.status).toBe(201);
+      const { request } = await response.json();
+      expect(fetchCalls()).toHaveLength(2);
+      const [[wakeUrl, wakeInit]] = wakeCalls();
+      expect(wakeUrl).toBe("https://wake.example.test/start");
+      expect(wakeInit.method).toBe("POST");
+      expect(new Headers(wakeInit.headers).has("Authorization")).toBe(false);
+      const [[enqueueUrl, enqueueInit]] = enqueueCalls();
+      expect(enqueueUrl).toBe(
+        `https://guide.example.test/api/internal/insight-requests/${request.requestKey}/enqueue`,
+      );
+      expect(enqueueInit.method).toBe("POST");
+      expect(new Headers(enqueueInit.headers).get("Authorization")).toBe("Bearer enqueue-secret-e2e-1");
+      expect(new Headers(enqueueInit.headers).get("Content-Type")).toBe("application/json");
+      expect(enqueueInit.body).toBe('{"environment":"staging"}');
+    });
+
+    it("trims the settings and a trailing slash on either URL", async () => {
+      configureDelivery({
+        AI_TEST_INSIGHTS_ENQUEUE_URL: ` ${ENQUEUE_URL}/ `,
+        AI_TEST_INSIGHTS_ENQUEUE_SECRET: ` ${ENQUEUE_SECRET} `,
+        AI_TEST_INSIGHTS_WAKE_URL: ` ${WAKE_URL}/ `,
+        APP_ENV: " production ",
+      });
+
+      const { request } = await (await post("1001", { selectedTestIds: ["T9"] })).json();
+
+      expect(wakeCalls()[0][0]).toBe("https://wake.example.test/start");
+      expect(enqueueCalls()[0][0]).toBe(
+        `https://guide.example.test/api/internal/insight-requests/${request.requestKey}/enqueue`,
+      );
+      expect(new Headers(enqueueCalls()[0][1].headers).get("Authorization")).toBe("Bearer enqueue-secret-e2e-1");
+      expect(enqueueCalls()[0][1].body).toBe('{"environment":"production"}');
+    });
+
+    it("gives each call a 10-second limit", async () => {
+      const timeout = vi.spyOn(AbortSignal, "timeout");
+
+      await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(timeout.mock.calls).toEqual([[10_000], [10_000]]);
+      for (const [, init] of fetchCalls()) expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("makes the wake and enqueue calls together", async () => {
+      // The wake answers only once the enqueue call has been made: in turn,
+      // the two would wait on each other for ever.
+      let enqueued: () => void = () => {};
+      const enqueueMade = new Promise<void>((resolve) => (enqueued = resolve));
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/enqueue")) {
+          enqueued();
+          return new Response(null, { status: 202 });
+        }
+        await enqueueMade;
+        return new Response(null, { status: 200 });
+      });
+
+      expect((await post("1001", { selectedTestIds: ["T9"] })).status).toBe(201);
+    });
+
+    it("skips only the wake call when the wake URL is blank", async () => {
+      configureDelivery({ AI_TEST_INSIGHTS_WAKE_URL: "  " });
+
+      await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(wakeCalls()).toHaveLength(0);
+      expect(enqueueCalls()).toHaveLength(1);
+    });
+
+    it.each([
+      ["a network error", () => Promise.reject(new TypeError("fetch failed"))],
+      ["a 500", () => Promise.resolve(new Response(null, { status: 500 }))],
+    ])("ignores %s from the wake call", async (_label, wake) => {
+      mockFetch.mockImplementation(async (url: string) =>
+        url.endsWith("/enqueue") ? new Response(null, { status: 202 }) : wake(),
+      );
+
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).request.state).toBe("queued");
+    });
+
+    it("leaves the request queued when the generator accepts it with 202", async () => {
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body).toMatchObject({ outcome: "created", request: { state: "queued", outcomeCode: null, finishedAt: null } });
+      expect(mockQuery.mock.calls.some(([sql]) => /UPDATE ai_test_insight_requests/.test(sql))).toBe(false);
+    });
+
+    it("returns the request as it reads after delivery", async () => {
+      // The generator claimed the request while answering the enqueue call.
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/enqueue")) {
+          const key = url.split("/").at(-2) as string;
+          Object.assign(stored.get(key) as Record<string, unknown>, { state: "running" });
+          return new Response(null, { status: 202 });
+        }
+        return new Response(null, { status: 200 });
+      });
+
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).request.state).toBe("running");
+    });
+
+    it.each([401, 404, 422])(
+      "marks the request failed with enqueue_rejected when the generator answers %i",
+      async (status) => {
+        guideAnswers(status);
+
+        const response = await post("1001", { selectedTestIds: ["T9", "T4"] });
+
+        expect(response.status).toBe(201);
+        const body = await response.json();
+        expect(body.outcome).toBe("created");
+        expect(body.request).toMatchObject({
+          state: "failed",
+          outcomeCode: "enqueue_rejected",
+          selectedTestIds: ["T9", "T4"],
+          finishedAt: "2026-11-27T05:30:02Z",
+        });
+        const updates = mockQuery.mock.calls.filter(([sql]) => /UPDATE ai_test_insight_requests/.test(sql));
+        expect(updates).toHaveLength(1);
+        const [sql, params] = updates[0];
+        expect(params).toEqual([body.request.requestKey]);
+        expect(sql).toContain("finished_at = (now() AT TIME ZONE 'UTC')");
+        expect(sql).toContain("updated_at = (now() AT TIME ZONE 'UTC')");
+      },
+    );
+
+    it("leaves a request the generator already claimed alone when the enqueue call is rejected", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/enqueue")) {
+          const key = url.split("/").at(-2) as string;
+          Object.assign(stored.get(key) as Record<string, unknown>, { state: "running" });
+          return new Response(null, { status: 422 });
+        }
+        return new Response(null, { status: 200 });
+      });
+
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).request).toMatchObject({ state: "running", outcomeCode: null });
+    });
+
+    it.each([
+      ["a 503", () => Promise.resolve(new Response(null, { status: 503 }))],
+      ["a 500", () => Promise.resolve(new Response(null, { status: 500 }))],
+      ["a timeout", () => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"))],
+      ["a network error", () => Promise.reject(new TypeError("fetch failed"))],
+    ])("leaves the request queued after %s from the enqueue call", async (_label, enqueue) => {
+      mockFetch.mockImplementation(async (url: string) =>
+        url.endsWith("/enqueue") ? enqueue() : new Response(null, { status: 200 }),
+      );
+
+      const response = await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).request).toMatchObject({ state: "queued", outcomeCode: null });
+      expect(mockQuery.mock.calls.some(([sql]) => /UPDATE ai_test_insight_requests/.test(sql))).toBe(false);
+    });
+
+    it("does not deliver a request that was already running", async () => {
+      openRequest = viewRow({ request_key: "running-key", state: "running" });
+
+      await post("1001", { selectedTestIds: ["T9"] });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("never logs the enqueue secret", async () => {
+      for (const answer of [
+        () => Promise.resolve(new Response(null, { status: 401 })),
+        () => Promise.resolve(new Response(null, { status: 503 })),
+        () => Promise.reject(new TypeError(`fetch failed for Bearer ${ENQUEUE_SECRET}`)),
+      ]) {
+        mockFetch.mockImplementation(async (url: string) =>
+          url.endsWith("/enqueue") ? answer() : Promise.reject(new TypeError(`wake failed ${ENQUEUE_SECRET}`)),
+        );
+        await post("1001", { selectedTestIds: ["T9"] });
+      }
+
+      const logged = [console.error, console.warn, console.info, console.log]
+        .flatMap((log) => vi.mocked(log).mock.calls.flat())
+        .map((value) => (value instanceof Error ? `${value.name} ${value.message}` : JSON.stringify(value)))
+        .join(" ");
+      expect(logged).not.toContain(ENQUEUE_SECRET);
     });
   });
 
