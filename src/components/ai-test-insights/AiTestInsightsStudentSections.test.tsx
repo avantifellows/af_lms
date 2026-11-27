@@ -207,6 +207,27 @@ describe("AiTestInsightsStudentSections", () => {
     ]);
   });
 
+  it("lets a viewer open a History Test Insight through the requests route with the page's centre", async () => {
+    const user = userEvent.setup();
+    sessionsReplies = [
+      { status: 200, body: { timeline: [{ kind: "test_insight", testInsight: COMPLETED }], draft: null, notesAccess: "read" } },
+    ];
+    stubFetch({ status: 200, body: { tests: TESTS } });
+    renderSections(false, 302);
+    const summaryRoute = "/api/ai-test-insights/students/1005/requests/req-completed-1005/summary?centre=302";
+    await within(history()).findByText("AI Summary of 27 Nov 2026");
+    const summaryReads = () => vi.mocked(fetch).mock.calls.filter(([url]) => url === summaryRoute);
+    expect(summaryReads()).toHaveLength(0);
+
+    await user.click(within(history()).getByRole("button", { name: "View AI Summary" }));
+
+    expect(summaryReads()).toHaveLength(1);
+    expect(within(history()).getByRole("link", { name: "Download PDF" })).toHaveAttribute(
+      "href",
+      "/api/ai-test-insights/students/1005/requests/req-completed-1005/pdf?centre=302",
+    );
+  });
+
   it("shows a dash on the newest test line when the Student has no test", async () => {
     stubFetch({ status: 200, body: { tests: [] } });
     renderSections();

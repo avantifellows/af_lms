@@ -1313,6 +1313,120 @@ test.describe("AI Test Insights tab", () => {
           expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([earlier]);
           expect(await enqueueOrWakeCalls()).toBe(callsBefore);
         });
+
+        // "View AI Summary" in History (#577): every Test Insight in the
+        // timeline opens in place through part 1's summary and PDF routes, so
+        // generating again no longer hides an earlier AI Summary.
+        test.describe("From History", () => {
+          const CONCERN = "Loses marks on rotational motion [e2e-577]";
+          const ACTIONS = "Two torque worksheets a week [e2e-577]";
+          const sessionsRoute = () => `/api/ai-test-insights/students/${ids.studentIds.esha}/sessions`;
+          const history = (page: Page) => page.getByRole("region", { name: "History" });
+          /** The History entry (list item) that holds `text`. */
+          const entryWith = (page: Page, text: string) =>
+            history(page).getByRole("listitem").filter({ hasText: text });
+          const setRequestedAt = (requestKey: string, at: string) =>
+            pool.query(`UPDATE ai_test_insight_requests SET requested_at = $2 WHERE request_key = $1`, [requestKey, at]);
+
+          /**
+           * Counts the page's answered reads of one request's summary route and
+           * status route from now on. `next dev` mounts each effect twice and
+           * aborts the first fetch, so only finished requests count.
+           */
+          function countRequestReads(page: Page, requestKey: string) {
+            const reads = { summary: 0, status: 0 };
+            const base = `/api/ai-test-insights/students/${ids.studentIds.esha}/requests/${requestKey}`;
+            page.on("requestfinished", (request) => {
+              const path = new URL(request.url()).pathname;
+              if (path === `${base}/summary`) reads.summary += 1;
+              if (path === base) reads.status += 1;
+            });
+            return reads;
+          }
+
+          // Sessions first: a submitted session holds its linked request.
+          test.afterEach(async () => {
+            await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.esha]);
+          });
+
+          test("reads and downloads a Test Insight no session records, and still does after Generate again", async ({
+            page,
+          }) => {
+            test.slow();
+            await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+            const summary = await generateForEsha(page);
+            await expectFixedText(summary, POLLED);
+            const [earlier] = await readInsightRequests(pool, ids.studentIds.esha);
+            // 05:30 UTC is 11:00 on 20 Nov 2026 in India.
+            await setRequestedAt(earlier.requestKey, "2026-11-20 05:30:00");
+            await page.reload();
+            await expectFixedText(summary);
+            expect(await historyEntries(page)).toEqual([
+              ["AI Summary of 20 Nov 2026", "Made from: Mock Test 1", "Asked for by E2E ATI Teacher on 20 Nov 2026, 11:00"],
+            ]);
+
+            // Nothing is read before it is opened; opening reads the text once and polls nothing.
+            const reads = countRequestReads(page, earlier.requestKey);
+            const callsBefore = await enqueueOrWakeCalls();
+            const entry = entryWith(page, "AI Summary of 20 Nov 2026");
+            await expect(entry.getByRole("article")).toHaveCount(0);
+            expect(reads).toEqual({ summary: 0, status: 0 });
+            await entry.getByRole("button", { name: "View AI Summary" }).click();
+            await expectFixedText(entry);
+            await expect(entry.getByText("Made from: Mock Test 1", { exact: true })).toBeVisible();
+            await expectFixedPdfDownload(page, entry, `ai-summary-${ids.studentIds.esha}-2026-11-20.pdf`);
+            await entry.getByRole("button", { name: "Hide AI Summary" }).click();
+            await expect(entry.getByRole("article")).toHaveCount(0);
+            expect(reads).toEqual({ summary: 1, status: 0 });
+            expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+
+            // Generate again: the card shows the new AI Summary, and the earlier one stays readable in History.
+            await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+            await summary.getByRole("button", { name: "Generate again" }).click();
+            await page.getByRole("dialog", { name: "Generate again?" }).getByRole("button", { name: "Generate again" }).click();
+            await expect(history(page).getByRole("listitem")).toHaveCount(2, POLLED);
+            const rows = await readInsightRequests(pool, ids.studentIds.esha);
+            expect(rows.map((row) => row.state)).toEqual(["completed", "completed"]);
+            await entry.getByRole("button", { name: "View AI Summary" }).click();
+            await expectFixedText(entry);
+            await expectFixedPdfDownload(page, entry, `ai-summary-${ids.studentIds.esha}-2026-11-20.pdf`);
+          });
+
+          test("reads and downloads the Test Insight a submitted session records, for the Teacher and a viewer", async ({
+            page,
+            pmPage,
+          }) => {
+            test.slow();
+            await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+            const summary = await generateForEsha(page);
+            await expectFixedText(summary, POLLED);
+            const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+            // 05:30 UTC is 11:00 on 27 Nov 2026 in India.
+            await setRequestedAt(request.requestKey, "2026-11-27 05:30:00");
+            const notes = { sessionDate: "2026-11-20", areasOfConcern: CONCERN, immediateActions: ACTIONS, otherNotes: null };
+            const draft = await page.request.put(`${sessionsRoute()}/draft`, { data: { ...notes, expectedRevision: 0 } });
+            expect(draft.status()).toBe(200);
+            const submitted = await page.request.post(sessionsRoute(), {
+              data: { ...notes, expectedRevision: (await draft.json()).revision, openRequestKey: request.requestKey },
+            });
+            expect(submitted.status()).toBe(201);
+            const callsBefore = await enqueueOrWakeCalls();
+
+            for (const viewer of [page, pmPage]) {
+              await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+              await viewer.goto(studentUrl("esha"));
+              // The Test Insight shows once, inside the session.
+              await expect(history(viewer).getByRole("listitem")).toHaveCount(1);
+              const entry = entryWith(viewer, "Notes by E2E ATI Teacher");
+              await expect(entry.getByText("AI Summary of 27 Nov 2026", { exact: true })).toBeVisible();
+              await entry.getByRole("button", { name: "View AI Summary" }).click();
+              await expectFixedText(entry);
+              await expect(entry.getByText("Asked for by E2E ATI Teacher on 27 Nov 2026, 11:00", { exact: true })).toBeVisible();
+              await expectFixedPdfDownload(viewer, entry, `ai-summary-${ids.studentIds.esha}-2026-11-27.pdf`);
+            }
+            expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+          });
+        });
       });
     });
 

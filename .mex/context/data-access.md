@@ -1202,3 +1202,13 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   a draft; requests with declared `requested_at`, the 14 Nov one recorded by her 14 Nov session, plus
   failed, no-data and running) and her expected entries, `AI_TEST_INSIGHTS_ASHA_HISTORY`, are in
   `e2e/helpers/ai-test-insights-fixtures.ts`; her counts are unchanged (3, 2, 14 Nov 2026).
+- **View AI Summary in History (#551 slice #577, 2026-11-28):** no new read or route. Each Test Insight
+  in the timeline (by itself or the one a session records) has "View AI Summary", which mounts the
+  shared client piece `src/components/ai-test-insights/TestInsightSummary.tsx` (moved out of the AI
+  Summary card, which now uses it too: text from part 1's `…/requests/[requestKey]/summary`, Download
+  PDF through `…/pdf`, `TestInsightMadeBy`) and "Hide AI Summary" unmounts it. Both routes are reached
+  with `aiTestInsightsRequestsUrl(studentId, centreId)`, the same URL the card gets, so the page's
+  `centre` rides along. The text is read only on open; nothing polls, wakes or enqueues. The seeded
+  fixture requests have no Item files, so the e2e "From History" specs (inside "AI Summary") use
+  requests the fake generator completed for Esha. `next dev` mounts effects twice and aborts the first
+  fetch, so a spec that counts reads counts `requestfinished`, not `request`.

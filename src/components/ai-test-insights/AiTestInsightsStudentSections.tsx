@@ -17,6 +17,8 @@
 // no form, so it follows the AI Summary card). Session Notes and History
 // share one read of the sessions route, read again after a submit, after
 // "Reload notes", and when the AI Summary card's request becomes `completed`.
+// History opens its Test Insights (#577) through the same requests route as
+// the card, with the page's `centre`.
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 
@@ -68,6 +70,7 @@ export default function AiTestInsightsStudentSections({
   const [shownRequest, setShownRequest] = useState<InsightRequestView | null>(latestRequest);
   const router = useRouter();
   const sessionsUrl = aiTestInsightsSessionsUrl(studentId, centreId);
+  const requestsUrl = aiTestInsightsRequestsUrl(studentId, centreId);
   const sessions = useAiTestInsightsSessions(sessionsUrl);
   const { reload: reloadSessions } = sessions;
 
@@ -93,7 +96,7 @@ export default function AiTestInsightsStudentSections({
         tests={state}
         canEdit={canEdit}
         onRetry={retry}
-        requestsUrl={aiTestInsightsRequestsUrl(studentId, centreId)}
+        requestsUrl={requestsUrl}
         initialRequest={latestRequest}
         onRequestChange={onRequestChange}
       />
@@ -109,7 +112,7 @@ export default function AiTestInsightsStudentSections({
           }}
         />
       )}
-      <AiTestInsightsHistory sessions={sessions} tests={state} />
+      <AiTestInsightsHistory sessions={sessions} tests={state} requestsUrl={requestsUrl} />
     </>
   );
 }

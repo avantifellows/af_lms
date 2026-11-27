@@ -8,8 +8,17 @@
 // Insight it records; a Test Insight entry shows that Test Insight alone. A
 // failed read stays inside this section, with Retry. No pagination, search or
 // filter.
+//
+// Every Test Insight in it (by itself or the one a session records) has
+// "View AI Summary" (#577), which opens the shared `TestInsightSummary` in
+// place (the AI Summary card's piece: text, Download PDF, the tests and who
+// asked) and closes it again. The text is read only once it is opened, through
+// part 1's summary and PDF routes with the page's `centre`; nothing polls.
+import { useId, useState } from "react";
+
 import TestInsightMadeBy from "@/components/ai-test-insights/TestInsightMadeBy";
-import { Card } from "@/components/ui";
+import TestInsightSummary from "@/components/ai-test-insights/TestInsightSummary";
+import { Button, Card } from "@/components/ui";
 import { RetryAlert } from "@/components/ui/RetryAlert";
 import type { SessionsRead } from "@/hooks/use-ai-test-insights-sessions";
 import { sessionNotesFieldName, SESSION_NOTES_TEXT_FIELDS } from "@/lib/ai-test-insights-session-notes-rules";
@@ -24,12 +33,33 @@ import type { TimelineEntry } from "@/lib/ai-test-insights-timeline";
 
 const EMPTY_MESSAGE = "No Insight Sessions or AI Summaries yet.";
 
-/** One Test Insight: its name, the tests it was made from, who asked for it and when. */
-function TestInsightLine({ request, tests }: { request: InsightRequestView; tests: AiTestInsightsTestsState }) {
+interface TestInsightProps {
+  request: InsightRequestView;
+  tests: AiTestInsightsTestsState;
+  /** The Student's requests route, with the page's `centre`. */
+  requestsUrl: string;
+}
+
+/**
+ * One Test Insight: its name, then the tests it was made from and who asked
+ * for it and when; opened, the shared piece shows those with its text and PDF.
+ */
+function TestInsightLine({ request, tests, requestsUrl }: TestInsightProps) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <p className="text-sm font-medium text-text-primary">{aiSummaryTitle(request)}</p>
-      <TestInsightMadeBy request={request} tests={tests} />
+      {open ? (
+        <div id={panelId}>
+          <TestInsightSummary request={request} tests={tests} requestsUrl={requestsUrl} />
+        </div>
+      ) : (
+        <TestInsightMadeBy request={request} tests={tests} />
+      )}
+      <Button variant="secondary" size="sm" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen(!open)}>
+        {open ? "Hide AI Summary" : "View AI Summary"}
+      </Button>
     </div>
   );
 }
@@ -37,9 +67,11 @@ function TestInsightLine({ request, tests }: { request: InsightRequestView; test
 function SessionEntry({
   entry,
   tests,
+  requestsUrl,
 }: {
   entry: Extract<TimelineEntry, { kind: "session" }>;
   tests: AiTestInsightsTestsState;
+  requestsUrl: string;
 }) {
   return (
     <div className="space-y-3">
@@ -64,7 +96,7 @@ function SessionEntry({
           );
         })}
       </dl>
-      {entry.testInsight && <TestInsightLine request={entry.testInsight} tests={tests} />}
+      {entry.testInsight && <TestInsightLine request={entry.testInsight} tests={tests} requestsUrl={requestsUrl} />}
     </div>
   );
 }
@@ -72,11 +104,14 @@ function SessionEntry({
 export default function AiTestInsightsHistory({
   sessions,
   tests,
+  requestsUrl,
 }: {
   /** The page's read of the sessions route. */
   sessions: SessionsRead;
   /** The page's read of the test picker route, which names the tests. */
   tests: AiTestInsightsTestsState;
+  /** The Student's requests route, with the page's `centre`: View AI Summary reads its summary and PDF routes. */
+  requestsUrl: string;
 }) {
   const { state } = sessions;
   let body;
@@ -95,9 +130,9 @@ export default function AiTestInsightsHistory({
             className="py-4 first:pt-0 last:pb-0"
           >
             {entry.kind === "session" ? (
-              <SessionEntry entry={entry} tests={tests} />
+              <SessionEntry entry={entry} tests={tests} requestsUrl={requestsUrl} />
             ) : (
-              <TestInsightLine request={entry.testInsight} tests={tests} />
+              <TestInsightLine request={entry.testInsight} tests={tests} requestsUrl={requestsUrl} />
             )}
           </li>
         ))}
