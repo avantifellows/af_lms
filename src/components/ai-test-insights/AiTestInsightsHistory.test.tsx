@@ -82,6 +82,8 @@ const REQUESTS_URL = "/api/ai-test-insights/students/1001/requests";
 const sessionUrl = (sessionId: number) => `/api/ai-test-insights/students/1001/sessions/${sessionId}?centre=302`;
 
 let onEdited: ReturnType<typeof vi.fn<() => void>>;
+/** Shows the rendered History the page's next read of the sessions route. */
+let rerenderWith: (sessions: SessionsRead) => void;
 
 function renderHistory(
   sessions: SessionsRead,
@@ -89,17 +91,22 @@ function renderHistory(
   requestsUrl: string = REQUESTS_URL,
 ) {
   onEdited = vi.fn();
-  render(
+  const history = (read: SessionsRead) => (
     <AiTestInsightsHistory
-      sessions={sessions}
+      sessions={read}
       tests={tests}
       requestsUrl={requestsUrl}
       sessionUrl={sessionUrl}
       onEdited={onEdited}
-    />,
+    />
   );
+  const { rerender } = render(history(sessions));
+  rerenderWith = (read) => rerender(history(read));
   return screen.getByRole("region", { name: "History" });
 }
+
+/** The page's read of the sessions route while it reads again, keeping its reload. */
+const reading = (sessions: SessionsRead): SessionsRead => ({ state: { status: "loading" }, reload: sessions.reload });
 
 /** Each entry's lines of text, in the order shown. */
 const entryLines = (history: HTMLElement) =>
@@ -231,6 +238,22 @@ describe("AiTestInsightsHistory View AI Summary", () => {
     expect(within(entry).queryByRole("article")).not.toBeInTheDocument();
     expect(within(entry).queryByRole("link", { name: "Download PDF" })).not.toBeInTheDocument();
     expect(within(entry).getByRole("button", { name: "View AI Summary" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps an open AI Summary open, without reading it again, while the timeline is read again", async () => {
+    const user = userEvent.setup();
+    const fetchMock = answerSummary(MARKDOWN);
+    const sessions = loaded(TIMELINE);
+    const history = renderHistory(sessions);
+    await user.click(within(entryWith(history, "AI Summary of 11 Feb 2026")).getByRole("button", { name: "View AI Summary" }));
+    await within(history).findByRole("article", { name: "AI Summary text" });
+
+    rerenderWith(reading(sessions));
+    expect(within(history).getByRole("article", { name: "AI Summary text" })).toBeInTheDocument();
+    rerenderWith(loaded(TIMELINE));
+
+    expect(within(entryWith(history, "AI Summary of 11 Feb 2026")).getByRole("article", { name: "AI Summary text" })).toBeInTheDocument();
+    expect(askedUrls(fetchMock)).toEqual([summaryUrl("rk-52")]);
   });
 
   it("offers View AI Summary on each Test Insight and on no session without one", () => {
@@ -577,6 +600,70 @@ describe("AiTestInsightsHistory Edit", () => {
 
     fireEvent.click(within(alert).getByRole("button", { name: "Reload notes" }));
     expect(sessions.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an edit in progress and its typing while the timeline is read again, and shows no loading line", async () => {
+    const sessions = loaded(TIMELINE);
+    const entry = editAshasEntry(sessions);
+    type(entry, "Areas of concern", `Typed before the reload ${MARKER}`);
+
+    rerenderWith(reading(sessions));
+    expect(screen.queryByText("Loading history…")).not.toBeInTheDocument();
+    expect(field(entry, "Areas of concern").value).toBe(`Typed before the reload ${MARKER}`);
+    rerenderWith(loaded(TIMELINE));
+
+    const after = entryWith(screen.getByRole("region", { name: "History" }), "Notes by Asha Teacher");
+    expect(field(after, "Areas of concern").value).toBe(`Typed before the reload ${MARKER}`);
+    expect(saveButton(after)).toBeEnabled();
+  });
+
+  it("keeps an edit when a reload fails, with Retry above the timeline", () => {
+    const sessions = loaded(TIMELINE);
+    const entry = editAshasEntry(sessions);
+    type(entry, "Areas of concern", `Typed before the reload ${MARKER}`);
+
+    rerenderWith({ state: { status: "failed" }, reload: sessions.reload });
+
+    const history = screen.getByRole("region", { name: "History" });
+    expect(within(history).getAllByRole("alert")[0]).toHaveTextContent("History could not be loaded.");
+    expect(field(entry, "Areas of concern").value).toBe(`Typed before the reload ${MARKER}`);
+  });
+
+  it("still refuses the edit with 409 when the entry changed on the server during a reload, and Reload notes shows the newer notes", async () => {
+    edits = [{ status: 409, body: { error: "These notes were changed in another tab.", code: "stale", currentRevision: 5 } }];
+    const sessions = loaded(TIMELINE);
+    const entry = editAshasEntry(sessions);
+    type(entry, "Areas of concern", `Typed in this tab ${MARKER}`);
+    // Another tab saved the entry at revision 5 meanwhile.
+    const newer = TIMELINE.map((item) =>
+      item.kind === "session" && item.sessionId === 11 ? { ...item, revision: 5, areasOfConcern: `Saved elsewhere ${MARKER}` } : item,
+    );
+    rerenderWith(reading(sessions));
+    rerenderWith({ state: { status: "loaded", sessions: { timeline: newer, draft: null, notesAccess: "read" } }, reload: sessions.reload });
+
+    fireEvent.click(saveButton(entry));
+    await tick(0);
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ expectedRevision: 4 });
+    const alert = within(entry).getByRole("alert");
+    expect(alert).toHaveTextContent("These notes were changed in another tab.");
+    expect(field(entry, "Areas of concern").value).toBe(`Typed in this tab ${MARKER}`);
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Reload notes" }));
+    expect(sessions.reload).toHaveBeenCalledTimes(1);
+    expect(within(entry).queryByLabelText("Areas of concern")).not.toBeInTheDocument();
+    expect(within(entry).getByText(`Saved elsewhere ${MARKER}`)).toBeInTheDocument();
+  });
+
+  it("closes the edit once it is saved", async () => {
+    const entry = editAshasEntry();
+    type(entry, "Areas of concern", `Weak in ray optics ${MARKER}`);
+
+    fireEvent.click(saveButton(entry));
+    await tick(0);
+
+    expect(within(entry).queryByLabelText("Areas of concern")).not.toBeInTheDocument();
+    expect(within(entry).getByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
 
   it("says a failed save failed, keeps the typed text, and lets the Teacher save again", async () => {

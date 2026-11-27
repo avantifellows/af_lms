@@ -10,7 +10,8 @@
 // at the entry's revision to the session's edit route. After a save the page
 // reads the timeline again (`onSaved`). Cancel puts the entry back and sends
 // nothing. A 409 `stale` (another tab saved first) shows the other-tab message
-// with "Reload notes" and keeps the typed text until then; any other failure
+// with "Reload notes" (which closes the edit and reads the timeline again) and
+// keeps the typed text until then; any other failure
 // says so and lets the author save again. It never touches the caller's draft
 // or the Session Notes form.
 import { useState } from "react";
@@ -60,13 +61,16 @@ export default function SessionNotesEdit({
     otherNotes: entry.otherNotes ?? "",
   }));
   const [state, setState] = useState<SaveState>("idle");
+  // The revision the edit was opened from: a reload of the timeline meanwhile
+  // must not move it, or a change another tab made would be saved over.
+  const [revision] = useState(entry.revision);
   const today = getTodayIST();
   const canSave =
     validateSessionNotes(asSessionNotes(values), "final", today).ok && state !== "saving" && state !== "stale";
 
   async function save() {
     setState("saving");
-    const request: SessionNotesEditRequest = { ...asSessionNotes(values), expectedRevision: entry.revision };
+    const request: SessionNotesEditRequest = { ...asSessionNotes(values), expectedRevision: revision };
     const outcome = await sendSessionNotes(editUrl, "PATCH", request);
     if (outcome === "ok") {
       onSaved();

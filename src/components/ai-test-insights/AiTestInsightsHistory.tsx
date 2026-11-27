@@ -20,6 +20,13 @@
 // with "Save changes" and Cancel. After a save the timeline is read again and
 // the page is told (`onEdited`), so the Student card's last Insight Session
 // date moves; "Reload notes" after a stale save reads the timeline again.
+//
+// Only the first read shows "Loading history…". A later read (after a
+// submit, an edit, "Reload notes", or the AI Summary card's request
+// completing) keeps the last timeline on screen until it answers, and a
+// failed one shows Retry above it, so an open Edit keeps its typing and an
+// open AI Summary stays open. An edit saves at the revision it was opened
+// from, so a change another tab made meanwhile still gets the 409.
 import { useId, useState } from "react";
 
 import SessionNotesEdit from "@/components/ai-test-insights/SessionNotesEdit";
@@ -116,11 +123,15 @@ function SessionEntry({
           entry={entry}
           editUrl={edit.sessionUrl(entry.sessionId)}
           onSaved={() => {
+            setEditing(false);
             edit.reload();
             edit.onEdited?.();
           }}
           onCancel={() => setEditing(false)}
-          onReload={edit.reload}
+          onReload={() => {
+            setEditing(false);
+            edit.reload();
+          }}
         />
       ) : (
         <dl className="space-y-2">
@@ -161,17 +172,22 @@ export default function AiTestInsightsHistory({
 }) {
   const { state } = sessions;
   const edit: EditProps = { sessionUrl, reload: sessions.reload, onEdited };
+  // The newest timeline a read answered, kept on screen while the next read runs or after it fails.
+  const [shown, setShown] = useState<TimelineEntry[] | null>(null);
+  if (state.status === "loaded" && state.sessions.timeline !== shown) setShown(state.sessions.timeline);
+  const timeline = state.status === "loaded" ? state.sessions.timeline : shown;
+  const failed = state.status === "failed" && (
+    <RetryAlert onRetry={sessions.reload}>History could not be loaded.</RetryAlert>
+  );
   let body;
-  if (state.status === "loading") {
-    body = <p className="text-sm text-text-secondary">Loading history…</p>;
-  } else if (state.status === "failed") {
-    body = <RetryAlert onRetry={sessions.reload}>History could not be loaded.</RetryAlert>;
-  } else if (state.sessions.timeline.length === 0) {
+  if (timeline === null) {
+    body = failed || <p className="text-sm text-text-secondary">Loading history…</p>;
+  } else if (timeline.length === 0) {
     body = <p className="text-sm text-text-secondary">{EMPTY_MESSAGE}</p>;
   } else {
     body = (
       <ol className="divide-y divide-border">
-        {state.sessions.timeline.map((entry) => (
+        {timeline.map((entry) => (
           <li
             key={entry.kind === "session" ? `session-${entry.sessionId}` : `insight-${entry.testInsight.requestKey}`}
             className="py-4 first:pt-0 last:pb-0"
@@ -191,6 +207,7 @@ export default function AiTestInsightsHistory({
     <section aria-label="History">
       <Card elevation="sm" className="p-4 sm:p-6">
         <h2 className="mb-4 text-lg font-bold text-text-primary">History</h2>
+        {timeline !== null && failed && <div className="mb-4">{failed}</div>}
         {body}
       </Card>
     </section>
