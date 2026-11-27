@@ -21,7 +21,9 @@
 //   fake's read-only access key id (SigV4 header or presigned query). The
 //   bytes are the fixed Test Insight in fake-ai-test-insight.json: `markdown`
 //   for a `report` file, `pdf` for a `report_pdf` file. Anything else is a
-//   404 NoSuchKey or a 403 AccessDenied, as S3 answers.
+//   404 NoSuchKey or a 403 AccessDenied, as S3 answers. As S3 does, a
+//   presigned URL's `response-content-type` and
+//   `response-content-disposition` (#565) set those answer headers.
 //
 // Its database side writes what AI Mentorship Guide writes on a request row
 // (#563). After answering 202 it claims the request when told to run it: one
@@ -364,7 +366,12 @@ async function serveObject(req, res, url) {
     : { rows: [] };
   const upload = UPLOADS_BY_KIND.get(found.rows[0]?.file_kind);
   if (!upload) return sendS3Error(res, 404, "NoSuchKey");
-  res.writeHead(200, { "Content-Type": upload.mimeType, "Content-Length": String(upload.bytes.length) });
+  const disposition = url.searchParams.get("response-content-disposition");
+  res.writeHead(200, {
+    "Content-Type": url.searchParams.get("response-content-type") ?? upload.mimeType,
+    "Content-Length": String(upload.bytes.length),
+    ...(disposition ? { "Content-Disposition": disposition } : {}),
+  });
   res.end(req.method === "HEAD" ? undefined : upload.bytes);
 }
 

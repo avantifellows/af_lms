@@ -39,11 +39,16 @@
 // earlier test"), who asked for it and when. A failed text read shows an
 // error with Retry. Reading it makes no status poll, so no wake or enqueue
 // call. Viewers read it too. The picker and Generate stay under it.
+//
+// It also offers "Download PDF" (#565): a link to the PDF route, which
+// answers with the PDF the generator made. The link stays whether the text
+// loads, is loading or failed. Viewers download it too.
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import TestInsightText from "@/components/ai-test-insights/TestInsightText";
 import { Button, Card } from "@/components/ui";
 import {
+  aiTestInsightsRequestPdfUrl,
   aiTestInsightsRequestStatusUrl,
   aiTestInsightsRequestSummaryUrl,
   formatInsightRequestTime,
@@ -191,7 +196,7 @@ function madeFrom(selectedTestIds: string[], tests: AiTestInsightsTestsState): s
   return selectedTestIds.map((id) => names.get(id) ?? "an earlier test").join(", ");
 }
 
-/** A `completed` request: its AI Summary text, the tests it was made from, who asked for it and when. */
+/** A `completed` request: its AI Summary text, its PDF, the tests it was made from, who asked for it and when. */
 function CompletedSummary({
   request,
   tests,
@@ -216,6 +221,12 @@ function CompletedSummary({
         </div>
       )}
       {state.status === "loaded" && <TestInsightText markdown={state.markdown} />}
+      <a
+        href={aiTestInsightsRequestPdfUrl(requestsUrl, request.requestKey)}
+        className="inline-flex text-sm font-medium text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        Download PDF
+      </a>
       <div className="space-y-1 text-xs text-text-muted">
         <p>Made from: {madeFrom(request.selectedTestIds, tests)}</p>
         <p>

@@ -1078,3 +1078,13 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `removeInsightRequestsMadeBySpecs` / `removeAiTestInsightsFixture` remove the fake's Items and Sessions
   (marked `config_snapshot_json = '{"fake_ai_mentorship_guide":true}'`; Item Files cascade). Persona Users
   now carry the persona's name as `first_name`, so the card shows "Asked for by E2E ATI Teacher".
+- **AI Summary PDF (#565):** `GET .../requests/[requestKey]/pdf` gates like the summary route (Student
+  access, then `requestByKey`; 404 unless that Student's and `completed`). `presignTestInsightPdf` in
+  `src/lib/ai-test-insights-artifacts.ts` finds the `report_pdf` file with the same `$n` read (no row →
+  404), applies the same folder check (502, nothing signed), then `getSignedUrl` on the reader's own
+  client with `expiresIn: 60` and `ResponseContentType: application/pdf` +
+  `ResponseContentDisposition: attachment; filename="ai-summary-{student.id}-{YYYY-MM-DD}.pdf"` (the
+  request's date in India, `aiTestInsightPdfFileName` in `src/lib/ai-test-insights-shared.ts`; never a
+  name). Answers 302 with `Cache-Control: no-store` and the same `Content-Disposition`; 503
+  `not_configured`; 502 when signing throws. No bytes pass through the LMS, nothing is written, no wake
+  or enqueue. Logs: request key, `student.id`, reason, error name — never a key, the URL or a name.

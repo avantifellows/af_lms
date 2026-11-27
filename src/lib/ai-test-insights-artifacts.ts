@@ -25,8 +25,12 @@
 // Logs carry the request key, `student.id`, a reason and an error name only,
 // never the text or an S3 key.
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { query } from "@/lib/db";
+
+/** How long a presigned PDF URL lasts: 60 seconds, as the document downloads. */
+export const TEST_INSIGHT_PDF_URL_TTL_SECONDS = 60;
 
 /** The largest Test Insight text the LMS returns: 1 MB. */
 export const TEST_INSIGHT_TEXT_MAX_BYTES = 1024 * 1024;
@@ -162,5 +166,45 @@ export async function readTestInsightText(studentId: number, requestKey: string)
     return { status: "read", markdown: new TextDecoder().decode(bytes) };
   } catch (error) {
     return { status: "unreadable", reason: "store_failed", errorName: errorName(error) };
+  }
+}
+
+export type TestInsightPdfSign =
+  | { status: "signed"; url: string }
+  | { status: "not_configured" }
+  | { status: "no_file" }
+  | { status: "unreadable"; reason: "outside_prefix" | "sign_failed"; errorName?: string };
+
+/**
+ * A 60-second presigned URL of the PDF of a completed request of the
+ * Student, which the browser saves as `fileName`. Not signed when the key
+ * fails the folder check.
+ */
+export async function presignTestInsightPdf(
+  studentId: number,
+  requestKey: string,
+  fileName: string,
+): Promise<TestInsightPdfSign> {
+  const settings = aiTestInsightsArtifactSettings();
+  if (!settings) return { status: "not_configured" };
+
+  const file = await insightFile(studentId, requestKey, "report_pdf");
+  if (!file) return { status: "no_file" };
+  if (!isKeyInItemFolder(settings, file.itemId, file.s3Key)) return { status: "unreadable", reason: "outside_prefix" };
+
+  try {
+    const url = await getSignedUrl(
+      artifactClient(settings),
+      new GetObjectCommand({
+        Bucket: settings.bucket,
+        Key: file.s3Key,
+        ResponseContentType: "application/pdf",
+        ResponseContentDisposition: `attachment; filename="${fileName}"`,
+      }),
+      { expiresIn: TEST_INSIGHT_PDF_URL_TTL_SECONDS },
+    );
+    return { status: "signed", url };
+  } catch (error) {
+    return { status: "unreadable", reason: "sign_failed", errorName: errorName(error) };
   }
 }

@@ -816,6 +816,60 @@ describe("AiTestInsightsSummaryCard AI Summary", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([SUMMARY_URL, SUMMARY_URL]);
   });
 
+  // The PDF the generator made (#565), from the PDF route, which 302s to
+  // the file. Viewers download it too.
+  const PDF_URL = "/api/ai-test-insights/students/1001/requests/key-1/pdf";
+  const pdfLink = () => within(card()).getByRole("link", { name: "Download PDF" });
+
+  it.each([
+    ["a Teacher", true],
+    ["a viewer", false],
+  ] as const)("gives %s a Download PDF link to the request's PDF route", async (_label, canEdit) => {
+    answerSummary(MARKDOWN);
+    renderWith(completed(), { canEdit });
+
+    await summaryText();
+    expect(pdfLink()).toHaveAttribute("href", PDF_URL);
+  });
+
+  it("carries the page's centre to the PDF route", async () => {
+    answerSummary(MARKDOWN);
+    renderWith(completed(), { requestsUrl: `${URL}?centre=302` });
+
+    await summaryText();
+    expect(pdfLink()).toHaveAttribute("href", `${PDF_URL}?centre=302`);
+  });
+
+  it("keeps the Download PDF link when the text read fails", async () => {
+    answerSummary(502);
+    renderWith(completed());
+
+    await within(card()).findByRole("alert");
+    expect(pdfLink()).toHaveAttribute("href", PDF_URL);
+  });
+
+  it("offers the PDF link while the text is still loading, without fetching the PDF", () => {
+    const fetchMock = vi.fn<(url: string) => Promise<unknown>>(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    renderWith(completed());
+
+    expect(pdfLink()).toHaveAttribute("href", PDF_URL);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([SUMMARY_URL]);
+  });
+
+  it.each(["queued", "running", "no_data", "failed"] as const)("has no Download PDF link for a %s request", (state) => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    renderWith(
+      completed({
+        state,
+        outcomeCode: state === "no_data" || state === "failed" ? "interrupted" : null,
+        finishedAt: state === "queued" || state === "running" ? null : "2026-11-27T05:34:10Z",
+      }),
+    );
+
+    expect(within(card()).queryByRole("link", { name: "Download PDF" })).not.toBeInTheDocument();
+  });
+
   it("says it is loading the text", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
     renderWith(completed());

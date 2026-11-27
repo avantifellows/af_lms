@@ -243,6 +243,9 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
   same Student access, in the same order, before any warehouse read. Every viewer may read it; a
   viewer (Program Manager, Program Admin, Admin, `read_only` Teacher) sees the picker read-only and
   only a Teacher with `edit` can tick tests.
+- **AI Summary PDF route** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]/pdf`
+  (#565) runs the same Student access, in the same order, and is a read: every viewer may download
+  the PDF of a completed request of a Student they may open. A request key of another Student is 404.
 
 ### NVS-Only Users
 

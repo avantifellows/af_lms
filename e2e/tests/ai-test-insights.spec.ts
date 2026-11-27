@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import type { Page } from "@playwright/test";
 
 import { test, expect, signInAs } from "../fixtures/auth";
@@ -861,6 +863,7 @@ test.describe("AI Test Insights tab", () => {
       // A finished request (#564): the card reads the AI Summary text from
       // the fake's object store through the summary route and shows it
       // formatted, with the tests it was made from, who asked and when.
+      // "Download PDF" (#565) saves the fixed PDF the fake "uploaded".
       test.describe("AI Summary", () => {
         // Up to two 10-second polls.
         const POLLED = { timeout: 25_000 };
@@ -876,6 +879,20 @@ test.describe("AI Test Insights tab", () => {
         const enqueueOrWakeCalls = async () => (await fakeAiMentorshipGuideCalls()).length;
         const summaryRoute = (requestKey: string) =>
           `/api/ai-test-insights/students/${ids.studentIds.esha}/requests/${requestKey}/summary`;
+
+        /**
+         * Downloads the PDF through the card's "Download PDF" link (#565) and
+         * checks it holds the fixed PDF bytes, saved under `fileName`.
+         */
+        async function expectFixedPdfDownload(page: Page, summary: ReturnType<Page["getByRole"]>, fileName: string) {
+          const [download] = await Promise.all([
+            page.waitForEvent("download"),
+            summary.getByRole("link", { name: "Download PDF" }).click(),
+          ]);
+          expect(download.suggestedFilename()).toBe(fileName);
+          const bytes = await readFile((await download.path())!);
+          expect(bytes.equals(Buffer.from(FAKE_TEST_INSIGHT.pdf, "latin1"))).toBe(true);
+        }
 
         /** Checks the card shows the fixed Test Insight as formatted text. */
         async function expectFixedText(summary: ReturnType<Page["getByRole"]>, options?: { timeout: number }) {
@@ -939,10 +956,14 @@ test.describe("AI Test Insights tab", () => {
           await expect(
             summary.getByText("Asked for by E2E ATI Teacher on 27 Nov 2026, 11:00", { exact: true }),
           ).toBeVisible();
+
+          // The PDF the generator made, named by the Student's id and the
+          // request's date, never the Student's name.
+          await expectFixedPdfDownload(page, summary, `ai-summary-${ids.studentIds.esha}-2026-11-27.pdf`);
           expect(await enqueueOrWakeCalls()).toBe(callsBefore);
         });
 
-        test("shows a Program Manager, Program Admin and Admin the AI Summary, with no Generate", async ({
+        test("shows a Program Manager, Program Admin and Admin the AI Summary and its PDF, with no Generate", async ({
           browser,
           pmPage,
           programAdminPage,
@@ -955,6 +976,12 @@ test.describe("AI Test Insights tab", () => {
           const teacherSummary = await generateForEsha(await teacherContext.newPage());
           await expectFixedText(teacherSummary, POLLED);
           await teacherContext.close();
+          // 20:30 UTC on 27 Nov is 28 Nov in India.
+          const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+          await pool.query(
+            `UPDATE ai_test_insight_requests SET requested_at = '2026-11-27 20:30:00' WHERE request_key = $1`,
+            [request.requestKey],
+          );
           const callsBefore = await enqueueOrWakeCalls();
 
           for (const viewer of [pmPage, programAdminPage, adminPage]) {
@@ -965,6 +992,7 @@ test.describe("AI Test Insights tab", () => {
             await expect(summary.getByText("Made from: Mock Test 1", { exact: true })).toBeVisible();
             await expect(summary.getByText(/^Asked for by E2E ATI Teacher on /)).toBeVisible();
             await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+            await expectFixedPdfDownload(viewer, summary, `ai-summary-${ids.studentIds.esha}-2026-11-28.pdf`);
           }
           expect(await enqueueOrWakeCalls()).toBe(callsBefore);
         });

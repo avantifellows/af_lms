@@ -185,6 +185,30 @@ export function aiTestInsightsRequestSummaryUrl(requestsUrl: string, requestKey:
   return `${path}/summary${search ? `?${search}` : ""}`;
 }
 
+/**
+ * The PDF route of one request (its AI Summary PDF), from the Student's
+ * requests route; a `centre` value is kept.
+ */
+export function aiTestInsightsRequestPdfUrl(requestsUrl: string, requestKey: string): string {
+  const [path, search] = aiTestInsightsRequestStatusUrl(requestsUrl, requestKey).split("?", 2);
+  return `${path}/pdf${search ? `?${search}` : ""}`;
+}
+
+/**
+ * The file name an AI Summary PDF downloads as: the Student's `student.id`
+ * and the request's date in India, never the Student's name.
+ * `2026-11-27T05:30:00Z` of Student 1001 is `ai-summary-1001-2026-11-27.pdf`.
+ */
+export function aiTestInsightPdfFileName(studentId: number, requestedAt: string): string {
+  const date = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(requestedAt));
+  return `ai-summary-${studentId}-${date}.pdf`;
+}
+
 const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** A UTC moment (`2026-11-27T05:30:00Z`) in India time: `27 Nov 2026, 11:00`. */
