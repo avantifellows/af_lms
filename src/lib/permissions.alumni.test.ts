@@ -65,6 +65,7 @@ describe("alumni_manager role (ADR 0008)", () => {
     const OTHER_FEATURES: Feature[] = [
       "students", "visits", "curriculum", "academic_mentorship", "holistic_mentorship",
       "performance", "summary_stats", "pm_dashboard", "quiz_sessions", "teacher_feedback",
+      "ai_test_insights",
     ];
 
     it.each(OTHER_FEATURES)("has no access to %s", (feature) => {

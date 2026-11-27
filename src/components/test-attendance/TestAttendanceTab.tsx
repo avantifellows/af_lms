@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Card } from "@/components/ui";
+import { RetryAlert } from "@/components/ui/RetryAlert";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import AllYearPage from "@/components/test-attendance/AllYearPage";
 import MonthPage, { Tile, TileNumber } from "@/components/test-attendance/MonthPage";
@@ -316,14 +317,7 @@ export default function TestAttendanceTab({
   }
 
   if (state.status === "failed") {
-    return (
-      <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-danger bg-danger-bg p-4">
-        <p className="text-sm text-text-primary">Couldn&apos;t load Test Attendance. Please try again.</p>
-        <Button variant="secondary" onClick={retry}>
-          Retry
-        </Button>
-      </div>
-    );
+    return <RetryAlert onRetry={retry}>Couldn&apos;t load Test Attendance. Please try again.</RetryAlert>;
   }
 
   return (

@@ -483,7 +483,9 @@ describe("AddUserModal — program selection", () => {
 describe("AddUserModal — role descriptions", () => {
   it("shows teacher description when role is teacher", () => {
     renderModal();
-    expect(screen.getByText(/Teachers can view and manage students/)).toBeInTheDocument();
+    expect(screen.getByText(
+      "Teachers can view and manage students in their assigned schools, and generate AI Test Insights for the JEE students of their physical centres",
+    )).toBeInTheDocument();
   });
 
   it("shows PM description when role is program_manager", async () => {
@@ -494,7 +496,7 @@ describe("AddUserModal — role descriptions", () => {
     await user.selectOptions(roleSelect, "program_manager");
 
     expect(screen.getByText(
-      "Program Managers can conduct school visits, view all visits and the Visit Summary for centres where they hold a PM/SPM/PH seat, view assigned schools, and monitor scoped Holistic Mentorship progress",
+      "Program Managers can conduct school visits, view all visits and the Visit Summary for centres where they hold a PM/SPM/PH seat, view assigned schools, monitor scoped Holistic Mentorship progress, and view AI Test Insights",
     )).toBeInTheDocument();
   });
 
@@ -506,7 +508,7 @@ describe("AddUserModal — role descriptions", () => {
     await user.selectOptions(roleSelect, "admin");
 
     expect(screen.getByText(
-      "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only",
+      "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only. AI Test Insights is view-only: only Teachers generate them",
     )).toBeInTheDocument();
   });
 
@@ -538,7 +540,7 @@ describe("AddUserModal — role descriptions", () => {
 
     expect(
       screen.getByText(
-        "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
+        "Program Admins can oversee scoped schools, manage their own school visits, monitor scoped Holistic Mentorship progress, and view AI Test Insights",
       ),
     ).toBeInTheDocument();
   });

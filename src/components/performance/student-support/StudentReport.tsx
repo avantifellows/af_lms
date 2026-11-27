@@ -245,7 +245,8 @@ function TestRow({ t }: { t: TestHistoryRow }) {
   );
 }
 
-function TestHistory({ tests }: { tests: TestHistoryRow[] }) {
+/** The per-test table with expandable subject rows; the AI Test Insights performance card reuses it. */
+export function TestHistory({ tests }: { tests: TestHistoryRow[] }) {
   if (!tests.length) return <p className="text-sm text-text-muted">No full tests yet.</p>;
   const sat = tests.filter((t) => !t.absent && t.overall?.pct != null);
   const avg = sat.length ? Math.round((sat.reduce((a, t) => a + (t.overall?.pct ?? 0), 0) / sat.length) * 10) / 10 : null;

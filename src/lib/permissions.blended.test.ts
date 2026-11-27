@@ -38,6 +38,7 @@ const EXISTING_FEATURES: Feature[] = [
   "pm_dashboard",
   "quiz_sessions",
   "teacher_feedback",
+  "ai_test_insights",
 ];
 
 function blendedPermission(

@@ -1,0 +1,13 @@
+{
+  "port": 3051,
+  "enqueueSecret": "e2e-fake-ai-test-insights-enqueue-secret",
+  "environment": "staging",
+  "store": {
+    "bucket": "e2e-fake-ai-test-insights",
+    "region": "ap-south-1",
+    "prefix": "acad-mentorship",
+    "accessKeyId": "e2e-fake-ai-test-insights-read-key",
+    "secretAccessKey": "e2e-fake-ai-test-insights-read-secret"
+  },
+  "autoCompleteAfterMs": 5000
+}

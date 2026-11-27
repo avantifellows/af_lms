@@ -1394,6 +1394,7 @@ describe("PMU roles (JNV NVS pinned)", () => {
       quiz_sessions: "none",
       teacher_feedback: "none",
       test_attendance: "view",
+      ai_test_insights: "none",
     };
     const EXPECTED_READ_ONLY: Record<string, FeatureAccess> = {
       ...EXPECTED,
@@ -1485,5 +1486,58 @@ describe("test_attendance feature (Test Attendance tab, #517)", () => {
   it("is not NVS-gated: an NVS-only PMU Govt School User keeps view", () => {
     const permission = makePermission({ role: "pmu_govt_school_user", program_ids: [PROGRAM_IDS.NVS] });
     expect(getFeatureAccess(permission, "test_attendance").access).toBe("view");
+  });
+});
+
+describe("ai_test_insights feature (AI Test Insights tab, #550)", () => {
+  // Literal expectations from the PRD (#550, Decision Summary): Teacher edit;
+  // Program Manager, Program Admin and Admin view; every other role none.
+  const EXPECTED: Array<[UserPermission["role"], FeatureAccess]> = [
+    ["teacher", "edit"],
+    ["program_manager", "view"],
+    ["program_admin", "view"],
+    ["admin", "view"],
+    ["holistic_mentorship_admin", "none"],
+    ["pmu_manager", "none"],
+    ["pmu_govt_school_user", "none"],
+    ["blended_mentor", "none"],
+    ["blended_admin", "none"],
+    ["alumni_manager", "none"],
+  ];
+
+  it.each(EXPECTED)("%s → %s", (role, access) => {
+    const permission = makePermission({ role, level: 3, school_codes: null, program_ids: [PROGRAM_IDS.COE] });
+    expect(getFeatureAccess(permission, "ai_test_insights")).toEqual({
+      access,
+      canView: access !== "none",
+      canEdit: access === "edit",
+    });
+  });
+
+  it("gives a read_only Teacher view", () => {
+    const permission = makePermission({ role: "teacher", read_only: true, program_ids: [PROGRAM_IDS.COE] });
+    expect(getFeatureAccess(permission, "ai_test_insights")).toEqual({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+  });
+
+  it.each(["teacher", "program_manager", "program_admin"] as const)(
+    "is NVS-gated: an NVS-only %s gets none",
+    (role) => {
+      const permission = makePermission({ role, program_ids: [PROGRAM_IDS.NVS] });
+      expect(getFeatureAccess(permission, "ai_test_insights").access).toBe("none");
+    },
+  );
+
+  it("keeps view for an Admin, whose program context is never NVS-only", () => {
+    const permission = makePermission({ role: "admin", level: 3, program_ids: [PROGRAM_IDS.NVS] });
+    expect(getFeatureAccess(permission, "ai_test_insights").access).toBe("view");
+  });
+
+  it("gives a Punjab CoE Teacher edit", () => {
+    const permission = makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.PUNJAB_COE] });
+    expect(getFeatureAccess(permission, "ai_test_insights").access).toBe("edit");
   });
 });

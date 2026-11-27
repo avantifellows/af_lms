@@ -58,6 +58,8 @@ import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 import TeacherFeedbackTab from "@/components/teacher-feedback/TeacherFeedbackTab";
+import AiTestInsightsTab from "@/components/ai-test-insights/AiTestInsightsTab";
+import { aiTestInsightsTabHasScope } from "@/lib/ai-test-insights-access";
 import AlumniTab from "@/components/alumni/AlumniTab";
 import { schoolHasAlumni } from "@/lib/alumni/schools";
 import {
@@ -795,6 +797,7 @@ function rosterFeatureAccess(permission: UserPermission) {
     teacherFeedback: getFeatureAccess(permission, "teacher_feedback"),
     alumni: getFeatureAccess(permission, "alumni"),
     testAttendance: getFeatureAccess(permission, "test_attendance"),
+    aiTestInsights: getFeatureAccess(permission, "ai_test_insights"),
   };
 }
 
@@ -845,6 +848,26 @@ function testAttendanceContent(
     scope.school.af_school_category === "JNV" &&
     roster.some(isTestAttendanceStudent);
   return show ? <TestAttendanceTab schoolUdise={schoolUdise} schoolCode={scope.school.code} /> : null;
+}
+
+// AI Test Insights tab audience: physical centres only (#550). A Centre page
+// whose centre has a physical-centre Program, or a School page whose School
+// has at least one such active centre, for a viewer with `ai_test_insights`
+// view whose list scope there is not empty: the same rule as the list route
+// (`aiTestInsightsTabHasScope`), so the tab never shows where its list would
+// answer 403. The tab loads its own list; this page runs no AI Test Insights query.
+function aiTestInsightsContent(scope: RosterScope, permission: UserPermission, canView: boolean): ReactNode {
+  if (!canView) return null;
+  if (scope.kind === "centre") {
+    const centreId = Number(scope.centre.id);
+    return aiTestInsightsTabHasScope(permission, { centreId, programId: scope.centre.program_id }) ? (
+      <AiTestInsightsTab schoolCode={scope.school.code} centreId={centreId} />
+    ) : null;
+  }
+  const centreProgramIds = (scope.school.centre_program_ids ?? []).map(Number);
+  return aiTestInsightsTabHasScope(permission, { centreProgramIds }) ? (
+    <AiTestInsightsTab schoolCode={scope.school.code} />
+  ) : null;
 }
 
 async function fetchRosterData(scope: RosterScope) {
@@ -1192,6 +1215,7 @@ function visibleRosterTabs({
     | "testAttendance"
     | "quizSessions"
     | "teacherFeedback"
+    | "aiTestInsights"
     | "mentorship"
     | "holisticMentorship"
     | "visits"
@@ -1234,6 +1258,13 @@ function visibleRosterTabs({
       label: "Teacher Feedback",
       content: content.teacherFeedback,
       show: access.teacherFeedback.canView,
+    },
+    // Shown only when RosterPage passes content (see aiTestInsightsContent).
+    {
+      id: "ai_test_insights",
+      label: "AI Test Insights",
+      content: content.aiTestInsights,
+      show: Boolean(content.aiTestInsights),
     },
     { id: "mentorship", label: "Academic Mentorship", content: content.mentorship, show: access.mentorship.canView },
     {
@@ -1435,6 +1466,7 @@ export default async function RosterPage({
           centreId={centre.centreId}
         />
       ),
+      aiTestInsights: aiTestInsightsContent(scope, permission, access.aiTestInsights.canView),
       mentorship: mentorshipContent,
       holisticMentorship: holisticContent,
       visits: <VisitsTab schoolCode={school.code} canEdit={access.visits.canEdit} />,

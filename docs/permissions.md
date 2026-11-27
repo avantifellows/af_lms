@@ -64,6 +64,7 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   test_attendance: { teacher: "none", program_manager: "none", program_admin: "none", admin: "view" },
   exam_passwords:  { teacher: "view", program_manager: "view", program_admin: "view", admin: "view" },
+  ai_test_insights: { teacher: "edit", program_manager: "view", program_admin: "view", admin: "view" },
 };
 ```
 
@@ -83,6 +84,7 @@ Certain features are restricted to users who have CoE or Nodal program access. U
 - mentorship
 - pm_dashboard
 - summary_stats
+- ai_test_insights
 
 ### The Matrix Lives in Code, Not the Database
 
@@ -201,6 +203,7 @@ page and API denies them (`getUserPermission` returns `null` for them).
 | pm_dashboard | none | view | view | view |
 | exam_passwords | view | view | view | view |
 | test_attendance | none | none | none | view |
+| ai_test_insights | edit | view | view | view |
 
 `test_attendance` is `view` only for `admin` here; the PMU roles (`pmu_manager`, `pmu_govt_school_user`) are the others who get it (see "PMU roles" above).
 
@@ -209,6 +212,63 @@ Edit Student Exams tab. It sits on top of the tab's own gate (edit rights on the
 school-scoped, never a JNV NVS Student), so a teacher sees their schools' Students and a PM
 their assigned schools'. Every reveal is logged to `lms_exam_password_reveals`. Every other
 role is `none`.
+
+### AI Test Insights (#550, physical centres only)
+
+`ai_test_insights` is `edit` for Teacher (only a Teacher generates a Test Insight; a
+`read_only` Teacher gets `view`), `view` for Program Manager, Program Admin and Admin, and
+`none` for every other role (both PMU roles, the Holistic Mentorship admin, the Blended
+Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV NVS gets
+`none`.
+
+- **Tab:** "AI Test Insights", right after Teacher Feedback, on a Centre page whose centre has
+  a physical-centre Program (every Program but JNV NVS), or a School page whose School has at
+  least one such active centre, and only where the user's list scope (below) is not empty, the
+  same rule the list route uses: a centre-seated user (an Admin below level 3 with a seat
+  included) only on their seat centres' pages; any other Admin sees it there; anyone else only when that centre's Program (on a School page, one of its
+  active physical centres' Programs) is in their program list. So the tab never shows where its
+  list would be refused. A School with no active centre, or whose only active centre is JNV NVS,
+  never shows it, for any role. The tab loads its own list; the roster page runs no AI Test
+  Insights query.
+- **List route:** `GET /api/school/[udise]/ai-test-insights` (optional `centre_id`) refuses,
+  before any Student read: 401 no session, 404 School not found, 403 no School access, 403 no
+  `ai_test_insights` view, 403 no physical-centre scope for this user.
+- **List scope** (`src/lib/ai-test-insights-access.ts`, the only place that decides it): seats
+  come first, for every role: a centre-seated user, an Admin below level 3 with a seat included,
+  gets only their seat centres and is refused on the School route without a centre. Any other
+  Admin gets every active physical centre of the School; other users the School's active physical
+  centres whose Program is in their program context. Student access uses the same rule, so a
+  seated Admin cannot open a Student listed only by a centre outside their seats. A named centre must be one of those, at that
+  School, and pass `canViewCentre`.
+- **Student page** `/ai-test-insights/students/[studentId]` (#557), opened from the tab's Open
+  link: **Student access** (same module) refuses 401 no session (the page sends you to sign in),
+  422 bad id, 403 no `ai_test_insights` view, and 404 when the Student is missing, not listed, or
+  listed only by centres the user may not list; a write also answers 403 when access is not `edit`,
+  before the 404 check. The page shows every refusal as the same not-found page. A user who may
+  list a centre may open every listed Student of it (no mentor-mentee mapping).
+- **Test picker route** `GET /api/ai-test-insights/students/[studentId]/tests` (#559) runs the
+  same Student access, in the same order, before any warehouse read. Every viewer may read it; a
+  viewer (Program Manager, Program Admin, Admin, `read_only` Teacher) sees the picker read-only and
+  only a Teacher with `edit` can tick tests.
+- **Generate route** `POST /api/ai-test-insights/students/[studentId]/requests` (#560) is the
+  only write. Only a Teacher with `edit` access (a Teacher who is not `read_only`) whose School
+  scope lets them open the Student can call it: it runs Student access as a write, so a Program
+  Manager, Program Admin, Admin or `read_only` Teacher gets 403 before any Student is read, and a
+  Teacher who may not open the Student gets 404. Then 422 for a bad body, and 409 when the login
+  links to no User. The card hides Generate from viewers, but the route is the gate.
+- **Status route** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]` (#563)
+  runs the same Student access as a read, so every viewer may call it for a Student they may open;
+  a request key of another Student is 404. Its one side effect is only for a caller with `edit`:
+  a poll of a `queued` request may deliver it to AI Mentorship Guide again. A viewer's poll never
+  does.
+- **AI Summary text route**
+  `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]/summary` (#564) runs the
+  same Student access as a read: every viewer may read the AI Summary of a completed request of a
+  Student they may open. A request key of another Student, or a request that is not completed,
+  is 404.
+- **AI Summary PDF route** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]/pdf`
+  (#565) runs the same Student access, in the same order, and is a read: every viewer may download
+  the PDF of a completed request of a Student they may open. A request key of another Student is 404.
 
 ### NVS-Only Users
 
@@ -223,6 +283,7 @@ role is `none`.
 | pm_dashboard | none | none | none | view |
 | exam_passwords | view | view | view | view |
 | test_attendance | none | none | none | view |
+| ai_test_insights | none | none | none | view |
 
 NVS-only users can edit students and view performance. `exam_passwords` and `test_attendance` are not NVS-gated, so the matrix value applies (the Exams tab itself never shows a JNV NVS Student's password). Test Attendance for NVS staff comes through the PMU roles, not Teacher / Program Manager / Program Admin (ADR 0007). The other features are gated off by the NVS restriction.
 

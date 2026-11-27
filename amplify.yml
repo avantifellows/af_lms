@@ -19,6 +19,14 @@ frontend:
           echo "DB_SERVICE_TOKEN=$DB_SERVICE_TOKEN" >> .env.production
           echo "HOLISTIC_PROFILE_ETL_URL=$HOLISTIC_PROFILE_ETL_URL" >> .env.production
           echo "HOLISTIC_PROFILE_ETL_TOKEN=$HOLISTIC_PROFILE_ETL_TOKEN" >> .env.production
+          echo "AI_TEST_INSIGHTS_ENQUEUE_URL=$AI_TEST_INSIGHTS_ENQUEUE_URL" >> .env.production
+          echo "AI_TEST_INSIGHTS_ENQUEUE_SECRET=$AI_TEST_INSIGHTS_ENQUEUE_SECRET" >> .env.production
+          echo "AI_TEST_INSIGHTS_WAKE_URL=$AI_TEST_INSIGHTS_WAKE_URL" >> .env.production
+          echo "AI_TEST_INSIGHTS_S3_BUCKET=$AI_TEST_INSIGHTS_S3_BUCKET" >> .env.production
+          echo "AI_TEST_INSIGHTS_S3_REGION=$AI_TEST_INSIGHTS_S3_REGION" >> .env.production
+          echo "AI_TEST_INSIGHTS_S3_PREFIX=$AI_TEST_INSIGHTS_S3_PREFIX" >> .env.production
+          echo "AI_TEST_INSIGHTS_S3_ACCESS_KEY_ID=$AI_TEST_INSIGHTS_S3_ACCESS_KEY_ID" >> .env.production
+          echo "AI_TEST_INSIGHTS_S3_SECRET_ACCESS_KEY=$AI_TEST_INSIGHTS_S3_SECRET_ACCESS_KEY" >> .env.production
           echo "BLENDED_LEARNING_ETL_URL=$BLENDED_LEARNING_ETL_URL" >> .env.production
           echo "BLENDED_LEARNING_ETL_TOKEN=$BLENDED_LEARNING_ETL_TOKEN" >> .env.production
           echo "BLENDED_LEARNING_SES_ACCESS_KEY_ID=$BLENDED_LEARNING_SES_ACCESS_KEY_ID" >> .env.production

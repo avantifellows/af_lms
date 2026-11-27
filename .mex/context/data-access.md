@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-25
+last_updated: 2026-11-27
 ---
 
 # Data Access
@@ -31,7 +31,7 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 ## 1. PostgreSQL — `query()` (the default)
 `import { query } from "@/lib/db"` → `query<RowType>(sql, params)`. Returns `rows`.
 - **All reads** (lists, dashboards, detail pages, scope resolution).
-- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum (including Curriculum Plans: `lms_curriculum_plans`, `lms_curriculum_plan_chapters`, `lms_curriculum_plan_assignments`, written through `src/lib/curriculum-plans.ts` (Plan Assignments, by plan and by Centre, plus Centre coverage through `src/lib/curriculum-plan-assignments.ts`) in `withTransaction()` with the plan row locked `FOR UPDATE`; the plan schema preflight (`checkCurriculumPlansSchema`) lists every column those writes use, audit columns included, so a partly applied migration 503s; db-service owns their migrations, mirrored by `e2e/fixtures/migrations/20261019120000_add_lms_curriculum_plans.sql` and `20261023091700_widen_lms_curriculum_plan_exam_tracks.sql`, which lets `exam_tracks` include `cet` and indexes the remaining foreign keys), permissions/centre tables, Academic Mentor-Mentee Mappings, Holistic Mentorship product records, and intervention flags (`lms_student_intervention_flags` + append-only `lms_student_intervention_flag_updates`; a DB trigger allows only clearing `body`; mirrored for e2e, idempotently, by `e2e/fixtures/migrations/20261027130000_add_lms_student_intervention_flags.sql`).
+- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum (including Curriculum Plans: `lms_curriculum_plans`, `lms_curriculum_plan_chapters`, `lms_curriculum_plan_assignments`, written through `src/lib/curriculum-plans.ts` (Plan Assignments, by plan and by Centre, plus Centre coverage through `src/lib/curriculum-plan-assignments.ts`) in `withTransaction()` with the plan row locked `FOR UPDATE`; the plan schema preflight (`checkCurriculumPlansSchema`) lists every column those writes use, audit columns included, so a partly applied migration 503s; db-service owns their migrations, mirrored by `e2e/fixtures/migrations/20261019120000_add_lms_curriculum_plans.sql` and `20261023091700_widen_lms_curriculum_plan_exam_tracks.sql`, which lets `exam_tracks` include `cet` and indexes the remaining foreign keys), permissions/centre tables, Academic Mentor-Mentee Mappings, Holistic Mentorship product records, and intervention flags (`lms_student_intervention_flags` + append-only `lms_student_intervention_flag_updates`; a DB trigger allows only clearing `body`; mirrored for e2e, idempotently, by `e2e/fixtures/migrations/20261027130000_add_lms_student_intervention_flags.sql`), and AI Test Insights requests and sessions (`ai_test_insight_*`, db-service-owned DDL; see "AI Test Insights tables" below).
 - Holistic Profile regeneration first records an attributable request atomically in Postgres, then calls the configured ETL collection endpoint at `/{request_key}/enqueue` with the matching `APP_ENV` in the body. No Student data is sent. Ambiguous network outcomes remain queued for retry; confirmed rejection is recorded as failed without replacing the previous Profile.
 - Curriculum eligible Centres (#417) have one definition: `src/lib/curriculum-eligible-centres.ts`. `ELIGIBLE_CENTRE_TRACKS_FROM_SQL` (`centres c` + `school s` + `centre_exam_tracks cet`) and `ELIGIBLE_CENTRE_SQL` (active, physical, JNV) are static fragments. Plan assignment (by plan, by Centre, Centre coverage) and the Curriculum Summary's `scoped_centres` both build their queries from them, so the Centres you can assign match the Centres the Summary shows. `loadTracksWithContent(db, { gradeIds } | { gradeNumbers })` returns the Grade's in-syllabus LMS Chapter Exam Config tracks, keyed by Grade number. Change the rule there, never in a copy.
 - Multi-statement writes: `withTransaction(async (client) => { ... })` (no nesting — it throws).
@@ -947,3 +947,195 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
   Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
   `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.
+
+## AI Test Insights tables (#550; e2e mirror #554, 2026-11-27)
+
+- **Ownership (ADR 0015):** db-service owns the DDL (PR #884, migration
+  `20261126120504_create_ai_test_insight_tables`) and exposes no API for these tables. The LMS
+  reads and writes `ai_test_insight_requests`, `ai_test_insight_sessions` and
+  `ai_test_insight_session_note_audits` through its own Postgres boundary (`query()` /
+  `withTransaction()`, `$n` placeholders), never through a DB Service HTTP call. AI Mentorship Guide
+  updates only a request's progress (state, Item link, times, outcome code) and owns the
+  `acad_mentorship_*` tables; the LMS only reads its Items and Item File rows.
+- **What the database enforces:** one `queued`/`running` request per Student
+  (`ati_requests_active_student_unique`; a second insert is a unique violation), lifecycle CHECKs on
+  requests and sessions, the composite FK `(inference_item_id, student_id)` onto
+  `am_items_id_student_unique` (the Item is the same Student's), and append-only Session Note audits
+  (trigger `ati_session_note_audits_immutable`, `23514`). Times are `timestamp(0)` UTC: write and
+  compare with `now() AT TIME ZONE 'UTC'` and set `updated_at` yourself (no trigger).
+- **E2E fixture schema:** `e2e/fixtures/migrations/20261127120000_add_ai_test_insights_schema.sql`
+  mirrors, idempotently and pg_dump-identically, db-service `20260616100000_create_academic_mentorship_tables`
+  (all 15 `acad_mentorship_*` tables plus its seeded `global` runtime-settings row),
+  `20260616173000_allow_scoring_status_in_eval_run_benchmarks` and
+  `20261126120504_create_ai_test_insight_tables`, read from `origin/feat/issue-880-ai-test-insights-tables`.
+  It seeds no Insight Request or Session rows. Re-diff with `patterns/mirror-db-service-schema-in-e2e.md`
+  whenever db-service PR #884 changes.
+- **Listed Students (#555):** the one rule for "which Students AI Test Insights is for" is
+  `listedStudentRowsSql(firstParam)` in `src/lib/ai-test-insights-students.ts`, a subquery of
+  `(student_id, user_id, centre_id, program_id, grade)` rows: `centre_students` for
+  `CURRENT_ACADEMIC_YEAR`, Grade 11 or 12, an active centre whose Program is not JNV NVS,
+  `student.status IS DISTINCT FROM 'dropout'`, and `LOWER(BTRIM(student.stream))` in
+  `ENGINEERING_STREAM_VALUES` (`engineering`, `engg`, `pcm`; exported from
+  `src/lib/student-support-rules.ts`, the exam-stream normaliser). A blank stream is **not**
+  listed, unlike the Student Report's `studentExamStream`, which defaults blank to engineering.
+  A Student on two centres' rosters gives two rows: `listAiTestInsightsStudents(centreIds)` groups
+  by Student (lowest Grade if two), orders by Grade, then name, and adds each Student's counts
+  (below). Later slices reuse the same subquery for Student access.
+- **Insight counts (#556):** `readAiTestInsightsCounts(studentIds)` in
+  `src/lib/ai-test-insights-counts.ts` is the one read of "how much attention a Student has had";
+  the Tab uses it now and the Student page reuses it, so the two never disagree. It makes two
+  `query()` reads keyed by `student_id = ANY($1::bigint[])`, across all academic years:
+  1. `ai_test_insight_sessions WHERE state = 'submitted'` → `insightSessionsCompleted` (count) and
+     `lastInsightSessionDate` (`TO_CHAR(MAX(session_date), 'YYYY-MM-DD')`);
+  2. `ai_test_insight_requests WHERE state = 'completed'` → `testInsightsGenerated` (count).
+  Drafts and requests in any other state are not counted. A Student with no rows gets 0, 0 and
+  null; a failed read throws, and the list route answers 500 (never zeros). The Tab's search (name
+  or Student ID) and Grade filter run in the browser on the loaded list.
+- **Student access and the Student card (#557):** Student access reads the Student's listed rows
+  with the same `listedStudentRowsSql` joined to `centres` and `school` (`WHERE student_id = $1`,
+  one row per listing centre, lowest id first), then filters by the user's list scope (see
+  `context/permissions.md`). `readAiTestInsightsStudentCard(context)` in
+  `src/lib/ai-test-insights-student-card.ts` reads name, `student.student_id`, `user.gender`,
+  `student.category`, `student.stream` (blank → null, shown as a dash) and Batch = distinct names
+  of the Student's current batch enrollments (`enrollment_record` `group_type = 'batch'`,
+  `is_current`, `group_id = batch.id`) whose `batch.program_id` is the context's Program; Grade
+  comes from the context, and the session values from `readAiTestInsightsCounts`. Null when the
+  Student is gone (page → not found).
+- **Performance card (#558):** no new read. The Student page's client card asks the existing
+  Student Report endpoint (`/api/quiz-analytics/[udise]/student-report`, gate and data unchanged)
+  with `school.udise || school.code`, the context's Grade, `PROGRAM_ID_TO_LABEL[programId]` and
+  `student=<user.id>` (the warehouse's `enrollment_user_id`), and shows only the score graph and
+  the per-test table. It lists every test the report lists; limiting to Major, Full Syllabus and
+  Mock is the test picker's job.
+- **Test picker (#559):** `readAiTestInsightsTests(userId)` in `src/lib/ai-test-insights-tests.ts`
+  (server-only, BigQuery, parameterised, no cache) reads `fact_student_test_results_overall` with
+  `enrollment_user_id = @userId` (the Student's `user.id` from Student access), `section =
+  'overall'`, `test_format IN UNNEST(@formats)` (`AI_TEST_INSIGHTS_TEST_FORMATS`: Major, Full
+  Syllabus, Mock — never Part or Chapter), `academic_year = CURRENT_ACADEMIC_YEAR`, `start_date` on
+  or after that year's 1 April (`academicYearStart`), `test_id IS NOT NULL` and `SUBMITTED_ONLY`
+  (`has_quiz_ended IS NOT FALSE`: unknown counts as submitted). It groups by
+  `CAST(test_id AS STRING)` with the newest sitting date and orders by date then id, both
+  descending, casting the id and date to strings; the reader only maps those rows (since PR #573
+  it no longer repeats the null-id drop, grouping, format filter or order in JS). The unit test's
+  fake warehouse applies each of those SQL clauses only when the read has it, so dropping one
+  fails a test. Served by `GET /api/ai-test-insights/students/[studentId]/tests`;
+  the Student page reads it once for the picker and the Student card's Newest test line.
+- **Insight Requests (#560):** the LMS **writes `ai_test_insight_requests` directly** (ADR 0015),
+  only through `src/lib/ai-test-insights-requests.ts` (server-only). Reads `latestRequest(studentId)`
+  (newest by `requested_at`, then `id`) and `requestByKey(studentId, requestKey)` (`WHERE
+  student_id = $1 AND request_key = $2`, so another Student's key is null) return one view shape,
+  `InsightRequestView` in `ai-test-insights-shared.ts`: `requestKey`, `state`, `outcomeCode`,
+  `selectedTestIds`, `requestedAt` / `finishedAt` (`to_char(… 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`, so
+  no layer reads the UTC `timestamp(0)` as local time) and `requestedByName` (the requester
+  `user`'s name, else their email). `createRequest` keeps the PRD's step order in comments: (1) a
+  `queued`/`running` request → `already_running` with it; (2) same tests (#567, below); (3) not
+  configured; (4) `withTransaction`: close a stalled request (#566), then insert — a `23505` on
+  `ati_requests_active_student_unique` returns `already_running` with the winner; (5: later)
+  deliver. The insert writes a server `randomUUID()` key, the Student context's `school.id` and
+  `programId` (the page's `centre` if it lists the Student, else the lowest centre),
+  `CURRENT_ACADEMIC_YEAR`, `requested_by_user_id`, `selected_test_ids` as sent (newest first,
+  `$7::jsonb`), `notes_snapshot '[]'`, `state 'queued'` and `requested_at` / `inserted_at` /
+  `updated_at` = `now() AT TIME ZONE 'UTC'`. The actor's User is `user_permission.user_id`, else
+  the lowest-id `user` with the same email (`actorUserId` in `src/lib/actor-user.ts`, which
+  `getAcademicMentorshipActorUserId` also uses since the PR #573 review); neither → 409 `no_linked_user`. The Student page reads
+  `latestRequest` on the server (no "page data" route). E2E: `readInsightRequests` and
+  `markInsightRequestRunning` in `e2e/helpers/ai-test-insights-fixtures.ts`.
+- **Same tests again (#567):** step 2 of `createRequest`, after the already-running check and
+  before the not-configured check: unless the body says `generateAgain: true`, it reads the
+  Student's newest `completed` request `WHERE student_id = $1 AND state = 'completed' AND
+  selected_test_ids @> $2::jsonb AND selected_test_ids <@ $2::jsonb` (each array holds the other:
+  the same ids in any order, as the ids are distinct) `ORDER BY requested_at DESC, id DESC LIMIT 1`,
+  and if there is one
+  returns `existing` with it — route 200 `{ outcome: "existing", request }`, nothing written, no
+  wake or enqueue, even where generation is not configured. `no_data` and `failed` rows never
+  count. With `generateAgain: true` the step is skipped and a new row is inserted; the earlier
+  completed row is not touched. On the card, Generate reads "Generate again" while the ticked set
+  equals the shown `completed` request's set and opens a confirmation (`Modal`, "Generate again?")
+  first; an `existing` answer shows that request with "An AI Summary for these tests already
+  exists". E2E "AI Summary" uses a second, stale tab of the Teacher to get an `existing` answer.
+  Order is not compared because the picker lists tests by their newest sitting: after a re-sit the
+  same tests come in another order than the stored one (still stored as sent, newest first at the
+  time). Before the final checks the step used jsonb `=`, so that order made a new request with no
+  confirmation; the route test and the e2e "same tests sent in another order" cover it.
+- **Stall rule (#566):** a `queued` or `running` request whose `requested_at` is 20 minutes old or
+  more is shown as `failed` with `outcomeCode: "timed_out"`. The rule lives in one place,
+  `insightRequestAsShown(view, nowUtc)` in `src/lib/ai-test-insights-requests.ts`, and `toView`
+  applies it to every read (`latestRequest`, `requestByKey`, the already-running check), so every
+  route and the Student page agree. The clock is the database's: each view read also selects
+  `read_at` = `(now() AT TIME ZONE 'UTC')::timestamp(0)`, rounded to the second as the
+  `timestamp(0)` `requested_at` is stored (`to_char` truncates, the column rounds; a truncated
+  clock read a request made in the same second as one second in the future, so a request
+  back-dated by exactly 20 minutes still read in progress). A read never changes the row. Only the
+  next Generate closes a stalled row: `createRequest` counts only a fresh in-progress request as
+  `already_running`; otherwise, in the insert's transaction, it runs `UPDATE … SET state =
+  'failed', outcome_code = 'timed_out', finished_at, updated_at (UTC) WHERE student_id = $1 AND
+  state IN ('queued', 'running') AND requested_at <= <rounded UTC now> - interval '20 minutes'`
+  before the insert. The re-delivery claim adds `AND NOT (<same stall condition>)`, so a stalled
+  request is never woken or enqueued again (the status route also sees it as `failed`). A late
+  generator result on a stalled row nobody retried is accepted (AI Mentorship Guide updates `WHERE
+  state IN ('queued', 'running')`), so the row reads `completed`. E2E `backdateInsightRequest`
+  moves `requested_at` back by N minutes.
+- **Requests ended without an AI Summary (#561):** `no_data` and `failed` rows carry
+  `outcome_code`; the card turns it into words with `outcomeMessage(code)` in the client-safe
+  `src/lib/ai-test-insights-outcomes.ts` (the PRD table; any other code, or none, reads "Something
+  went wrong while writing the AI Summary."). "Try again" posts the ended request's
+  `selectedTestIds`, in their stored order, with `generateAgain: true` to the same create route,
+  so it is always an ordinary new `queued` row: never the `existing` answer, even when an earlier
+  completed request has the same tests (PR #573 review: after a failed "Generate again" it used
+  to show that earlier AI Summary and write nothing). A row that really ended is never updated
+  by the LMS; a stalled one (#566, still `queued`/`running` in the table) is closed `timed_out`
+  by that insert's transaction. E2E `endInsightRequestWithoutSummary`
+  ends a row as AI Mentorship Guide does (`WHERE state IN ('queued', 'running')`, UTC
+  `finished_at` / `updated_at`, `started_at` kept or set); `readInsightRequests` also returns
+  `outcomeCode` and `finishedAt`.
+- **Status route and re-delivery (#563):** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]`
+  reads `requestByKey` after Student access (a read), so another Student's key is 404, and answers
+  `{ request }` (`AiTestInsightsRequestStatusResponse`). It is the one read with a side effect: for
+  `student.canEdit` and a `queued` request it calls `redeliver(requestKey)`, one of the three updates the PRD lets
+  the LMS make after insert (with `enqueue_rejected` and the stall close): `UPDATE … SET
+  updated_at = now() AT TIME ZONE 'UTC' WHERE request_key = $1 AND state = 'queued' AND not stalled (#566) AND updated_at
+  <= now() AT TIME ZONE 'UTC' - interval '30 seconds' RETURNING request_key`. Only a returned row
+  delivers (5 s per call), so two polls inside 30 s make one enqueue call; a rejection marks
+  `enqueue_rejected` with the same `state = 'queued'` guard. Not configured → no claim. The route
+  re-reads the row after a delivery; any error in the side effect is logged and the answer stays
+  `{ request }`. E2E `backdateInsightRequestUpdate` moves `updated_at` back; `readInsightRequests`
+  also returns `startedAt`. The fake generator claims (`WHERE state = 'queued'`) and ends
+  (`WHERE state IN ('queued', 'running')`) rows as AI Mentorship Guide does, in UTC with `updated_at`.
+- **AI Summary text and the artifact reader (#564):** `GET .../requests/[requestKey]/summary` gates
+  Student access first (a read, so viewers read it), then `requestByKey`: 404 unless the request is that
+  Student's and `completed`. `readTestInsightText` in `src/lib/ai-test-insights-artifacts.ts`
+  (server-only) finds the file with one `$n` read, `ai_test_insight_requests r JOIN
+  acad_mentorship_inference_item_files f ON f.item_id = r.inference_item_id WHERE r.student_id = $1 AND
+  r.request_key = $2 AND f.file_kind = $3 AND r.state = 'completed' ORDER BY f.id DESC LIMIT 1`
+  (`report` for the text; `report_pdf` is the PDF's kind) — no row is 404. The key must start with
+  `{AI_TEST_INSIGHTS_S3_PREFIX}/{APP_ENV}/items/{item id}/` and hold no `.` or `..` segment, or the route
+  answers 502 without reading it; the reader's own S3 client (`AI_TEST_INSIGHTS_S3_*` read-only key,
+  path-style only with the local endpoint override) then `GetObject`s it, 502 on a store error, an empty
+  body or more than 1 MB (by `ContentLength`, then by the bytes read). Not configured → 503
+  `not_configured`. Answers `{ markdown }` (`AiTestInsightsSummaryResponse`) with `no-store`; it writes
+  nothing and never wakes or enqueues. Logs: request key, `student.id`, reason, error name — never the
+  text, a key or a name. Route tests mock S3 with `aws-sdk-client-mock`. In e2e the fake generator's
+  complete writes the Session, Item and two Item File rows; `readInsightRequestItem` reads them back, and
+  `removeInsightRequestsMadeBySpecs` / `removeAiTestInsightsFixture` remove the fake's Items and Sessions
+  (marked `config_snapshot_json = '{"fake_ai_mentorship_guide":true}'`; Item Files cascade). Persona Users
+  now carry the persona's name as `first_name`, so the card shows "Asked for by E2E ATI Teacher".
+- **AI Summary PDF (#565):** `GET .../requests/[requestKey]/pdf` gates like the summary route (Student
+  access, then `requestByKey`; 404 unless that Student's and `completed`). `presignTestInsightPdf` in
+  `src/lib/ai-test-insights-artifacts.ts` finds the `report_pdf` file with the same `$n` read (no row →
+  404), applies the same folder check (502, nothing signed), then `getSignedUrl` on the reader's own
+  client with `expiresIn: 60` and `ResponseContentType: application/pdf` +
+  `ResponseContentDisposition: attachment; filename="ai-summary-{student.id}-{YYYY-MM-DD}.pdf"` (the
+  request's date in India, `aiTestInsightPdfFileName` in `src/lib/ai-test-insights-shared.ts`; never a
+  name). Answers 302 with `Cache-Control: no-store` and the same `Content-Disposition`; 503
+  `not_configured`; 502 when signing throws. No bytes pass through the LMS, nothing is written, no wake
+  or enqueue. Logs: request key, `student.id`, reason, error name — never a key, the URL or a name.
+  Asked with `Accept: application/json` it answers 200 `{ url }` (`AiTestInsightsPdfResponse`,
+  `no-store`) with the same presigned URL instead of the 302; a browser visit (a new tab) still
+  gets the 302. The card's link (`DownloadPdf` in `AiTestInsightsSummaryCard.tsx`, PR #573
+  reviews) handles a plain click in script: one JSON ask, then `window.location.assign` to the
+  presigned URL, which the store answers as a download, so the page stays and the route is called
+  once per download. Any other answer keeps the Student page and shows a `RetryAlert`: 503 `not_configured` → "The PDF can't be
+  downloaded here: AI Summary reading is not set up in this environment.", 404 → "The PDF of this AI
+  Summary could not be found.", anything else or a network error → "The PDF could not be downloaded.
+  Please try again.". A modified click (new tab or window) is left to the browser. E2E moves the
+  `report_pdf` key out of the Item folder (502) and back, then Retry downloads.

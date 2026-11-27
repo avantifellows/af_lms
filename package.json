@@ -31,6 +31,8 @@
     "test:e2e": "NODE_V8_COVERAGE=.v8-coverage playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
+    "fake:ai-mentorship-guide": "node e2e/helpers/fake-ai-mentorship-guide.cjs",
+    "fake:ai-mentorship-guide:auto": "node e2e/helpers/fake-ai-mentorship-guide.cjs --auto",
     "pm:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-pm-centres.ts",
     "pm:check": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-teacher-centre-vs-prod.ts",
     "pm:promodiff": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-promotion-school-diff.ts",
@@ -70,6 +72,7 @@
     "react-dom": "19.2.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.6.0",
+    "remark-gfm": "^4.0.1",
     "sanitize-html": "^2.18.1",
     "sonner": "^2.0.7",
     "zod": "^4.6.5"

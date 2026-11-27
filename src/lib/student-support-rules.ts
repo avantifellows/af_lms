@@ -10,11 +10,15 @@ import type {
   ToNextLevel,
 } from "@/types/student-support";
 
+/** The trimmed, lower-cased stream labels that mean JEE (engineering). Also
+ *  the AI Test Insights listed-Student rule, which has no blank default. */
+export const ENGINEERING_STREAM_VALUES: readonly string[] = ["engineering", "engg", "pcm"];
+
 /** JEE (engineering) or NEET (medical) from a stream label, else null. The
  *  warehouse spells streams many ways (PCM, Engg, engineering, PCB, Med …). */
 export function examStream(stream: string | null | undefined): "engineering" | "medical" | null {
   const s = (stream || "").trim().toLowerCase();
-  if (["engineering", "engg", "pcm"].includes(s)) return "engineering";
+  if (ENGINEERING_STREAM_VALUES.includes(s)) return "engineering";
   if (["medical", "med", "pcb"].includes(s)) return "medical";
   return null;
 }

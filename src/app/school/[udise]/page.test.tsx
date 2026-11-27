@@ -266,6 +266,16 @@ vi.mock("@/components/test-attendance/TestAttendanceTab", () => ({
   ),
 }));
 
+// The real AI Test Insights tab fetches its own list; its own tests cover it.
+vi.mock("@/components/ai-test-insights/AiTestInsightsTab", () => ({
+  __esModule: true,
+  default: ({ schoolCode, centreId }: { schoolCode: string; centreId?: number }) => (
+    <div data-testid="ai-test-insights-tab" data-school-code={schoolCode} data-centre-id={centreId ?? ""}>
+      AiTestInsightsTab
+    </div>
+  ),
+}));
+
 vi.mock("@/components/EditStudentModal", () => ({
   __esModule: true,
   default: () => null,
@@ -1251,6 +1261,154 @@ describe("SchoolPage (server component)", () => {
 
       expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
       expect(screen.queryByTestId("tab-test_attendance")).not.toBeInTheDocument();
+    });
+  });
+
+  // AI Test Insights tab (#550): physical centres only. Real matrix and real
+  // program context, so the `ai_test_insights` row and NVS gating decide the
+  // role part of the rule; the School's active centres decide the page part.
+  describe("AI Test Insights tab", () => {
+    const tabOrder = () =>
+      screen
+        .getAllByTestId(/^tab-/)
+        .map((element) => element.dataset.testid!)
+        .filter((id) => !id.startsWith("tab-content-"))
+        .map((id) => id.slice("tab-".length));
+
+    async function setupViewer(
+      role: string,
+      { schoolOverrides = {}, permissionOverrides = {} }: {
+        schoolOverrides?: Record<string, unknown>;
+        permissionOverrides?: Record<string, unknown>;
+      } = {},
+    ) {
+      // A JNV School with an active CoE centre and NVS Students.
+      setupAdminDefaults({ centre_program_ids: [1, 64], ...schoolOverrides });
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+        "@/lib/permissions",
+      );
+      const pmu = role === "pmu_manager" || role === "pmu_govt_school_user";
+      mockGetUserPermission.mockResolvedValue(
+        makePermission({
+          role,
+          ...(pmu
+            ? { level: 1, school_codes: ["70705"], program_ids: [64] }
+            : { level: 3, school_codes: null, program_ids: [1, 64] }),
+          ...permissionOverrides,
+        }),
+      );
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+      mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+    }
+
+    describe.each([
+      ["teacher", {}],
+      ["read_only teacher", { read_only: true }],
+      ["program_manager", {}],
+      ["program_admin", {}],
+      ["admin", {}],
+    ] as const)("%s", (label, permissionOverrides) => {
+      const role = label.replace("read_only ", "");
+
+      it("shows AI Test Insights after Teacher Feedback at a School with an active centre", async () => {
+        await setupViewer(role, { permissionOverrides });
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-ai_test_insights")).toHaveTextContent("AI Test Insights");
+        const order = tabOrder();
+        // Teacher Feedback is not a Teacher's tab; the next tab before it is Quiz Sessions.
+        const before = order.includes("teacher_feedback") ? "teacher_feedback" : "quiz_sessions";
+        expect(order[order.indexOf(before) + 1]).toBe("ai_test_insights");
+        const tab = screen.getByTestId("ai-test-insights-tab");
+        expect(tab).toHaveAttribute("data-school-code", "70705");
+        expect(tab).toHaveAttribute("data-centre-id", "");
+      });
+
+      it("is hidden at a School with no active centre", async () => {
+        await setupViewer(role, { permissionOverrides, schoolOverrides: { centre_program_ids: [] } });
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      });
+
+      it("is hidden at a School whose only active centre is JNV NVS", async () => {
+        await setupViewer(role, { permissionOverrides, schoolOverrides: { centre_program_ids: [64] } });
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      });
+    });
+
+    // Review finding 3 (#573): the list route keeps only the School's centres
+    // whose Program is in the user's program context, so the tab must too.
+    it.each(["program_manager", "program_admin"])(
+      "is hidden for a %s whose Programs include none of the School's physical centres",
+      async (role) => {
+        await setupViewer(role, { schoolOverrides: { centre_program_ids: [2, 64] } });
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      },
+    );
+
+    it("shows a Program Manager the tab when one of the School's physical centres is in their Programs", async () => {
+      await setupViewer("program_manager", { schoolOverrides: { centre_program_ids: [1, 2, 64] } });
+
+      await renderPage();
+
+      expect(screen.getByTestId("tab-ai_test_insights")).toBeInTheDocument();
+    });
+
+    it("shows an Admin the tab whatever their Program list, as the list route does", async () => {
+      await setupViewer("admin", { schoolOverrides: { centre_program_ids: [2, 64] } });
+
+      await renderPage();
+
+      expect(screen.getByTestId("tab-ai_test_insights")).toBeInTheDocument();
+    });
+
+    it.each(["pmu_manager", "pmu_govt_school_user"])("is hidden for %s", async (role) => {
+      await setupViewer(role);
+
+      await renderPage();
+
+      expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+    });
+
+    it.each(["teacher", "program_manager", "program_admin"])(
+      "is hidden for an NVS-only %s",
+      async (role) => {
+        await setupViewer(role, { permissionOverrides: { level: 1, school_codes: ["70705"], program_ids: [64] } });
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      },
+    );
+
+    it("is hidden for the Holistic Mentorship admin", async () => {
+      await setupViewer("holistic_mentorship_admin", { permissionOverrides: { program_ids: [1] } });
+      mockRequireHolisticMentorshipAccess.mockResolvedValue({
+        ok: true,
+        permission: makePermission({ role: "holistic_mentorship_admin", program_ids: [1] }),
+        school: { id: 20, code: "70705", programId: 1 },
+        canEdit: true,
+      });
+      mockListHolisticAssignmentRoster.mockResolvedValue([]);
+
+      await renderPage("70705", "1");
+
+      expect(screen.getByTestId("tab-holistic_mentorship")).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
     });
   });
 

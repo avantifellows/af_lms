@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 
 import { CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID } from "../../src/lib/constants";
 import type { TestAttendanceResponse } from "../../src/types/test-attendance";
+import { fixtureIdReader } from "./fixture-ids";
 
 // Test Attendance tab (#517) fixture. The e2e dump has no JNV School with a
 // listed Student (current-year grade 11/12, a current JNV NVS batch), so the
@@ -22,11 +23,7 @@ const STUDENTS = [
 
 const FIXTURE_EMAILS = [TEST_ATTENDANCE_PMU.email, ...STUDENTS.map((student) => student.email)];
 
-async function oneId(pool: Pool, sql: string, params: unknown[], what: string): Promise<number> {
-  const result = await pool.query<{ id: number }>(sql, params);
-  if (result.rows.length === 0) throw new Error(`Test Attendance fixture: ${what} not found`);
-  return Number(result.rows[0].id);
-}
+const oneId = fixtureIdReader("Test Attendance");
 
 async function insertUser(pool: Pool, email: string, role: string, first: string | null, last: string | null) {
   return oneId(

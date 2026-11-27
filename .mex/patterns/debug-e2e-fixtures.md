@@ -14,7 +14,7 @@ edges:
     condition: when failures are in PM school visit flows
   - target: context/data-access.md
     condition: when fixture rows need to match schema/read-path expectations
-last_updated: 2026-11-20
+last_updated: 2026-11-27
 ---
 
 # Debug E2E Fixtures
@@ -37,7 +37,10 @@ expectations, or fixture rows missing a relationship the app now requires.
 - `resetDatabase()` applies DB Service Holistic migrations from a sibling `../db-service_holistic_mentorship` checkout. If it is missing, symlink it to `../db-service` for the run (`ln -s db-service db-service_holistic_mentorship` from the parent folder) and remove the symlink afterwards.
 - That step shells out to `mix`. The asdf shim fails there: no version is pinned for `db-service`, and its per-version `MIX_HOME` has no Hex. Put the real binaries first: `PATH="$HOME/.asdf/installs/elixir/1.18.4-otp-27/bin:$HOME/.asdf/installs/erlang/27.0/bin:$PATH" MIX_HOME=$HOME/.mix npx playwright test`.
 - `relation "lms_student_intervention_flags" does not exist` in the webServer log (surfacing as browser 500s in the Holistic responsive/health test) means the local `e2e/fixtures/db-dump.sql` predates that table; nothing in the e2e migrations creates it. Refresh the dump rather than loosening the health assertions. `column s.tshirt_size does not exist` (a Next.js runtime-error overlay on `/centre/<id>`, so the Teacher's "Holistic Mentorship" tab never renders) is the same stale-dump problem: the uniform-size `student` columns come from db-service `20260925130000_add_uniform_sizes_and_g10_school_to_student`, and `resetDatabase()` only applies db-service `*holistic*` migrations. Run e2e from a worktree by symlinking the gitignored `.env.test` and the dump from the main checkout (and remove the symlinks after).
+- `column ser.application_password_ciphertext does not exist` (browser 500s "Failed to load student exam records for the roster", failing the Holistic responsive/health test) is the same stale-fixture problem: the exam-password encryption code reads `student_exam_record.application_password_ciphertext`, which the local dump and the e2e migrations don't create. Seen on the #550 feature branch (2026-11-27) with and without that branch's changes.
 - A batch `enrollment_record.group_id` holds `batch.id`, not the batch `group.id`; join `batch ON batch.id = enrollment_record.group_id` (as `permissions.ts` does). Batch *membership* (`group_user`) is the one that goes through `"group".child_id`.
+- `adminPage` is the default `page` signed in as Admin, not a separate browser context (`pmPage`, `programAdminPage` and `teacherPage` each get their own). In a test that takes both `page` and `adminPage`, a later `signInAs(page, …)` signs `adminPage` in as that persona too, so an "Admin can't see X" check silently runs as the other user. Use `pmPage` or `programAdminPage` for a second user in the same test.
+- A full spec run can pass and still exit 134 with "JavaScript heap out of memory" after `[MR] generating report data`: that is the monocart coverage reporter, not a test. Read the `N passed` / `N failed` line above it, or run the spec with `--reporter=list`.
 - The `pmPage` fixture owns no Schools or Centres on `/dashboard` ("My Schools 0", empty card grids). Use `adminPage` for dashboard card → destination journeys.
 - Centre-seated Teachers are confined off `/school/<code>` (Access Denied); open their Holistic workspace at `/centre/<id>`.
 - `seedHolisticFixtures()` upserts the shared fixture actors' permissions, so do not call it a second time for another Program. The EMRS (Program 78) Admin journey uses the separate `LMS78` scope seeded by `seedHolisticE2eEmrsScope()` in `e2e/helpers/db.ts`.

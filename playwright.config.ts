@@ -1,5 +1,12 @@
 import { defineConfig } from "@playwright/test";
 
+import {
+  FAKE_AI_MENTORSHIP_GUIDE_APP_ENV,
+  FAKE_AI_MENTORSHIP_GUIDE_DATABASE_ENV,
+  FAKE_AI_MENTORSHIP_GUIDE_ORIGIN,
+  FAKE_AI_MENTORSHIP_GUIDE_PORT,
+  FAKE_AI_MENTORSHIP_GUIDE_SCRIPT,
+} from "./e2e/helpers/fake-ai-mentorship-guide";
 import { FAKE_ELEVENLABS_PRELOAD } from "./e2e/helpers/fake-elevenlabs";
 
 const TEST_PORT = 3001;
@@ -54,53 +61,82 @@ export default defineConfig({
       use: { browserName: "chromium" },
     },
   ],
-  webServer: {
-    command: `npx next dev --port ${TEST_PORT}`,
-    url: `http://localhost:${TEST_PORT}`,
-    reuseExistingServer: false,
-    timeout: 30_000,
-    env: {
-      DATABASE_HOST: "localhost",
-      DATABASE_PORT: "5432",
-      DATABASE_USER: process.env.TEST_DB_USER || "postgres",
-      DATABASE_PASSWORD: process.env.TEST_DB_PASSWORD || "postgres",
-      DATABASE_NAME: "af_lms_test",
-      DATABASE_SSL: "false",
-      NEXTAUTH_SECRET: "e2e-test-secret-at-least-32-chars-long",
-      NEXTAUTH_URL: `http://localhost:${TEST_PORT}`,
-      GOOGLE_CLIENT_ID: "fake-client-id",
-      GOOGLE_CLIENT_SECRET: "fake-client-secret",
-      NEXT_TEST_MODE: "1",
-      // Blended Learning photos are presigned locally against a fake bucket;
-      // specs answer the S3 GETs themselves.
-      S3_DOCS_BUCKET: "e2e-fake-docs",
-      S3_DOCS_PREFIX: "lms-documents",
-      S3_DOCS_REGION: "ap-south-1",
-      S3_DOCS_ACCESS_KEY_ID: "e2e-fake-access-key",
-      S3_DOCS_SECRET_ACCESS_KEY: "e2e-fake-secret-key",
-      // The well-being notifier stays unconfigured, so no email is sent. A
-      // blank value would be dropped and refilled from .env.local; the
-      // notifier trims these to empty and skips.
-      BLENDED_LEARNING_SES_ACCESS_KEY_ID: " ",
-      BLENDED_LEARNING_WELLBEING_EMAILS: " ",
-      // etl-next is unconfigured too, so a new draft is never woken and stays
-      // transcribing.
-      BLENDED_LEARNING_ETL_URL: " ",
-      BLENDED_LEARNING_ETL_TOKEN: " ",
-      // BigQuery stays unavailable, so server-rendered pages never query the
-      // warehouse from .env.local credentials (the Visit Summary School page
-      // shows "Academic levels unavailable"). Specs stub /api/quiz-analytics.
-      GOOGLE_SERVICE_ACCOUNT_JSON: " ",
-      // Holistic Dictation never reaches ElevenLabs or OpenRouter. The
-      // preload fakes Scribe and the translation inside the server (fixed
-      // replies, any other request to either host refused) and only then sets
-      // dummy keys: without it both keys stay blank and Dictation is off. Most
-      // specs also fake the dictation route with page.route.
-      NODE_OPTIONS: `--require "${FAKE_ELEVENLABS_PRELOAD}"`,
-      HOLISTIC_DICTATION_ENABLED: "true",
-      HOLISTIC_DICTATION_ELEVENLABS_API_KEY: " ",
-      HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: "false",
-      HOLISTIC_DICTATION_OPENROUTER_API_KEY: " ",
+  webServer: [
+    {
+      command: `npx next dev --port ${TEST_PORT}`,
+      url: `http://localhost:${TEST_PORT}`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      env: {
+        DATABASE_HOST: "localhost",
+        DATABASE_PORT: "5432",
+        DATABASE_USER: process.env.TEST_DB_USER || "postgres",
+        DATABASE_PASSWORD: process.env.TEST_DB_PASSWORD || "postgres",
+        DATABASE_NAME: "af_lms_test",
+        DATABASE_SSL: "false",
+        NEXTAUTH_SECRET: "e2e-test-secret-at-least-32-chars-long",
+        NEXTAUTH_URL: `http://localhost:${TEST_PORT}`,
+        GOOGLE_CLIENT_ID: "fake-client-id",
+        GOOGLE_CLIENT_SECRET: "fake-client-secret",
+        NEXT_TEST_MODE: "1",
+        // Blended Learning photos are presigned locally against a fake bucket;
+        // specs answer the S3 GETs themselves.
+        S3_DOCS_BUCKET: "e2e-fake-docs",
+        S3_DOCS_PREFIX: "lms-documents",
+        S3_DOCS_REGION: "ap-south-1",
+        S3_DOCS_ACCESS_KEY_ID: "e2e-fake-access-key",
+        S3_DOCS_SECRET_ACCESS_KEY: "e2e-fake-secret-key",
+        // The well-being notifier stays unconfigured, so no email is sent. A
+        // blank value would be dropped and refilled from .env.local; the
+        // notifier trims these to empty and skips.
+        BLENDED_LEARNING_SES_ACCESS_KEY_ID: " ",
+        BLENDED_LEARNING_WELLBEING_EMAILS: " ",
+        // etl-next is unconfigured too, so a new draft is never woken and stays
+        // transcribing.
+        BLENDED_LEARNING_ETL_URL: " ",
+        BLENDED_LEARNING_ETL_TOKEN: " ",
+        // BigQuery stays unavailable, so server-rendered pages never query the
+        // warehouse from .env.local credentials (the Visit Summary School page
+        // shows "Academic levels unavailable"). Specs stub /api/quiz-analytics.
+        GOOGLE_SERVICE_ACCOUNT_JSON: " ",
+        // Holistic Dictation never reaches ElevenLabs or OpenRouter. The
+        // preload fakes Scribe and the translation inside the server (fixed
+        // replies, any other request to either host refused) and only then sets
+        // dummy keys: without it both keys stay blank and Dictation is off. Most
+        // specs also fake the dictation route with page.route.
+        NODE_OPTIONS: `--require "${FAKE_ELEVENLABS_PRELOAD}"`,
+        HOLISTIC_DICTATION_ENABLED: "true",
+        HOLISTIC_DICTATION_ELEVENLABS_API_KEY: " ",
+        HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: "false",
+        HOLISTIC_DICTATION_OPENROUTER_API_KEY: " ",
+        // AI Test Insights delivers every Generate to the fake generator
+        // started below, never to AI Mentorship Guide: the enqueue URL, secret
+        // and wake URL all point at it, and so do the artifact reader's
+        // settings (bucket, region, prefix, read-only key and the endpoint
+        // override): the text is read from the fake's object store on
+        // 127.0.0.1, never from S3. APP_ENV is set here (to "staging", which
+        // generation needs) so a value in .env.local is never used. The other
+        // readers of APP_ENV are unchanged by it: the Blended Learning wake is
+        // off above, Holistic Profile regeneration also needs its ETL URL and
+        // token (and its spec answers the request in the browser), and SNS
+        // publishing already read a missing APP_ENV as "production".
+        ...FAKE_AI_MENTORSHIP_GUIDE_APP_ENV,
+      },
     },
-  },
+    {
+      // The fake generator: one Node process on 127.0.0.1. Its database side
+      // claims, completes and ends request rows in the e2e database, like AI
+      // Mentorship Guide, and serves the files it "uploaded". It runs in
+      // steered mode, which specs drive; it refuses any database host but
+      // localhost.
+      command: `node "${FAKE_AI_MENTORSHIP_GUIDE_SCRIPT}"`,
+      url: `${FAKE_AI_MENTORSHIP_GUIDE_ORIGIN}/__fake/health`,
+      reuseExistingServer: false,
+      timeout: 10_000,
+      env: {
+        FAKE_AI_MENTORSHIP_GUIDE_PORT: String(FAKE_AI_MENTORSHIP_GUIDE_PORT),
+        ...FAKE_AI_MENTORSHIP_GUIDE_DATABASE_ENV,
+      },
+    },
+  ],
 });

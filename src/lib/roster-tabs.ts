@@ -12,6 +12,7 @@ export const ROSTER_TAB_IDS = [
   "test_attendance",
   "quiz_sessions",
   "teacher_feedback",
+  "ai_test_insights",
   "mentorship",
   "holistic_mentorship",
   "visits",
