@@ -1015,8 +1015,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   or after that year's 1 April (`academicYearStart`), `test_id IS NOT NULL` and `SUBMITTED_ONLY`
   (`has_quiz_ended IS NOT FALSE`: unknown counts as submitted). It groups by
   `CAST(test_id AS STRING)` with the newest sitting date and orders by date then id, both
-  descending; the JS repeats the null-id drop, one-row-per-test and order so the result never
-  depends on the warehouse's row order. Served by `GET /api/ai-test-insights/students/[studentId]/tests`;
+  descending, casting the id and date to strings; the reader only maps those rows (since PR #573
+  it no longer repeats the null-id drop, grouping, format filter or order in JS). The unit test's
+  fake warehouse applies each of those SQL clauses only when the read has it, so dropping one
+  fails a test. Served by `GET /api/ai-test-insights/students/[studentId]/tests`;
   the Student page reads it once for the picker and the Student card's Newest test line.
 - **Insight Requests (#560):** the LMS **writes `ai_test_insight_requests` directly** (ADR 0015),
   only through `src/lib/ai-test-insights-requests.ts` (server-only). Reads `latestRequest(studentId)`
