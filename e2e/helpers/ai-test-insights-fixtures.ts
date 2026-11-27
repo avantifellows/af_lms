@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "../../src/lib/constants";
+import { fixtureIdReader } from "./fixture-ids";
 
 // AI Test Insights Tab (#550) fixture. Seeds three made-up JNV Schools in
 // the AHMEDABAD region (so the e2e Program Manager and Program Admin reach
@@ -200,11 +201,7 @@ export interface AiTestInsightsFixtureIds {
   personaUserIds: Record<string, number>;
 }
 
-async function oneId(pool: Pool, sql: string, params: unknown[], what: string): Promise<number> {
-  const result = await pool.query<{ id: number | string }>(sql, params);
-  if (result.rows.length === 0) throw new Error(`AI Test Insights fixture: ${what} not found`);
-  return Number(result.rows[0].id);
-}
+const oneId = fixtureIdReader("AI Test Insights");
 
 async function insertSchool(pool: Pool, school: { code: string; udise: string; name: string }) {
   const id = await oneId(
