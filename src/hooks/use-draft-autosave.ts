@@ -41,7 +41,8 @@ interface DraftAutosaveHandlers<T> {
 
 /**
  * Autosaves `value` while `enabled`, `delayMs` after its last change, unless
- * it matches what the server holds. Returns `flush`: send any change (or, when
+ * it matches what the server will hold once the saves queued and in flight
+ * are done. Returns `flush`: send any change (or, when
  * `failed`, the value again) now, and wait until nothing is queued or in
  * flight; true when everything is saved. `flush` saves nothing unless
  * `canFlush`.
@@ -63,6 +64,8 @@ export function useDraftAutosave<T>({
   delayMs: number;
 }): () => Promise<boolean> {
   const { savedRef, queuedRef, inFlightRef, timerRef } = refs;
+  // `JSON.stringify` of the value being sent now, or null.
+  const sendingRef = useRef<string | null>(null);
   // The newest handlers, so a save in flight reports to the current render.
   const handlersRef = useRef(handlers);
   useLayoutEffect(() => {
@@ -80,6 +83,7 @@ export function useDraftAutosave<T>({
         }
         const next = queuedRef.current;
         queuedRef.current = null;
+        sendingRef.current = JSON.stringify(next);
         handlersRef.current.onSaving();
         try {
           await handlersRef.current.save(next);
@@ -88,6 +92,8 @@ export function useDraftAutosave<T>({
         } catch (caught) {
           handlersRef.current.onFailed(caught);
           return false;
+        } finally {
+          sendingRef.current = null;
         }
       }
       handlersRef.current.onDrained();
@@ -99,6 +105,17 @@ export function useDraftAutosave<T>({
     return work;
   }, [inFlightRef, queuedRef, savedRef]);
 
+  // What the server will hold once nothing is queued or in flight: a value
+  // that matches it needs no save, and any other value does, even one that
+  // matches what the server holds now (typing undone while a newer save is out).
+  const matchesServerSoon = useCallback(
+    (candidate: T) => {
+      const target = queuedRef.current ? JSON.stringify(queuedRef.current) : (sendingRef.current ?? savedRef.current);
+      return JSON.stringify(candidate) === target;
+    },
+    [queuedRef, savedRef],
+  );
+
   const cancelTimer = useCallback(() => {
     if (timerRef.current === null) return;
     window.clearTimeout(timerRef.current);
@@ -108,22 +125,22 @@ export function useDraftAutosave<T>({
   const flush = useCallback(async () => {
     cancelTimer();
     if (!canFlush) return true;
-    if (JSON.stringify(value) !== savedRef.current || failed) queuedRef.current = value;
+    if (!matchesServerSoon(value) || failed) queuedRef.current = value;
     while (queuedRef.current || inFlightRef.current) {
       if (!(await pump())) return false;
     }
     return true;
-  }, [value, canFlush, failed, cancelTimer, inFlightRef, pump, queuedRef, savedRef]);
+  }, [value, canFlush, failed, cancelTimer, inFlightRef, pump, queuedRef, matchesServerSoon]);
 
   useEffect(() => {
-    if (!enabled || JSON.stringify(value) === savedRef.current) return;
+    if (!enabled || matchesServerSoon(value)) return;
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       queuedRef.current = value;
       void pump();
     }, delayMs);
     return cancelTimer;
-  }, [value, enabled, delayMs, timerRef, cancelTimer, pump, queuedRef, savedRef]);
+  }, [value, enabled, delayMs, timerRef, cancelTimer, pump, queuedRef, matchesServerSoon]);
 
   return flush;
 }

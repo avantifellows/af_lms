@@ -124,6 +124,56 @@ describe("useDraftAutosave", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it("sends the saved value again when the typing goes back to it while a newer save is in flight", async () => {
+    const { save, events, type } = setup({ text: "A" });
+    const inFlight = deferred();
+    save.mockReturnValueOnce(inFlight.promise).mockResolvedValue();
+
+    type("AB");
+    await tick(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+    // Undo back to what the server held before "AB" went out.
+    type("A");
+    await act(async () => inFlight.resolve());
+    await tick(5000);
+
+    expect(save.mock.calls.map(([value]) => value.text)).toEqual(["AB", "A"]);
+    expect(events.at(-2)).toBe("saved A");
+  });
+
+  it("flush sends the saved value again when the typing went back to it while a newer save was in flight", async () => {
+    const { hook, save, type } = setup({ text: "A" });
+    const inFlight = deferred();
+    save.mockReturnValueOnce(inFlight.promise).mockResolvedValue();
+
+    type("AB");
+    await tick(1000);
+    type("A");
+    let flushed: Promise<boolean> = Promise.resolve(false);
+    act(() => {
+      flushed = hook.result.current();
+    });
+    await act(async () => inFlight.resolve());
+
+    expect(await flushed).toBe(true);
+    expect(save.mock.calls.map(([value]) => value.text)).toEqual(["AB", "A"]);
+  });
+
+  it("sends nothing more when the typing goes back to the value in flight", async () => {
+    const { save, type } = setup({ text: "A" });
+    const inFlight = deferred();
+    save.mockReturnValueOnce(inFlight.promise).mockResolvedValue();
+
+    type("AB");
+    await tick(1000);
+    type("ABC");
+    type("AB");
+    await act(async () => inFlight.resolve());
+    await tick(5000);
+
+    expect(save.mock.calls.map(([value]) => value.text)).toEqual(["AB"]);
+  });
+
   it("reports a failed save, and flush sends the same value again", async () => {
     const { hook, save, events, type } = setup({ text: "" });
     save.mockRejectedValueOnce(new Error("offline")).mockResolvedValue();
