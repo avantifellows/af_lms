@@ -1038,3 +1038,12 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `getAcademicMentorshipActorUserId`); neither → 409 `no_linked_user`. The Student page reads
   `latestRequest` on the server (no "page data" route). E2E: `readInsightRequests` and
   `markInsightRequestRunning` in `e2e/helpers/ai-test-insights-fixtures.ts`.
+- **Requests ended without an AI Summary (#561):** `no_data` and `failed` rows carry
+  `outcome_code`; the card turns it into words with `outcomeMessage(code)` in the client-safe
+  `src/lib/ai-test-insights-outcomes.ts` (the PRD table; any other code, or none, reads "Something
+  went wrong while writing the AI Summary."). "Try again" posts the ended request's
+  `selectedTestIds`, in their stored order, to the same create route, so it is an ordinary new
+  `queued` row; the ended row is never updated by the LMS. E2E `endInsightRequestWithoutSummary`
+  ends a row as AI Mentorship Guide does (`WHERE state IN ('queued', 'running')`, UTC
+  `finished_at` / `updated_at`, `started_at` kept or set); `readInsightRequests` also returns
+  `outcomeCode` and `finishedAt`.

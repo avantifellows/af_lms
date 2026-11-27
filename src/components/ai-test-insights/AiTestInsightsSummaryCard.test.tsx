@@ -300,4 +300,170 @@ describe("AiTestInsightsSummaryCard", () => {
       expect(generate()).toBeEnabled();
     });
   });
+
+  // A request that ended without an AI Summary (#561): the reason in plain
+  // words and "Try again", which sends the same tests again.
+  describe("No AI Summary", () => {
+    const LOADED = { status: "loaded", tests: TESTS } as const;
+    const NO_SUMMARY = "No AI Summary could be made";
+    const NO_CATEGORY = "This student has no category on record. Add it in Edit Student, then try again.";
+
+    const ended = (overrides: Partial<InsightRequestView>): InsightRequestView => ({
+      requestKey: "key-old",
+      state: "failed",
+      outcomeCode: "interrupted",
+      selectedTestIds: ["T7", "T4"],
+      requestedAt: "2026-11-27T05:30:00Z",
+      requestedByName: "Asha Teacher",
+      finishedAt: "2026-11-27T05:34:00Z",
+      ...overrides,
+    });
+
+    const tryAgain = () => within(card()).queryByRole("button", { name: "Try again" });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("says no AI Summary could be made, why, and offers Try again for a no-data request", () => {
+      render(
+        <AiTestInsightsSummaryCard
+          tests={LOADED}
+          canEdit
+          onRetry={() => {}}
+          requestsUrl={URL}
+          initialRequest={ended({ state: "no_data", outcomeCode: "missing_category_for_cutoff" })}
+        />,
+      );
+
+      expect(within(card()).getByText(NO_SUMMARY)).toBeInTheDocument();
+      expect(within(card()).getByText(NO_CATEGORY)).toBeInTheDocument();
+      expect(tryAgain()).toBeEnabled();
+    });
+
+    it.each([
+      ["interrupted", "The run was interrupted."],
+      ["pipeline_error", "Something went wrong while writing the AI Summary."],
+    ])("shows the reason for a failed request (%s) and offers Try again", (outcomeCode, message) => {
+      render(
+        <AiTestInsightsSummaryCard
+          tests={LOADED}
+          canEdit
+          onRetry={() => {}}
+          requestsUrl={URL}
+          initialRequest={ended({ state: "failed", outcomeCode })}
+        />,
+      );
+
+      expect(within(card()).getByText(message)).toBeInTheDocument();
+      expect(within(card()).queryByText(NO_SUMMARY)).not.toBeInTheDocument();
+      expect(tryAgain()).toBeEnabled();
+    });
+
+    it("Try again posts the failed request's tests in their order, with no confirmation, and shows the new request", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>(() =>
+        Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () =>
+            Promise.resolve({
+              outcome: "created",
+              request: ended({
+                requestKey: "key-new",
+                state: "queued",
+                outcomeCode: null,
+                requestedAt: new Date().toISOString(),
+                finishedAt: null,
+              }),
+            }),
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      render(
+        <AiTestInsightsSummaryCard
+          tests={LOADED}
+          canEdit
+          onRetry={() => {}}
+          requestsUrl={URL}
+          // Not the picker's order: the request's own order is sent.
+          initialRequest={ended({ selectedTestIds: ["T4", "T9"] })}
+        />,
+      );
+
+      await user.click(tryAgain()!);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(URL);
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ selectedTestIds: ["T4", "T9"] });
+      expect(within(card()).queryByRole("dialog")).not.toBeInTheDocument();
+      expect(
+        await within(card()).findByText("Waiting to start. This can take about 2 minutes if the server was asleep."),
+      ).toBeInTheDocument();
+      expect(within(card()).queryByText("The run was interrupted.")).not.toBeInTheDocument();
+      expect(tryAgain()).not.toBeInTheDocument();
+    });
+
+    it("keeps the reason and Try again when Try again cannot be recorded", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: "x" }) })),
+      );
+      render(
+        <AiTestInsightsSummaryCard tests={LOADED} canEdit onRetry={() => {}} requestsUrl={URL} initialRequest={ended({})} />,
+      );
+
+      await user.click(tryAgain()!);
+
+      expect(await within(card()).findByRole("alert")).toHaveTextContent("The AI Summary could not be requested. Try again.");
+      expect(within(card()).getByText("The run was interrupted.")).toBeInTheDocument();
+      expect(tryAgain()).toBeEnabled();
+    });
+
+    it("keeps the picker usable, so the Teacher can choose other tests and Generate", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>(() =>
+        Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.resolve({ outcome: "created", request: ended({ requestKey: "key-new", state: "queued" }) }),
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      render(
+        <AiTestInsightsSummaryCard
+          tests={LOADED}
+          canEdit
+          onRetry={() => {}}
+          requestsUrl={URL}
+          initialRequest={ended({ state: "no_data", outcomeCode: "no_candidate_tests" })}
+        />,
+      );
+
+      await user.click(box(/Full Syllabus Test 1/));
+      await user.click(box(/Mock Test 1/));
+      await user.click(within(card()).getByRole("button", { name: "Generate" }));
+
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ selectedTestIds: ["T7"] });
+    });
+
+    it.each(["no_data", "failed"] as const)("shows a viewer the reason for a %s request and no Try again", (state) => {
+      render(
+        <AiTestInsightsSummaryCard
+          tests={LOADED}
+          canEdit={false}
+          onRetry={() => {}}
+          requestsUrl={URL}
+          initialRequest={ended({ state, outcomeCode: "missing_category_for_cutoff" })}
+        />,
+      );
+
+      expect(within(card()).getByText(NO_CATEGORY)).toBeInTheDocument();
+      expect(tryAgain()).not.toBeInTheDocument();
+      expect(within(card()).queryByRole("button", { name: "Generate" })).not.toBeInTheDocument();
+    });
+  });
 });

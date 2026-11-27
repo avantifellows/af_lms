@@ -12,6 +12,7 @@ import {
   AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
+  endInsightRequestWithoutSummary,
   markInsightRequestRunning,
   readInsightRequests,
   removeAiTestInsightsFixture,
@@ -575,6 +576,86 @@ test.describe("AI Test Insights tab", () => {
         const summary = pmPage.getByRole("region", { name: "AI Summary" });
         await expect(summary.getByText(WRITING)).toBeVisible();
         await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+      });
+    });
+
+    // A request that ended without an AI Summary (#561): the reason in plain
+    // words, and "Try again", which sends the same tests again.
+    test.describe("No AI Summary", () => {
+      const WAITING = "Waiting to start. This can take about 2 minutes if the server was asleep.";
+      const NO_SUMMARY = "No AI Summary could be made";
+      const NO_CATEGORY = "This student has no category on record. Add it in Edit Student, then try again.";
+      const INTERRUPTED = "The run was interrupted.";
+      const GENERAL = "Something went wrong while writing the AI Summary.";
+
+      test("says why after every reload, and Try again makes one new request with the same tests", async ({
+        page,
+        pmPage,
+      }) => {
+        // Divya's fixture request failed with a code the table does not hold.
+        // The picker stays usable under it: the Teacher picks tests and Generates.
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await answerTestPicker(page, 200, { tests: PICKER_TESTS });
+        await page.goto(studentUrl("divya"));
+        const summary = page.getByRole("region", { name: "AI Summary" });
+        const tryAgain = summary.getByRole("button", { name: "Try again" });
+        await expect(summary.getByText(GENERAL, { exact: true })).toBeVisible();
+        await summary.getByRole("checkbox", { name: /Major Test 2/ }).check();
+        await summary.getByRole("button", { name: "Generate" }).click();
+        await expect(summary.getByText(WAITING)).toBeVisible();
+        const fixtureRows = await readInsightRequests(pool, ids.studentIds.divya);
+        const first = fixtureRows[fixtureRows.length - 1];
+        expect(first).toMatchObject({ state: "queued", selectedTestIds: ["T9", "T4"] });
+
+        // No data, for a Student with no category.
+        await endInsightRequestWithoutSummary(pool, first.requestKey, "no_data", "missing_category_for_cutoff");
+        await page.reload();
+        await expect(summary.getByText(NO_SUMMARY, { exact: true })).toBeVisible();
+        await expect(summary.getByText(NO_CATEGORY, { exact: true })).toBeVisible();
+        const endedFirst = (await readInsightRequests(pool, ids.studentIds.divya)).find(
+          (row) => row.requestKey === first.requestKey,
+        );
+        expect(endedFirst).toMatchObject({ state: "no_data", outcomeCode: "missing_category_for_cutoff" });
+
+        // Try again: no confirmation, one new queued row with the same tests,
+        // and the earlier row left as it was.
+        await tryAgain.click();
+        await expect(summary.getByText(WAITING)).toBeVisible();
+        await expect(tryAgain).toHaveCount(0);
+        const afterFirstTry = await readInsightRequests(pool, ids.studentIds.divya);
+        expect(afterFirstTry).toHaveLength(fixtureRows.length + 1);
+        expect(afterFirstTry.find((row) => row.requestKey === first.requestKey)).toEqual(endedFirst);
+        const second = afterFirstTry[afterFirstTry.length - 1];
+        expect(second.requestKey).not.toBe(first.requestKey);
+        expect(second).toMatchObject({ state: "queued", outcomeCode: null, selectedTestIds: ["T9", "T4"] });
+
+        // Failed, interrupted.
+        await endInsightRequestWithoutSummary(pool, second.requestKey, "failed", "interrupted");
+        await page.reload();
+        await expect(summary.getByText(INTERRUPTED, { exact: true })).toBeVisible();
+        await expect(summary.getByText(NO_SUMMARY, { exact: true })).toHaveCount(0);
+        await expect(tryAgain).toBeVisible();
+
+        // Failed, with a code the table does not hold.
+        await tryAgain.click();
+        await expect(summary.getByText(WAITING)).toBeVisible();
+        const afterSecondTry = await readInsightRequests(pool, ids.studentIds.divya);
+        expect(afterSecondTry).toHaveLength(fixtureRows.length + 2);
+        const third = afterSecondTry[afterSecondTry.length - 1];
+        expect(third).toMatchObject({ state: "queued", selectedTestIds: ["T9", "T4"] });
+        await endInsightRequestWithoutSummary(pool, third.requestKey, "failed", "llm_quota_exhausted");
+        await page.reload();
+        await expect(summary.getByText(GENERAL, { exact: true })).toBeVisible();
+        await expect(summary.getByText(INTERRUPTED, { exact: true })).toHaveCount(0);
+        await expect(tryAgain).toBeVisible();
+
+        // A viewer, in a browser of their own, sees the reason and no Try again.
+        await answerTestPicker(pmPage, 200, { tests: PICKER_TESTS });
+        await pmPage.goto(studentUrl("divya"));
+        const viewerSummary = pmPage.getByRole("region", { name: "AI Summary" });
+        await expect(viewerSummary.getByText(GENERAL, { exact: true })).toBeVisible();
+        await expect(viewerSummary.getByRole("button", { name: "Try again" })).toHaveCount(0);
+        await expect(viewerSummary.getByRole("button", { name: "Generate" })).toHaveCount(0);
       });
     });
 

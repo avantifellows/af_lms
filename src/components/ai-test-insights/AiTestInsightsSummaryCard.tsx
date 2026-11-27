@@ -15,6 +15,11 @@
 // final state shows the picker and Generate, as if there were none. Viewers
 // see the request's state and never Generate; the create route refuses them
 // anyway.
+//
+// A request that ended `no_data` or `failed` (#561) shows why, in the plain
+// words of `@/lib/ai-test-insights-outcomes`, and for an editor "Try again",
+// which posts that request's tests again with no confirmation; the picker and
+// Generate stay usable beneath it.
 import { useState, useSyncExternalStore } from "react";
 
 import { Button, Card } from "@/components/ui";
@@ -28,6 +33,7 @@ import {
   type AiTestInsightsTestsState,
   type InsightRequestView,
 } from "@/lib/ai-test-insights-shared";
+import { outcomeMessage } from "@/lib/ai-test-insights-outcomes";
 
 const FORMAT_LABELS: Record<AiTestInsightsTestFormat, string> = {
   major_test: "Major test",
@@ -77,6 +83,38 @@ function InProgress({ request }: { request: InsightRequestView & { state: "queue
         <p className="mt-1 text-sm text-text-secondary">{formatElapsed(now - Date.parse(request.requestedAt))} elapsed</p>
       )}
       <p className="mt-1 text-xs text-text-muted">You can leave this page and come back.</p>
+    </div>
+  );
+}
+
+/**
+ * A request that ended `no_data` or `failed`: why, in plain words, and for an
+ * editor "Try again", which sends the same tests again.
+ */
+function NoSummary({
+  request,
+  canEdit,
+  submitting,
+  onTryAgain,
+}: {
+  request: InsightRequestView & { state: "no_data" | "failed" };
+  canEdit: boolean;
+  submitting: boolean;
+  onTryAgain: () => void;
+}) {
+  return (
+    <div role="status" className="mb-4 flex flex-col items-start gap-3 rounded-lg border border-border bg-bg p-4">
+      <div>
+        {request.state === "no_data" && (
+          <p className="text-sm font-medium text-text-primary">No AI Summary could be made</p>
+        )}
+        <p className="text-sm text-text-secondary">{outcomeMessage(request.outcomeCode)}</p>
+      </div>
+      {canEdit && (
+        <Button variant="secondary" onClick={onTryAgain} disabled={submitting}>
+          Try again
+        </Button>
+      )}
     </div>
   );
 }
@@ -319,6 +357,14 @@ export default function AiTestInsightsSummaryCard({
         <h2 className="mb-4 text-lg font-bold text-text-primary">AI Summary</h2>
         {request && (request.state === "queued" || request.state === "running") && (
           <InProgress request={{ ...request, state: request.state }} />
+        )}
+        {request && (request.state === "no_data" || request.state === "failed") && (
+          <NoSummary
+            request={{ ...request, state: request.state }}
+            canEdit={canEdit}
+            submitting={submitting}
+            onTryAgain={() => generate(request.selectedTestIds)}
+          />
         )}
         <CardBody
           tests={tests}

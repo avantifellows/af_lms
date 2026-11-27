@@ -348,6 +348,7 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
 export interface StoredInsightRequest {
   requestKey: string;
   state: string;
+  outcomeCode: string | null;
   selectedTestIds: unknown;
   notesSnapshot: unknown;
   requestedByUserId: number;
@@ -357,16 +358,18 @@ export interface StoredInsightRequest {
   requestedAt: number;
   insertedAt: number;
   updatedAt: number;
+  finishedAt: number | null;
 }
 
 /** The Student's Insight Requests, oldest first. */
 export async function readInsightRequests(pool: Pool, studentId: number): Promise<StoredInsightRequest[]> {
   const result = await pool.query(
-    `SELECT request_key, state, selected_test_ids, notes_snapshot, requested_by_user_id, school_id, program_id,
+    `SELECT request_key, state, outcome_code, selected_test_ids, notes_snapshot, requested_by_user_id, school_id, program_id,
             academic_year,
             EXTRACT(EPOCH FROM requested_at)::float8 AS requested_at,
             EXTRACT(EPOCH FROM inserted_at)::float8 AS inserted_at,
-            EXTRACT(EPOCH FROM updated_at)::float8 AS updated_at
+            EXTRACT(EPOCH FROM updated_at)::float8 AS updated_at,
+            EXTRACT(EPOCH FROM finished_at)::float8 AS finished_at
      FROM ai_test_insight_requests
      WHERE student_id = $1
      ORDER BY id`,
@@ -375,6 +378,7 @@ export async function readInsightRequests(pool: Pool, studentId: number): Promis
   return result.rows.map((row) => ({
     requestKey: row.request_key,
     state: row.state,
+    outcomeCode: row.outcome_code,
     selectedTestIds: row.selected_test_ids,
     notesSnapshot: row.notes_snapshot,
     requestedByUserId: Number(row.requested_by_user_id),
@@ -384,6 +388,7 @@ export async function readInsightRequests(pool: Pool, studentId: number): Promis
     requestedAt: Number(row.requested_at),
     insertedAt: Number(row.inserted_at),
     updatedAt: Number(row.updated_at),
+    finishedAt: row.finished_at === null ? null : Number(row.finished_at),
   }));
 }
 
@@ -396,6 +401,27 @@ export async function markInsightRequestRunning(pool: Pool, requestKey: string):
     [requestKey],
   );
   if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no queued request to move to running");
+}
+
+/**
+ * Ends a `queued` or `running` request without an AI Summary, as AI Mentorship
+ * Guide does: `no_data` or `failed` with an outcome code, in UTC, with
+ * `updated_at` set, and only while the request is still in progress.
+ */
+export async function endInsightRequestWithoutSummary(
+  pool: Pool,
+  requestKey: string,
+  state: "no_data" | "failed",
+  outcomeCode: string,
+): Promise<void> {
+  const result = await pool.query(
+    `UPDATE ai_test_insight_requests
+     SET state = $2, outcome_code = $3, started_at = COALESCE(started_at, ${NOW}),
+         finished_at = ${NOW}, updated_at = ${NOW}
+     WHERE request_key = $1 AND state IN ('queued', 'running')`,
+    [requestKey, state, outcomeCode],
+  );
+  if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no request in progress to end");
 }
 
 /**
