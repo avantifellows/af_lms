@@ -2128,11 +2128,12 @@ test.describe("AI Test Insights tab", () => {
         const historyOf = (page: Page) => page.getByRole("region", { name: "History" });
         const cardValue = (page: Page, label: string) =>
           page.getByRole("region", { name: "Student" }).locator(`dt:text-is('${label}') + dd`);
-        /** A date as the Student page writes it (en-GB short), from the test's own clock. */
-        const todayShown = () =>
-          new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).format(
-            new Date(),
-          );
+        /** Today as the Student page writes it (`3 Sep 2026`, never "Sept"), from the test's own clock. */
+        const todayShown = () => {
+          const [year, month, day] = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()).split("-");
+          const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          return `${Number(day)} ${months[Number(month) - 1]} ${year}`;
+        };
         const teacherUserId = () => ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email];
 
         /** Saves a draft for the Student and submits it as `page`'s Teacher: the session at revision 2. */

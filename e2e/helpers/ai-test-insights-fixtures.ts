@@ -174,10 +174,10 @@ export const AI_TEST_INSIGHTS_ASHA_HISTORY = [
     "Asked for by E2E ATI Teacher on 14 Nov 2026, 10:30",
   ],
   [
-    // The Student page writes dates as en-GB short dates: September is "Sept".
-    "3 Sept 2026",
+    // The Student page writes September as "Sep", never the en-GB "Sept".
+    "3 Sep 2026",
     "Notes by E2E ATI Seated Teacher",
-    "Edited on 5 Sept 2026",
+    "Edited on 5 Sep 2026",
     "Areas of concern",
     ASHA_TEXT.sep.concern,
     "Immediate actions",

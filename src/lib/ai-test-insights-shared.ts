@@ -127,16 +127,19 @@ export function aiTestInsightsStudentPageUrl(studentId: number, centreId?: numbe
   return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
 }
 
-/** `2026-11-14` → `14 Nov 2026`; no date stays empty. Read as a calendar date, not a moment. */
+/** Every AI Test Insights date writes its month with these names. */
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * `2026-11-14` → `14 Nov 2026`; no date stays empty. Read as a calendar date,
+ * not a moment. The month comes from {@link SHORT_MONTHS}, as in
+ * {@link formatInsightRequestTime}, so September reads `Sep` everywhere (the
+ * en-GB locale would print `Sept`).
+ */
 export function formatInsightSessionDate(date: string | null): string {
   if (!date) return "";
   const [year, month, day] = date.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+  return `${day} ${SHORT_MONTHS[month - 1]} ${year}`;
 }
 
 /** The states an Insight Request is stored in. */
@@ -267,7 +270,6 @@ export function insightRequestDateInIndia(iso: string): string {
   }).format(new Date(iso));
 }
 
-const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** A UTC moment (`2026-11-27T05:30:00Z`) in India time: `27 Nov 2026, 11:00`. */
 export function formatInsightRequestTime(iso: string): string {
