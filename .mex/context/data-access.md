@@ -991,3 +991,13 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   Drafts and requests in any other state are not counted. A Student with no rows gets 0, 0 and
   null; a failed read throws, and the list route answers 500 (never zeros). The Tab's search (name
   or Student ID) and Grade filter run in the browser on the loaded list.
+- **Student access and the Student card (#557):** Student access reads the Student's listed rows
+  with the same `listedStudentRowsSql` joined to `centres` and `school` (`WHERE student_id = $1`,
+  one row per listing centre, lowest id first), then filters by the user's list scope (see
+  `context/permissions.md`). `readAiTestInsightsStudentCard(context)` in
+  `src/lib/ai-test-insights-student-card.ts` reads name, `student.student_id`, `user.gender`,
+  `student.category`, `student.stream` (blank → null, shown as a dash) and Batch = distinct names
+  of the Student's current batch enrollments (`enrollment_record` `group_type = 'batch'`,
+  `is_current`, `group_id = batch.id`) whose `batch.program_id` is the context's Program; Grade
+  comes from the context, and the session values from `readAiTestInsightsCounts`. Null when the
+  Student is gone (page → not found).

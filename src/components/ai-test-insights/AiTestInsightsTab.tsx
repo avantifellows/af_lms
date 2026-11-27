@@ -4,11 +4,14 @@
 // only). The roster page passes only the School code and, on a Centre page,
 // the centre id; the tab loads its own list when shown. A failed load shows an
 // error with Retry, never an empty list.
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Card, Input, Select } from "@/components/ui";
 import {
   aiTestInsightsListUrl,
+  aiTestInsightsStudentPageUrl,
+  formatInsightSessionDate,
   type AiTestInsightsListResponse,
   type AiTestInsightsStudent,
 } from "@/lib/ai-test-insights-shared";
@@ -47,19 +50,7 @@ function useAiTestInsightsList(schoolCode: string, centreId: number | undefined)
   return { state, retry: load };
 }
 
-/** `2026-11-14` → `14 Nov 2026`; no date stays empty. Read as a calendar date, not a moment. */
-function formatSessionDate(date: string | null): string {
-  if (!date) return "";
-  const [year, month, day] = date.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
-
-function StudentTable({ students }: { students: AiTestInsightsStudent[] }) {
+function StudentTable({ students, centreId }: { students: AiTestInsightsStudent[]; centreId?: number }) {
   return (
     <div className="overflow-x-auto">
       <table aria-label="AI Test Insights students" className="min-w-full text-sm">
@@ -69,7 +60,8 @@ function StudentTable({ students }: { students: AiTestInsightsStudent[] }) {
             <th scope="col" className="py-2 pr-3 font-medium">Grade</th>
             <th scope="col" className="py-2 pr-3 font-medium">Insight Sessions completed</th>
             <th scope="col" className="py-2 pr-3 font-medium">Test Insights generated</th>
-            <th scope="col" className="py-2 font-medium">Last Insight Session</th>
+            <th scope="col" className="py-2 pr-3 font-medium">Last Insight Session</th>
+            <th scope="col" className="py-2 font-medium">Open</th>
           </tr>
         </thead>
         <tbody>
@@ -82,7 +74,16 @@ function StudentTable({ students }: { students: AiTestInsightsStudent[] }) {
               <td className="py-2 pr-3 text-text-secondary">{student.grade}</td>
               <td className="py-2 pr-3 text-text-secondary">{student.insightSessionsCompleted}</td>
               <td className="py-2 pr-3 text-text-secondary">{student.testInsightsGenerated}</td>
-              <td className="py-2 text-text-secondary">{formatSessionDate(student.lastInsightSessionDate)}</td>
+              <td className="py-2 pr-3 text-text-secondary">{formatInsightSessionDate(student.lastInsightSessionDate)}</td>
+              <td className="py-2">
+                <Link
+                  href={aiTestInsightsStudentPageUrl(student.studentId, centreId)}
+                  aria-label={`Open ${student.name}`}
+                  className="font-medium text-accent hover:text-accent-hover hover:underline"
+                >
+                  Open
+                </Link>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -94,7 +95,7 @@ function StudentTable({ students }: { students: AiTestInsightsStudent[] }) {
 type GradeFilter = "all" | "11" | "12";
 
 /** Search and filter the loaded list in the browser; no new request. */
-function StudentList({ students }: { students: AiTestInsightsStudent[] }) {
+function StudentList({ students, centreId }: { students: AiTestInsightsStudent[]; centreId?: number }) {
   const [search, setSearch] = useState("");
   const [grade, setGrade] = useState<GradeFilter>("all");
 
@@ -140,7 +141,7 @@ function StudentList({ students }: { students: AiTestInsightsStudent[] }) {
       {shown.length === 0 ? (
         <p className="py-8 text-center text-sm text-text-muted">No Students match your search.</p>
       ) : (
-        <StudentTable students={shown} />
+        <StudentTable students={shown} centreId={centreId} />
       )}
     </div>
   );
@@ -173,7 +174,7 @@ export default function AiTestInsightsTab({
 
   return (
     <Card elevation="sm" className="p-4">
-      <StudentList students={state.students} />
+      <StudentList students={state.students} centreId={centreId} />
     </Card>
   );
 }

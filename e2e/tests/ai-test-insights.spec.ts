@@ -3,7 +3,9 @@ import type { Page } from "@playwright/test";
 import { test, expect, signInAs } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
 import {
+  AI_TEST_INSIGHTS_CARDS,
   AI_TEST_INSIGHTS_COE_CENTRE_LIST,
+  AI_TEST_INSIGHTS_NOT_LISTED_KEYS,
   AI_TEST_INSIGHTS_NO_CENTRE_SCHOOL,
   AI_TEST_INSIGHTS_NODAL_CENTRE_LIST,
   AI_TEST_INSIGHTS_PERSONAS,
@@ -29,7 +31,8 @@ async function tabNames(page: Page): Promise<string[]> {
 
 /**
  * Opens the tab and reads its rows as [name, Student ID, Grade, Insight
- * Sessions completed, Test Insights generated, Last Insight Session].
+ * Sessions completed, Test Insights generated, Last Insight Session]; the
+ * Open column is left out.
  */
 async function listedRows(page: Page): Promise<string[][]> {
   await tabBar(page).getByRole("tab", { name: TAB }).click();
@@ -41,11 +44,28 @@ async function shownRows(page: Page): Promise<string[][]> {
   await expect(table).toBeVisible();
   return table.locator("tbody tr").evaluateAll((rows) =>
     rows.map((row) => {
-      const [student, ...rest] = Array.from(row.querySelectorAll("td"));
+      const [student, ...rest] = Array.from(row.querySelectorAll("td")).slice(0, -1);
       const [name, code] = Array.from(student.querySelectorAll("div")).map((div) => div.textContent ?? "");
       return [name, code, ...rest.map((cell) => cell.textContent ?? "")];
     }),
   );
+}
+
+/** The Student card's heading and its fields as [label, value] pairs. */
+async function studentCard(page: Page): Promise<{ name: string; fields: string[][] }> {
+  const card = page.getByRole("region", { name: "Student" });
+  await expect(card).toBeVisible();
+  const name = (await card.getByRole("heading").textContent()) ?? "";
+  const fields = await card.locator("dt").evaluateAll((terms) =>
+    terms.map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
+  );
+  return { name, fields };
+}
+
+async function expectNotFound(page: Page, url: string) {
+  const response = await page.goto(url);
+  expect(response?.status()).toBe(404);
+  await expect(page.getByRole("region", { name: "Student" })).toHaveCount(0);
 }
 
 function expectAfterTeacherFeedback(names: string[]) {
@@ -211,5 +231,97 @@ test.describe("AI Test Insights tab", () => {
     expect((await page.request.get(base)).status()).toBe(403);
     expect((await page.request.get(`${base}?centre_id=${ids.nodalCentreId}`)).status()).toBe(403);
     expect((await page.request.get(`${base}?centre_id=${ids.otherCentreId}`)).status()).toBe(403);
+  });
+
+  test.describe("Student page", () => {
+    const studentUrl = (key: string, centreId?: number) =>
+      `/ai-test-insights/students/${ids.studentIds[key]}${centreId === undefined ? "" : `?centre=${centreId}`}`;
+
+    test("opens from the School page and goes back to the School page's tab", async ({ adminPage }) => {
+      await adminPage.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
+      await listedRows(adminPage);
+
+      await adminPage.getByRole("link", { name: "Open Asha Atiq" }).click();
+      await expect(adminPage).toHaveURL(new RegExp(`/ai-test-insights/students/${ids.studentIds.asha}$`));
+      expect(await studentCard(adminPage)).toEqual(AI_TEST_INSIGHTS_CARDS.asha);
+
+      await adminPage.getByRole("link", { name: "Back to AI Test Insights" }).click();
+      await expect(adminPage).toHaveURL(new RegExp(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}\\?tab=ai_test_insights$`));
+      expect(await shownRows(adminPage)).toEqual(AI_TEST_INSIGHTS_SCHOOL_LIST);
+    });
+
+    test("opens from a Centre page with that centre, and goes back to the Centre page's tab", async ({ adminPage }) => {
+      await adminPage.goto(`/centre/${ids.nodalCentreId}?tab=ai_test_insights`);
+      await shownRows(adminPage);
+
+      await adminPage.getByRole("link", { name: "Open Esha Ekka" }).click();
+      await expect(adminPage).toHaveURL(
+        new RegExp(`/ai-test-insights/students/${ids.studentIds.esha}\\?centre=${ids.nodalCentreId}$`),
+      );
+      // Esha is on both centres: the Nodal page's Batch is the Nodal one.
+      expect(await studentCard(adminPage)).toEqual(AI_TEST_INSIGHTS_CARDS.eshaFromNodal);
+
+      await adminPage.getByRole("link", { name: "Back to AI Test Insights" }).click();
+      await expect(adminPage).toHaveURL(new RegExp(`/centre/${ids.nodalCentreId}\\?tab=ai_test_insights$`));
+      expect(await shownRows(adminPage)).toEqual(AI_TEST_INSIGHTS_NODAL_CENTRE_LIST);
+    });
+
+    test("uses the lowest centre and the School page's tab when no valid centre is named", async ({ adminPage }) => {
+      await adminPage.goto(studentUrl("esha"));
+      expect(await studentCard(adminPage)).toEqual(AI_TEST_INSIGHTS_CARDS.eshaFromCoe);
+
+      // A centre of another School lists no Student here; it changes nothing.
+      await adminPage.goto(studentUrl("esha", ids.otherCentreId));
+      expect(await studentCard(adminPage)).toEqual(AI_TEST_INSIGHTS_CARDS.eshaFromCoe);
+      await expect(adminPage.getByRole("link", { name: "Back to AI Test Insights" })).toHaveAttribute(
+        "href",
+        `/school/${AI_TEST_INSIGHTS_SCHOOL.code}?tab=ai_test_insights`,
+      );
+    });
+
+    test("shows the page to a Teacher, Program Manager, Program Admin and Admin", async ({
+      page,
+      adminPage,
+      pmPage,
+      programAdminPage,
+    }) => {
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+      for (const viewer of [page, pmPage, programAdminPage, adminPage]) {
+        await viewer.goto(studentUrl("chirag"));
+        expect(await studentCard(viewer)).toEqual(AI_TEST_INSIGHTS_CARDS.chirag);
+      }
+    });
+
+    test("is not found for a Teacher of another School, either way round", async ({ page }) => {
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher);
+      await expectNotFound(page, studentUrl("asha"));
+
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+      await expectNotFound(page, studentUrl("other"));
+    });
+
+    test("keeps a seat-confined Teacher to Students of their own centre", async ({ page }) => {
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+
+      await page.goto(studentUrl("asha"));
+      expect(await studentCard(page)).toEqual(AI_TEST_INSIGHTS_CARDS.asha);
+      // Divya is listed only by the Nodal centre of the same School.
+      await expectNotFound(page, studentUrl("divya"));
+      await expectNotFound(page, studentUrl("divya", ids.nodalCentreId));
+    });
+
+    test("is not found for every Student no centre lists, and for a bad or unknown id", async ({ adminPage }) => {
+      for (const key of AI_TEST_INSIGHTS_NOT_LISTED_KEYS) {
+        await expectNotFound(adminPage, studentUrl(key));
+      }
+      await expectNotFound(adminPage, "/ai-test-insights/students/abc");
+      await expectNotFound(adminPage, "/ai-test-insights/students/999999999");
+    });
+
+    test("is not found for a PMU user", async ({ page }) => {
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.pmuManager);
+
+      await expectNotFound(page, studentUrl("asha"));
+    });
   });
 });

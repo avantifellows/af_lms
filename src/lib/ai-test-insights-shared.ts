@@ -23,6 +23,21 @@ export interface AiTestInsightsStudent extends AiTestInsightsCounts {
   grade: 11 | 12;
 }
 
+/** The Student card on the Student page: who the Student is. */
+export interface AiTestInsightsStudentCardData {
+  name: string;
+  /** `student.student_id`. */
+  studentCode: string | null;
+  grade: 11 | 12;
+  /** Names of the Student's current batches in the Program of the centre that lists them. */
+  batches: string[];
+  gender: string | null;
+  category: string | null;
+  stream: string | null;
+  insightSessionsCompleted: number;
+  lastInsightSessionDate: string | null;
+}
+
 /** `GET /api/school/[udise]/ai-test-insights`. */
 export interface AiTestInsightsListResponse {
   students: AiTestInsightsStudent[];
@@ -44,4 +59,22 @@ export function aiTestInsightsListUrl(schoolCode: string, centreId?: number | st
   return centreId === undefined || centreId === null
     ? base
     : `${base}?centre_id=${encodeURIComponent(String(centreId))}`;
+}
+
+/** The Student page; on a Centre page the link carries the centre for the back link. */
+export function aiTestInsightsStudentPageUrl(studentId: number, centreId?: number | string | null): string {
+  const base = `/ai-test-insights/students/${studentId}`;
+  return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
+}
+
+/** `2026-11-14` → `14 Nov 2026`; no date stays empty. Read as a calendar date, not a moment. */
+export function formatInsightSessionDate(date: string | null): string {
+  if (!date) return "";
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }

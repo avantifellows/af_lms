@@ -39,12 +39,14 @@ interface StudentFixture {
   status: string;
   school: "main" | "other";
   batches: BatchKey[];
+  gender?: string;
+  category?: string;
 }
 
 // Listed: JEE (engineering in any spelling and case), Grade 11 or 12, not a
 // dropout, on an active CoE or Nodal centre's roster. Esha is on both centres.
 const LISTED: StudentFixture[] = [
-  { key: "asha", first: "Asha", last: "Atiq", grade: 11, stream: "Engineering", status: "active", school: "main", batches: ["coe"] },
+  { key: "asha", first: "Asha", last: "Atiq", grade: 11, stream: "Engineering", status: "active", school: "main", batches: ["coe"], gender: "Female", category: "OBC" },
   { key: "bhavya", first: "Bhavya", last: "Bose", grade: 12, stream: "PCM", status: "active", school: "main", batches: ["coe"] },
   { key: "chirag", first: "Chirag", last: "Chand", grade: 11, stream: " engg ", status: "active", school: "main", batches: ["coe"] },
   { key: "divya", first: "Divya", last: "Dutt", grade: 12, stream: "ENGINEERING", status: "active", school: "main", batches: ["nodal"] },
@@ -118,6 +120,36 @@ export const AI_TEST_INSIGHTS_SCHOOL_LIST = [ROW.asha, ROW.chirag, ROW.esha, ROW
 export const AI_TEST_INSIGHTS_COE_CENTRE_LIST = [ROW.asha, ROW.chirag, ROW.esha, ROW.bhavya];
 export const AI_TEST_INSIGHTS_NODAL_CENTRE_LIST = [ROW.esha, ROW.divya];
 
+/**
+ * The Student card on the Student page, as [label, value] pairs. Batch is the
+ * Student's current batches in the Program of the centre the page is for:
+ * Esha is on both centres, so the School page (lowest centre id, CoE) and the
+ * Nodal Centre page show different batches. A missing value is a dash.
+ */
+const CARD_FIELDS = (fields: string[]) =>
+  [
+    "Student ID",
+    "Grade",
+    "Batch",
+    "Gender",
+    "Category",
+    "Stream",
+    "Insight Sessions completed",
+    "Last Insight Session",
+  ].map((label, index) => [label, fields[index]]);
+export const AI_TEST_INSIGHTS_CARDS = {
+  asha: { name: "Asha Atiq", fields: CARD_FIELDS(["E2E-ATI-ASHA", "11", "E2E-ATI-COE", "Female", "OBC", "Engineering", "3", "14 Nov 2026"]) },
+  eshaFromCoe: { name: "Esha Ekka", fields: CARD_FIELDS(["E2E-ATI-ESHA", "11", "E2E-ATI-COE", "—", "—", "engineering", "0", "—"]) },
+  eshaFromNodal: { name: "Esha Ekka", fields: CARD_FIELDS(["E2E-ATI-ESHA", "11", "E2E-ATI-NODAL", "—", "—", "engineering", "0", "—"]) },
+  chirag: { name: "Chirag Chand", fields: CARD_FIELDS(["E2E-ATI-CHIRAG", "11", "E2E-ATI-COE", "—", "—", "engg", "1", "1 Oct 2026"]) },
+};
+
+/**
+ * Students no centre lists, by key; their Student page is not found for
+ * everyone. (Kabir, "other", is listed by the other School's centre.)
+ */
+export const AI_TEST_INSIGHTS_NOT_LISTED_KEYS = ["medical", "blank", "dropout", "grade10", "nvs"] as const;
+
 export interface Persona {
   name: string;
   email: string;
@@ -155,6 +187,8 @@ export interface AiTestInsightsFixtureIds {
   coeCentreId: number;
   nodalCentreId: number;
   otherCentreId: number;
+  /** `student.id` by fixture key (asha, esha, medical, …). */
+  studentIds: Record<string, number>;
 }
 
 async function oneId(pool: Pool, sql: string, params: unknown[], what: string): Promise<number> {
@@ -191,7 +225,7 @@ async function insertCentre(pool: Pool, name: string, schoolId: number, programI
   );
 }
 
-async function insertBatchGroup(pool: Pool, batch: { batchId: string; programId: number }) {
+async function insertBatchGroup(pool: Pool, batch: { batchId: string; programId: number }): Promise<{ batchId: number; groupId: number }> {
   const batchId = await oneId(
     pool,
     `INSERT INTO batch (name, batch_id, program_id, inserted_at, updated_at)
@@ -199,20 +233,28 @@ async function insertBatchGroup(pool: Pool, batch: { batchId: string; programId:
     [batch.batchId, batch.programId],
     "inserted batch",
   );
-  return oneId(
+  const groupId = await oneId(
     pool,
     `INSERT INTO "group" (type, child_id, inserted_at, updated_at) VALUES ('batch', $1, ${NOW}, ${NOW}) RETURNING id`,
     [batchId],
     "batch group",
   );
+  return { batchId, groupId };
 }
 
-async function insertUser(pool: Pool, email: string, role: string, first: string | null, last: string | null) {
+async function insertUser(
+  pool: Pool,
+  email: string,
+  role: string,
+  first: string | null,
+  last: string | null,
+  gender: string | null = null,
+) {
   return oneId(
     pool,
-    `INSERT INTO "user" (first_name, last_name, email, role, inserted_at, updated_at)
-     VALUES ($1, $2, $3, $4, ${NOW}, ${NOW}) RETURNING id`,
-    [first, last, email, role],
+    `INSERT INTO "user" (first_name, last_name, email, role, gender, inserted_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, ${NOW}, ${NOW}) RETURNING id`,
+    [first, last, email, role, gender],
     "inserted user",
   );
 }
@@ -229,7 +271,7 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
   const nodalCentreId = await insertCentre(pool, "Nodal", main.id, PROGRAM_IDS.NODAL);
   const otherCentreId = await insertCentre(pool, "Other CoE", other.id, PROGRAM_IDS.COE);
 
-  const batchGroups = {} as Record<BatchKey, number>;
+  const batchGroups = {} as Record<BatchKey, { batchId: number; groupId: number }>;
   for (const key of Object.keys(BATCHES) as BatchKey[]) {
     batchGroups[key] = await insertBatchGroup(pool, BATCHES[key]);
   }
@@ -237,16 +279,16 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
   const studentIds: Record<string, number> = {};
   for (const student of STUDENTS) {
     const gradeId = await oneId(pool, `SELECT id FROM grade WHERE number = $1 ORDER BY id LIMIT 1`, [student.grade], `grade ${student.grade}`);
-    const userId = await insertUser(pool, studentEmail(student.key), "student", student.first, student.last);
+    const userId = await insertUser(pool, studentEmail(student.key), "student", student.first, student.last, student.gender ?? null);
     studentIds[student.key] = await oneId(
       pool,
-      `INSERT INTO student (student_id, user_id, grade_id, status, stream, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, ${NOW}, ${NOW}) RETURNING id`,
-      [studentCode(student.key), userId, gradeId, student.status, student.stream],
+      `INSERT INTO student (student_id, user_id, grade_id, status, stream, category, inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, ${NOW}, ${NOW}) RETURNING id`,
+      [studentCode(student.key), userId, gradeId, student.status, student.stream, student.category ?? null],
       "inserted student",
     );
     const schoolGroupId = student.school === "main" ? main.groupId : other.groupId;
-    for (const groupId of [schoolGroupId, ...student.batches.map((key) => batchGroups[key])]) {
+    for (const groupId of [schoolGroupId, ...student.batches.map((key) => batchGroups[key].groupId)]) {
       await pool.query(
         `INSERT INTO group_user (group_id, user_id, inserted_at, updated_at) VALUES ($1, $2, ${NOW}, ${NOW})`,
         [groupId, userId],
@@ -257,6 +299,14 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
        VALUES ($1, $2, 'grade', $3, true, DATE '2026-04-01', ${NOW}, ${NOW})`,
       [userId, gradeId, CURRENT_ACADEMIC_YEAR],
     );
+    // The current batch enrollments the Student card's Batch reads.
+    for (const key of student.batches) {
+      await pool.query(
+        `INSERT INTO enrollment_record (user_id, group_id, group_type, academic_year, is_current, start_date, inserted_at, updated_at)
+         VALUES ($1, $2, 'batch', $3, true, DATE '2026-04-01', ${NOW}, ${NOW})`,
+        [userId, batchGroups[key].batchId, CURRENT_ACADEMIC_YEAR],
+      );
+    }
   }
 
   const personaUserIds: Record<string, number> = {};
@@ -283,7 +333,7 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
     teacherUserId: personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
   });
 
-  return { coeCentreId, nodalCentreId, otherCentreId };
+  return { coeCentreId, nodalCentreId, otherCentreId, studentIds };
 }
 
 /**

@@ -92,12 +92,39 @@ describe("AiTestInsightsTab", () => {
       "Insight Sessions completed",
       "Test Insights generated",
       "Last Insight Session",
+      "Open",
     ]);
     // Bilal has had no attention yet: 0, 0 and an empty date.
     expect(shownRows(table)).toEqual([
-      ["Asha KumarSTU1001", "11", "3", "2", "14 Nov 2026"],
-      ["Bilal Khan—", "12", "0", "0", ""],
+      ["Asha KumarSTU1001", "11", "3", "2", "14 Nov 2026", "Open"],
+      ["Bilal Khan—", "12", "0", "0", "", "Open"],
     ]);
+  });
+
+  it("opens each Student's page from a School page", async () => {
+    mockFetch.mockResolvedValue(ok(twoStudents));
+
+    render(<AiTestInsightsTab schoolCode="JNV001" />);
+
+    expect(await screen.findByRole("link", { name: "Open Asha Kumar" })).toHaveAttribute(
+      "href",
+      "/ai-test-insights/students/1001",
+    );
+    expect(screen.getByRole("link", { name: "Open Bilal Khan" })).toHaveAttribute(
+      "href",
+      "/ai-test-insights/students/1002",
+    );
+  });
+
+  it("carries the centre id to the Student's page from a Centre page", async () => {
+    mockFetch.mockResolvedValue(ok(twoStudents));
+
+    render(<AiTestInsightsTab schoolCode="JNV001" centreId={301} />);
+
+    expect(await screen.findByRole("link", { name: "Open Asha Kumar" })).toHaveAttribute(
+      "href",
+      "/ai-test-insights/students/1001?centre=301",
+    );
   });
 
   it("says no Student is listed when the list is empty", async () => {

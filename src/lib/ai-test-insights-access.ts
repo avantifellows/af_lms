@@ -4,14 +4,19 @@
 import { NextResponse } from "next/server";
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { listedStudentRowsSql } from "@/lib/ai-test-insights-students";
 import { query } from "@/lib/db";
 import { PROGRAM_IDS } from "@/lib/constants";
 import {
+  canAccessSchoolSync,
   canViewCentre,
   getCentreConfinement,
+  getFeatureAccess,
   getProgramContextSync,
+  getResolvedPermission,
   type UserPermission,
 } from "@/lib/permissions";
+import { getSession } from "@/lib/session";
 
 export interface AiTestInsightsListScope {
   authorized: true;
@@ -107,5 +112,147 @@ export async function resolveAiTestInsightsListScope(
     authorized: true,
     school: { id: auth.school.id, code: auth.school.code, region: auth.school.region },
     centreIds,
+  };
+}
+
+/** Who a Student is, for every AI Test Insights Student page and route. */
+export interface AiTestInsightsStudentContext {
+  /** `student.id`. */
+  studentId: number;
+  /** The Student's `user.id`, which the warehouse keys test results by. */
+  userId: number;
+  /** The School of the centre that lists the Student. */
+  school: { id: number; code: string; udise: string | null };
+  /** The centre that lists the Student: the page's when the user may list it, otherwise the lowest id. */
+  centreId: number;
+  /** The Program of that centre. */
+  programId: number;
+  grade: 11 | 12;
+  /** Feature access is `edit` (a Teacher who is not `read_only`). */
+  canEdit: boolean;
+}
+
+export type AiTestInsightsStudentRefusal = {
+  authorized: false;
+  status: 401 | 403 | 404 | 422;
+  response: NextResponse;
+};
+
+export type AiTestInsightsStudentAccess =
+  | {
+      authorized: true;
+      student: AiTestInsightsStudentContext;
+      /** The `centre` the page named is the context's centre (a valid one). */
+      centreNamedByPage: boolean;
+    }
+  | AiTestInsightsStudentRefusal;
+
+const REFUSAL_MESSAGES = {
+  401: "Unauthorized",
+  403: "Access denied",
+  404: "Student not found",
+  422: "Invalid student id",
+} as const;
+
+function refuseStudent(status: AiTestInsightsStudentRefusal["status"]): AiTestInsightsStudentRefusal {
+  return { authorized: false, status, response: NextResponse.json({ error: REFUSAL_MESSAGES[status] }, { status }) };
+}
+
+function parseStudentId(raw: string): number | null {
+  if (!/^[1-9][0-9]*$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+type ListedStudentRow = {
+  student_id: string | number;
+  user_id: string | number;
+  centre_id: string | number;
+  program_id: string | number;
+  grade: string | number;
+  school_id: string | number;
+  school_code: string;
+  school_udise: string | null;
+  school_region: string | null;
+};
+
+/** The centres that list this Student, one row per centre, lowest id first. */
+async function listedRowsOfStudent(studentId: number): Promise<ListedStudentRow[]> {
+  const listed = listedStudentRowsSql(2);
+  return query<ListedStudentRow>(
+    `WITH listed AS (${listed.sql})
+     SELECT listed.student_id,
+            listed.user_id,
+            listed.centre_id,
+            listed.program_id,
+            listed.grade,
+            sch.id AS school_id,
+            sch.code AS school_code,
+            sch.udise_code AS school_udise,
+            sch.region AS school_region
+     FROM listed
+     JOIN centres c ON c.id = listed.centre_id
+     JOIN school sch ON sch.id = c.school_id
+     WHERE listed.student_id = $1
+     ORDER BY listed.centre_id`,
+    [studentId, ...listed.params],
+  );
+}
+
+/** "This user may list this centre's Students" — the list scope's rule for one centre. */
+function mayListCentre(permission: UserPermission, row: ListedStudentRow): boolean {
+  if (!canAccessSchoolSync(permission, row.school_code, row.school_region || undefined)) return false;
+  const centreId = Number(row.centre_id);
+  const centres = [{ id: centreId, programId: Number(row.program_id) }];
+  return centresForUser(permission, centres, centreId)?.includes(centreId) ?? false;
+}
+
+/**
+ * Student access for AI Test Insights: the one helper every Student page and
+ * route calls. Given a `student.id` from the URL, returns the Student's
+ * context or a refusal, in this order: 401 no session, 422 bad id, 403 no
+ * `ai_test_insights` view, (for a `write`, 403 when access is not `edit`),
+ * 404 Student missing, not listed, or in no centre the user may list.
+ *
+ * The Student must be listed (the same predicate as the tab's list) by a
+ * centre the user may list. A Student listed by two such centres counts once:
+ * the context uses the page's `centre` when it is one of them, otherwise the
+ * lowest centre id. `centre` changes nothing else; an invalid one is ignored.
+ * No mentor-mentee mapping applies.
+ */
+export async function resolveAiTestInsightsStudentAccess(
+  rawStudentId: string,
+  options: { centre?: string | null; write?: boolean } = {},
+): Promise<AiTestInsightsStudentAccess> {
+  const session = await getSession();
+  if (!session) return refuseStudent(401);
+  const studentId = parseStudentId(rawStudentId);
+  if (studentId === null) return refuseStudent(422);
+
+  const email = session.user?.email;
+  const permission = email ? await getResolvedPermission(email) : null;
+  const access = getFeatureAccess(permission, "ai_test_insights");
+  if (!permission || !access.canView) return refuseStudent(403);
+  if (options.write && !access.canEdit) return refuseStudent(403);
+
+  const rows = (await listedRowsOfStudent(studentId)).filter((row) => mayListCentre(permission, row));
+  if (rows.length === 0) return refuseStudent(404);
+
+  const named = parseCentreId(options.centre ?? null);
+  const byPage = rows.find((row) => Number(row.centre_id) === named);
+  const chosen = byPage ?? rows.reduce((low, row) => (Number(row.centre_id) < Number(low.centre_id) ? row : low));
+
+  return {
+    authorized: true,
+    student: {
+      studentId,
+      userId: Number(chosen.user_id),
+      school: { id: Number(chosen.school_id), code: chosen.school_code, udise: chosen.school_udise },
+      centreId: Number(chosen.centre_id),
+      programId: Number(chosen.program_id),
+      grade: Number(chosen.grade) as 11 | 12,
+      canEdit: access.canEdit,
+    },
+    centreNamedByPage: byPage !== undefined,
   };
 }

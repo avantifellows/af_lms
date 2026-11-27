@@ -233,6 +233,12 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
   and is refused on the School route without a centre; other users the School's active physical
   centres whose Program is in their program context. A named centre must be one of those, at that
   School, and pass `canViewCentre`.
+- **Student page** `/ai-test-insights/students/[studentId]` (#557), opened from the tab's Open
+  link: **Student access** (same module) refuses 401 no session (the page sends you to sign in),
+  422 bad id, 403 no `ai_test_insights` view, and 404 when the Student is missing, not listed, or
+  listed only by centres the user may not list; a write also answers 403 when access is not `edit`,
+  before the 404 check. The page shows every refusal as the same not-found page. A user who may
+  list a centre may open every listed Student of it (no mentor-mentee mapping).
 
 ### NVS-Only Users
 
