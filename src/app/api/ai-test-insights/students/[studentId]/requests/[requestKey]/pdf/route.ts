@@ -1,9 +1,12 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
-import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
 import { presignTestInsightPdf } from "@/lib/ai-test-insights-artifacts";
-import { requestByKey } from "@/lib/ai-test-insights-requests";
-import { aiTestInsightPdfFileName, NOT_CONFIGURED_CODE } from "@/lib/ai-test-insights-shared";
+import {
+  NO_STORE,
+  readingNotConfigured,
+  withCompletedInsightRequest,
+} from "@/lib/ai-test-insights-request-routes";
+import { aiTestInsightPdfFileName } from "@/lib/ai-test-insights-shared";
 
 // The AI Summary PDF of one completed Insight Request (#565, physical centres
 // only): the file AI Mentorship Guide made, which the card's "Download PDF"
@@ -22,24 +25,7 @@ import { aiTestInsightPdfFileName, NOT_CONFIGURED_CODE } from "@/lib/ai-test-ins
 //
 // It only reads: no wake or enqueue call, no write. Logs carry the request
 // key, the Student's id, a reason and an error name, never a key or the URL.
-const NO_STORE = { "Cache-Control": "no-store" };
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ studentId: string; requestKey: string }> },
-) {
-  const { studentId, requestKey } = await params;
-  const access = await resolveAiTestInsightsStudentAccess(studentId, {
-    centre: request.nextUrl.searchParams.get("centre"),
-  });
-  if (!access.authorized) return access.response;
-  const { student } = access;
-
-  const found = await requestByKey(student.studentId, requestKey);
-  if (!found || found.state !== "completed") {
-    return NextResponse.json({ error: "AI Summary PDF not found" }, { status: 404, headers: NO_STORE });
-  }
-
+export const GET = withCompletedInsightRequest("AI Summary PDF not found", async (found, student) => {
   const fileName = aiTestInsightPdfFileName(student.studentId, found.requestedAt);
   const signed = await presignTestInsightPdf(student.studentId, found.requestKey, fileName);
   switch (signed.status) {
@@ -51,10 +37,7 @@ export async function GET(
     case "no_file":
       return NextResponse.json({ error: "AI Summary PDF not found" }, { status: 404, headers: NO_STORE });
     case "not_configured":
-      return NextResponse.json(
-        { error: "AI Summary reading is not configured", code: NOT_CONFIGURED_CODE },
-        { status: 503, headers: NO_STORE },
-      );
+      return readingNotConfigured();
     case "unreadable":
       console.error(
         `AI Test Insights PDF unreadable: request=${found.requestKey} student=${student.studentId} reason=${
@@ -63,4 +46,4 @@ export async function GET(
       );
       return NextResponse.json({ error: "AI Summary PDF could not be read" }, { status: 502, headers: NO_STORE });
   }
-}
+});

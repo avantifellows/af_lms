@@ -1,6 +1,6 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
-import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
+import { withInsightRequest } from "@/lib/ai-test-insights-request-routes";
 import { redeliver, requestByKey } from "@/lib/ai-test-insights-requests";
 import type { AiTestInsightsRequestStatusResponse } from "@/lib/ai-test-insights-shared";
 
@@ -18,23 +18,11 @@ import type { AiTestInsightsRequestStatusResponse } from "@/lib/ai-test-insights
 // after any re-delivery; a failed re-delivery is logged and never changes it.
 // A request made 20 minutes ago or more reads `failed` with `timed_out` (the
 // stall rule) and is never delivered again; the poll leaves its row as it is.
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ studentId: string; requestKey: string }> },
-) {
-  const { studentId, requestKey } = await params;
-  const access = await resolveAiTestInsightsStudentAccess(studentId, {
-    centre: request.nextUrl.searchParams.get("centre"),
-  });
-  if (!access.authorized) return access.response;
-  const { student } = access;
-
-  let found = await requestByKey(student.studentId, requestKey);
-  if (!found) return NextResponse.json({ error: "Request not found" }, { status: 404 });
-
+export const GET = withInsightRequest("Request not found", async (requested, student) => {
+  let found = requested;
   if (student.canEdit && found.state === "queued") {
     try {
-      if (await redeliver(found.requestKey)) found = (await requestByKey(student.studentId, requestKey)) ?? found;
+      if (await redeliver(found.requestKey)) found = (await requestByKey(student.studentId, found.requestKey)) ?? found;
     } catch (error) {
       // Only the request key, the Student's id and the error name.
       console.error(
@@ -47,4 +35,4 @@ export async function GET(
 
   const response: AiTestInsightsRequestStatusResponse = { request: found };
   return NextResponse.json(response);
-}
+});

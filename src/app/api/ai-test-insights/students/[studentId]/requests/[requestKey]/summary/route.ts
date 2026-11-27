@@ -1,9 +1,12 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
-import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
 import { readTestInsightText } from "@/lib/ai-test-insights-artifacts";
-import { requestByKey } from "@/lib/ai-test-insights-requests";
-import { NOT_CONFIGURED_CODE, type AiTestInsightsSummaryResponse } from "@/lib/ai-test-insights-shared";
+import {
+  NO_STORE,
+  readingNotConfigured,
+  withCompletedInsightRequest,
+} from "@/lib/ai-test-insights-request-routes";
+import type { AiTestInsightsSummaryResponse } from "@/lib/ai-test-insights-shared";
 
 // The AI Summary text of one completed Insight Request (#564, physical
 // centres only), which the AI Summary card shows. Student access gates first,
@@ -16,24 +19,7 @@ import { NOT_CONFIGURED_CODE, type AiTestInsightsSummaryResponse } from "@/lib/a
 //
 // It only reads: no wake or enqueue call, no write. Logs carry the request
 // key, the Student's id, a reason and an error name, never the text or a key.
-const NO_STORE = { "Cache-Control": "no-store" };
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ studentId: string; requestKey: string }> },
-) {
-  const { studentId, requestKey } = await params;
-  const access = await resolveAiTestInsightsStudentAccess(studentId, {
-    centre: request.nextUrl.searchParams.get("centre"),
-  });
-  if (!access.authorized) return access.response;
-  const { student } = access;
-
-  const found = await requestByKey(student.studentId, requestKey);
-  if (!found || found.state !== "completed") {
-    return NextResponse.json({ error: "AI Summary not found" }, { status: 404, headers: NO_STORE });
-  }
-
+export const GET = withCompletedInsightRequest("AI Summary not found", async (found, student) => {
   const read = await readTestInsightText(student.studentId, found.requestKey);
   switch (read.status) {
     case "read": {
@@ -43,10 +29,7 @@ export async function GET(
     case "no_file":
       return NextResponse.json({ error: "AI Summary not found" }, { status: 404, headers: NO_STORE });
     case "not_configured":
-      return NextResponse.json(
-        { error: "AI Summary reading is not configured", code: NOT_CONFIGURED_CODE },
-        { status: 503, headers: NO_STORE },
-      );
+      return readingNotConfigured();
     case "unreadable":
       console.error(
         `AI Test Insights summary unreadable: request=${found.requestKey} student=${student.studentId} reason=${
@@ -55,4 +38,4 @@ export async function GET(
       );
       return NextResponse.json({ error: "AI Summary could not be read" }, { status: 502, headers: NO_STORE });
   }
-}
+});
