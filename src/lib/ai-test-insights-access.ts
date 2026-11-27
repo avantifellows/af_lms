@@ -53,19 +53,24 @@ function parseCentreId(raw: string | null): number | null | "invalid" {
   return /^[1-9][0-9]{0,17}$/.test(raw) ? Number(raw) : "invalid";
 }
 
-/** The centres this user may list at the School before any named centre. */
+/**
+ * The centres this user may list at the School before any named centre.
+ * Seat confinement comes first, for every role: an Admin below level 3 who
+ * holds a centre seat is confined to it like anyone else (PR #573 review).
+ * Only an unconfined Admin lists every centre.
+ */
 function centresForUser(
   permission: UserPermission,
   centres: Array<{ id: number; programId: number }>,
   namedCentre: number | null,
 ): number[] | null {
-  if (permission.role === "admin") return centres.map((centre) => centre.id);
   const confinement = getCentreConfinement(permission);
   if (confinement.confined) {
     // As the School page: a seat-confined user lists only from a Centre page.
     if (namedCentre === null) return null;
     return centres.filter((centre) => confinement.centreIds.includes(centre.id)).map((centre) => centre.id);
   }
+  if (permission.role === "admin") return centres.map((centre) => centre.id);
   const { programIds } = getProgramContextSync(permission);
   return centres.filter((centre) => programIds.includes(centre.programId)).map((centre) => centre.id);
 }

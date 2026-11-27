@@ -92,6 +92,8 @@ const stored = (overrides: Partial<Stored> = {}): Stored => ({
 
 type FileRow = { item_id: number; file_kind: string; s3_key: string };
 
+/** The caller's centre seats (`centre_positions`); none unless a test sets them. */
+let seats: number[] = [];
 let permissionRow: Record<string, unknown> | null;
 let requests: Map<string, Stored>;
 let files: FileRow[];
@@ -144,6 +146,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch);
   configureReader();
   permissionRow = row("teacher");
+  seats = [];
   requests = new Map([
     [KEY, stored()],
     [OTHER_STUDENT_KEY, stored({ request_key: OTHER_STUDENT_KEY, student_id: 2001, inference_item_id: 42 })],
@@ -156,7 +159,9 @@ beforeEach(() => {
   mockGetServerSession.mockResolvedValue({ user: { email } });
   mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     if (sql.includes("FROM user_permission")) return permissionRow ? [permissionRow] : [];
-    if (sql.includes("FROM centre_positions")) return [];
+    if (sql.includes("FROM centre_positions")) {
+      return seats.map((centreId) => ({ centre_id: centreId, role: "teacher", centre_active: true }));
+    }
     if (sql.includes("centre_students")) return LISTED[String(params[0])] ?? [];
     if (sql.includes("acad_mentorship_inference_item_files")) {
       // The request's Item's file of one kind, for a completed request of that Student.
@@ -185,6 +190,20 @@ async function get(studentId: string, requestKey: string) {
 
 
 describe("GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]/pdf", () => {
+  // Review finding (PR #573, second review): an Admin below level 3 seated at
+  // the School's other centre (302) is seat-confined; Student 1001 is listed
+  // only by centre 301, so the PDF is refused as for a missing Student.
+  it("answers 404 to a level-1 Admin seated at another centre of the School", async () => {
+    // School access to JNV001 (so only the seat can refuse), seated at 302.
+    permissionRow = row("admin", { level: 1, school_codes: ["JNV001"], program_ids: [1, 2] });
+    seats = [302];
+
+    const response = await get("1001", KEY);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Student not found" });
+  });
+
   it("answers 302 to a 60-second presigned URL of the PDF file of the request's Item", async () => {
     const response = await get("1001", KEY);
 

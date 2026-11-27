@@ -224,8 +224,8 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
 - **Tab:** "AI Test Insights", right after Teacher Feedback, on a Centre page whose centre has
   a physical-centre Program (every Program but JNV NVS), or a School page whose School has at
   least one such active centre, and only where the user's list scope (below) is not empty, the
-  same rule the list route uses: an Admin sees it there; a centre-seated user only on their seat
-  centres' pages; anyone else only when that centre's Program (on a School page, one of its
+  same rule the list route uses: a centre-seated user (an Admin below level 3 with a seat
+  included) only on their seat centres' pages; any other Admin sees it there; anyone else only when that centre's Program (on a School page, one of its
   active physical centres' Programs) is in their program list. So the tab never shows where its
   list would be refused. A School with no active centre, or whose only active centre is JNV NVS,
   never shows it, for any role. The tab loads its own list; the roster page runs no AI Test
@@ -233,10 +233,12 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
 - **List route:** `GET /api/school/[udise]/ai-test-insights` (optional `centre_id`) refuses,
   before any Student read: 401 no session, 404 School not found, 403 no School access, 403 no
   `ai_test_insights` view, 403 no physical-centre scope for this user.
-- **List scope** (`src/lib/ai-test-insights-access.ts`, the only place that decides it): Admin
-  gets every active physical centre of the School; a centre-seated user only their seat centres
-  and is refused on the School route without a centre; other users the School's active physical
-  centres whose Program is in their program context. A named centre must be one of those, at that
+- **List scope** (`src/lib/ai-test-insights-access.ts`, the only place that decides it): seats
+  come first, for every role: a centre-seated user, an Admin below level 3 with a seat included,
+  gets only their seat centres and is refused on the School route without a centre. Any other
+  Admin gets every active physical centre of the School; other users the School's active physical
+  centres whose Program is in their program context. Student access uses the same rule, so a
+  seated Admin cannot open a Student listed only by a centre outside their seats. A named centre must be one of those, at that
   School, and pass `canViewCentre`.
 - **Student page** `/ai-test-insights/students/[studentId]` (#557), opened from the tab's Open
   link: **Student access** (same module) refuses 401 no session (the page sends you to sign in),

@@ -226,6 +226,46 @@ describe("GET /api/school/[udise]/ai-test-insights — refusal order", () => {
 });
 
 describe("GET /api/school/[udise]/ai-test-insights — list scope", () => {
+  // Review finding (PR #573, second review): an Admin below level 3 who holds a
+  // centre seat is seat-confined like anyone else; the Admin shortcut must not
+  // come first.
+  describe("a level-1 Admin seated at centre 301", () => {
+    beforeEach(() => {
+      permissionRow = row("admin", { level: 1, school_codes: [], program_ids: [1, 2] });
+      seats = [301];
+    });
+
+    it("is refused on the School route without a centre, like any seat-confined user", async () => {
+      const response = await get();
+
+      expect(response.status).toBe(403);
+      expect(studentReads()).toEqual([]);
+    });
+
+    it("lists only their seat centre's Students when it is named", async () => {
+      const response = await get("JNV001", "301");
+
+      expect(response.status).toBe(200);
+      expect(await listedIds(response)).toEqual([1001, 1002]);
+    });
+
+    it("is refused for the School's other centre", async () => {
+      const response = await get("JNV001", "302");
+
+      expect(response.status).toBe(403);
+      expect(studentReads()).toEqual([]);
+    });
+  });
+
+  it("still gives a level-3 Admin every active physical centre of the School", async () => {
+    permissionRow = row("admin", { level: 3, school_codes: null, program_ids: [1] });
+
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    expect(await listedIds(response)).toEqual([1001, 1002, 1003]);
+  });
+
   it("gives an Admin every active physical centre of the School", async () => {
     const response = await get();
 

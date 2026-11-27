@@ -126,6 +126,32 @@ async function statusOf(studentId: string, options?: { centre?: string | null; w
 }
 
 describe("resolveAiTestInsightsStudentAccess", () => {
+  // Review finding (PR #573, second review): an Admin below level 3 who holds a
+  // centre seat is seat-confined; only their seat centres' Students open.
+  describe("a level-1 Admin seated at centre 301", () => {
+    beforeEach(() => {
+      permissionRow = row("admin", { level: 1, school_codes: [], program_ids: [1, 2] });
+      seats = [301];
+    });
+
+    it("cannot open a Student listed only by the School's other centre, even naming it", async () => {
+      expect(await statusOf("1003")).toBe(404);
+      expect(await statusOf("1003", { centre: "302" })).toBe(404);
+    });
+
+    it("opens a Student of their seat centre, and a Student of both centres through their seat", async () => {
+      expect(await statusOf("1001")).toBe(200);
+      const both = await resolveAiTestInsightsStudentAccess("1005", { centre: "302" });
+      expect(both.authorized && both.student.centreId).toBe(301);
+    });
+  });
+
+  it("still lets a level-3 Admin open a Student of any centre", async () => {
+    permissionRow = row("admin", { level: 3, school_codes: null, program_ids: [1] });
+
+    expect(await statusOf("1003")).toBe(200);
+  });
+
   it("gives a Teacher the context of a listed Student of their School", async () => {
     const result = await resolveAiTestInsightsStudentAccess("1001");
 
@@ -364,6 +390,7 @@ describe("aiTestInsightsTabHasScope", () => {
     ["it is JNV NVS", permission({ program_ids: [1, 64] }), { centreId: 303, programId: 64 }, false],
     ["it has no Program", permission(), { centreId: 304, programId: null }, false],
     ["the user is an Admin, whatever their Programs", permission({ role: "admin", program_ids: [1] }), { centreId: 302, programId: 2 }, true],
+    ["the user is an Admin seated elsewhere", { ...seated([301]), role: "admin" } as UserPermission, { centreId: 302, programId: 2 }, false],
     ["the user is seated there", seated([302]), { centreId: 302, programId: 2 }, true],
     ["the user is seated elsewhere", seated([301]), { centreId: 302, programId: 2 }, false],
   ] as const)("on a Centre page: %s → %s", (_label, user, page, expected) => {
@@ -377,6 +404,7 @@ describe("aiTestInsightsTabHasScope", () => {
     ["the School has no active centre", permission(), [], false],
     ["an Admin, whatever their Programs", permission({ role: "admin", program_ids: [1] }), [2, 64], true],
     ["a seat-confined user (the route refuses them without a centre)", seated([301]), [1, 2], false],
+    ["a seat-confined Admin", { ...seated([301]), role: "admin" } as UserPermission, [1, 2], false],
   ] as const)("on a School page: %s → %s", (_label, user, centreProgramIds, expected) => {
     expect(aiTestInsightsTabHasScope(user, { centreProgramIds: [...centreProgramIds] })).toBe(expected);
   });

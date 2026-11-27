@@ -98,6 +98,8 @@ const VIEW = {
   finishedAt: null,
 };
 
+/** The caller's centre seats (`centre_positions`); none unless a test sets them. */
+let seats: number[] = [];
 let permissionRow: Record<string, unknown> | null;
 let requests: Map<string, Stored>;
 
@@ -154,6 +156,7 @@ beforeEach(() => {
   configureDelivery();
   guideAnswers(202);
   permissionRow = row("teacher");
+  seats = [];
   requests = new Map([
     [KEY, stored()],
     [OTHER_STUDENT_KEY, stored({ request_key: OTHER_STUDENT_KEY, student_id: 2001 })],
@@ -161,7 +164,9 @@ beforeEach(() => {
   mockGetServerSession.mockResolvedValue({ user: { email } });
   mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     if (sql.includes("FROM user_permission")) return permissionRow ? [permissionRow] : [];
-    if (sql.includes("FROM centre_positions")) return [];
+    if (sql.includes("FROM centre_positions")) {
+      return seats.map((centreId) => ({ centre_id: centreId, role: "teacher", centre_active: true }));
+    }
     if (sql.includes("centre_students")) return LISTED[String(params[0])] ?? [];
     if (/UPDATE ai_test_insight_requests/.test(sql) && sql.includes("'enqueue_rejected'")) {
       // Applied only where its guard holds.
@@ -203,6 +208,20 @@ async function get(studentId: string, requestKey: string, search = "") {
 }
 
 describe("GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]", () => {
+  // Review finding (PR #573, second review): an Admin below level 3 seated at
+  // the School's other centre (302) is seat-confined; Student 1001 is listed
+  // only by centre 301, so the status is refused as for a missing Student.
+  it("answers 404 to a level-1 Admin seated at another centre of the School", async () => {
+    // School access to JNV001 (so only the seat can refuse), seated at 302.
+    permissionRow = row("admin", { level: 1, school_codes: ["JNV001"], program_ids: [1, 2] });
+    seats = [302];
+
+    const response = await get("1001", KEY);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Student not found" });
+  });
+
   it("answers the request in the view shape", async () => {
     permissionRow = row("program_manager");
 
