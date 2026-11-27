@@ -14,6 +14,7 @@ import {
   type AiTestInsightsRequestState,
   type InsightRequestView,
 } from "@/lib/ai-test-insights-shared";
+import { notesCopySql } from "@/lib/ai-test-insights-session-notes";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { query, withTransaction } from "@/lib/db";
 
@@ -197,7 +198,9 @@ function isActiveStudentConflict(error: unknown): boolean {
  *    `not_configured`, and nothing is written.
  * 4. In one transaction, close the Student's stalled request (`failed`,
  *    `timed_out`; it still holds the one running slot), then insert the new
- *    row. This is the only place a stalled request is closed. A unique
+ *    row, whose `notes_snapshot` the same statement reads from the Session
+ *    Notes module's notes copy (#579) and nothing updates afterwards. This is
+ *    the only place a stalled request is closed. A unique
  *    violation on the one-running-request index is not an error:
  *    `already_running` with the row that won.
  * 5. Deliver to AI Mentorship Guide, then return `created` with the row as it
@@ -246,7 +249,7 @@ export async function createRequest(params: {
            INSERT INTO ai_test_insight_requests
              (request_key, student_id, school_id, program_id, academic_year, requested_by_user_id,
               selected_test_ids, notes_snapshot, state, requested_at, inserted_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, '[]'::jsonb, 'queued', ${UTC_NOW}, ${UTC_NOW}, ${UTC_NOW})
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, ${notesCopySql("$2", "$5")}, 'queued', ${UTC_NOW}, ${UTC_NOW}, ${UTC_NOW})
            RETURNING *
          )
          SELECT ${VIEW_COLUMNS}

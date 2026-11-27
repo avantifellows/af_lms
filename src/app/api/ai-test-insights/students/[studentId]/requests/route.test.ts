@@ -238,7 +238,11 @@ describe("POST /api/ai-test-insights/students/[studentId]/requests", () => {
     const { request } = await response.json();
     // request_key, student, School, Program (centre 301, the lowest), year, User, tests.
     expect(params).toEqual([request.requestKey, 1001, 9, 1, "2026-2027", 777, '["T9","T7","T4"]']);
-    expect(sql).toContain("'[]'::jsonb");
+    // The notes copy (#579) is read from the Student's sessions by the insert
+    // itself, so the copy and the row are one write. The fixture database
+    // proves its contents (e2e).
+    expect(sql).toMatch(/FROM ai_test_insight_sessions/);
+    expect(sql).not.toContain("'[]'::jsonb, 'queued'");
     expect(sql).toContain("now() AT TIME ZONE 'UTC'");
     expect(sql).not.toMatch(/now\(\)(?! AT TIME ZONE 'UTC')/);
   });

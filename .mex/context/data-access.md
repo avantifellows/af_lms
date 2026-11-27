@@ -1034,7 +1034,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   deliver. The insert writes a server `randomUUID()` key, the Student context's `school.id` and
   `programId` (the page's `centre` if it lists the Student, else the lowest centre),
   `CURRENT_ACADEMIC_YEAR`, `requested_by_user_id`, `selected_test_ids` as sent (newest first,
-  `$7::jsonb`), `notes_snapshot '[]'`, `state 'queued'` and `requested_at` / `inserted_at` /
+  `$7::jsonb`), `notes_snapshot` (the notes copy, #579 below; `'[]'` until then), `state 'queued'` and `requested_at` / `inserted_at` /
   `updated_at` = `now() AT TIME ZONE 'UTC'`. The actor's User is `user_permission.user_id`, else
   the lowest-id `user` with the same email (`actorUserId` in `src/lib/actor-user.ts`, which
   `getAcademicMentorshipActorUserId` also uses since the PR #573 review); neither → 409 `no_linked_user`. The Student page reads
@@ -1236,3 +1236,21 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   and a submitted session by any author, both removed by the existing cleanups). Known limit: an
   open edit closes, losing its typing, if the timeline is read again for another reason (a submit
   from the form, the card's request completing).
+- **Notes copy (#551 slice #579, 2026-11-28):** the Insight Request insert **reads
+  `ai_test_insight_sessions`**: its `notes_snapshot` value is a scalar subquery the Session Notes
+  module builds (`notesCopySql("$2", "$5")`, the insert's own Student and academic-year
+  placeholders, so the params are unchanged), in the same `INSERT … VALUES` statement, so the copy
+  and the row are one write. It is the only dependency of the Insight Request module on the Session
+  Notes module (the Session Notes module still imports nothing from it). Selection: `state =
+  'submitted'`, the same `student_id`, `academic_year` = `CURRENT_ACADEMIC_YEAR`, any author, `ORDER
+  BY session_date DESC, submitted_at DESC, id DESC LIMIT 5`; `jsonb_agg(jsonb_build_object(…))` in
+  that order with exactly `session_date` (`to_char(…, 'YYYY-MM-DD')`), `areas_of_concern`,
+  `immediate_actions` and `other_notes` (null unless it has a non-space character), `COALESCE(…,
+  '[]'::jsonb)`, so no notes is `[]`, never null. Nothing updates it afterwards; `existing`,
+  `already_running` and `not_configured` run no insert. The request view never returns it and no
+  log holds it. The fake generator checks it as AI Mentorship Guide does (avantifellows/ai-mentorship-guide#151):
+  not a list of objects whose four fields are each a string, null or absent → `failed` /
+  `invalid_request`, no Item (on a run and on a `completed` `/__fake/end`). E2E "Delivery › Notes
+  copy" seeds Esha with `addInsightSessions` (declared sessions and hand-written copies in
+  `AI_TEST_INSIGHTS_NOTES_COPY`, removed by `removeInsightSessionsMadeBySpecs`) and breaks a copy
+  with `setInsightRequestNotesCopy`.

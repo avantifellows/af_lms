@@ -11,11 +11,13 @@ import {
   AI_TEST_INSIGHTS_NOT_LISTED_KEYS,
   AI_TEST_INSIGHTS_NO_CENTRE_SCHOOL,
   AI_TEST_INSIGHTS_NODAL_CENTRE_LIST,
+  AI_TEST_INSIGHTS_NOTES_COPY,
   AI_TEST_INSIGHTS_PERSONAS,
   AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
   addCompletedInsightRequest,
+  addInsightSessions,
   addSubmittedInsightSession,
   backdateInsightRequest,
   backdateInsightRequestUpdate,
@@ -29,6 +31,7 @@ import {
   removeInsightRequestsMadeBySpecs,
   removeInsightSessionsMadeBySpecs,
   seedAiTestInsightsFixture,
+  setInsightRequestNotesCopy,
   type AiTestInsightsFixtureIds,
 } from "../helpers/ai-test-insights-fixtures";
 import {
@@ -1428,6 +1431,81 @@ test.describe("AI Test Insights tab", () => {
             }
             expect(await enqueueOrWakeCalls()).toBe(callsBefore);
           });
+        });
+      });
+
+      // The notes copy (#579): a new request carries the Student's latest
+      // submitted Session Notes of this academic year, written with the row
+      // and never changed. Esha has no seeded sessions; each test removes the
+      // ones it added, before the requests go.
+      test.describe("Notes copy", () => {
+        // Up to two 10-second polls.
+        const POLLED = { timeout: 25_000 };
+        const editRoute = (sessionId: number) => `/api/ai-test-insights/students/${ids.studentIds.esha}/sessions/${sessionId}`;
+
+        test.afterEach(async () => {
+          await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.esha]);
+        });
+
+        test("is empty when the Student's only submitted notes are last year's, beside a draft", async ({ page }) => {
+          await addInsightSessions(pool, ids, "esha", AI_TEST_INSIGHTS_NOTES_COPY.lastYearAndDraft.sessions);
+
+          const summary = await generateForEsha(page);
+          await expect(summary.getByText(WAITING)).toBeVisible();
+
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows).toHaveLength(1);
+          expect(rows[0].notesSnapshot).toEqual([]);
+        });
+
+        test("holds the five newest submitted this year by any Teacher, the generator completes it, and a later edit leaves it", async ({
+          page,
+        }) => {
+          test.slow();
+          const notesCopy = AI_TEST_INSIGHTS_NOTES_COPY.sixThisYear;
+          // The second declared session is the Teacher's earlier one of 20 Nov.
+          const [, teachersSessionId] = await addInsightSessions(pool, ids, "esha", notesCopy.sessions);
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+
+          const summary = await generateForEsha(page);
+          await expect(summary.getByRole("article", { name: "AI Summary text" })).toBeVisible(POLLED);
+
+          const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(request).toMatchObject({ state: "completed", outcomeCode: null });
+          expect(request.notesSnapshot).toEqual(notesCopy.copy);
+
+          // The author edits one of the copied sessions: the stored copy stays.
+          const edited = await page.request.patch(editRoute(teachersSessionId), {
+            data: {
+              sessionDate: "2026-11-21",
+              areasOfConcern: "Edited concern [e2e-579]",
+              immediateActions: "Edited action [e2e-579]",
+              otherNotes: "Edited other [e2e-579]",
+              expectedRevision: 1,
+            },
+          });
+          expect(edited.status()).toBe(200);
+          expect(await edited.json()).toEqual({ revision: 2 });
+          expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([request]);
+        });
+
+        test("ends a request whose copy is malformed failed with invalid_request in the fake generator, with no Item", async ({
+          page,
+        }) => {
+          const summary = await generateForEsha(page);
+          await expect(summary.getByText(WAITING)).toBeVisible();
+          const [queued] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(queued.notesSnapshot).toEqual([]);
+
+          // `session_date` as a number, which AI Mentorship Guide refuses.
+          await setInsightRequestNotesCopy(pool, queued.requestKey, [
+            { session_date: 20261120, areas_of_concern: "Concern [e2e-579]", immediate_actions: "Action [e2e-579]", other_notes: null },
+          ]);
+          await endFakeAiMentorshipGuideRequest(queued.requestKey, { state: "completed" });
+
+          const [ended] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(ended).toMatchObject({ state: "failed", outcomeCode: "invalid_request" });
+          expect(await readInsightRequestItem(pool, queued.requestKey)).toBeNull();
         });
       });
     });

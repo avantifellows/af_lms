@@ -10,7 +10,9 @@
 // and a revision check on every update.
 //
 // Modes: `draft` (#574), `submit` (#575) and `edit` (#578, the author only).
-// It also lists a Student's submitted sessions for the History timeline (#576).
+// It also lists a Student's submitted sessions for the History timeline (#576),
+// and builds the notes copy a new Insight Request carries (#579, SQL the
+// Insight Request module's insert embeds).
 // A submit checks its open request key against `ai_test_insight_requests`
 // in its own SQL.
 import type { AiTestInsightsStudentContext } from "@/lib/ai-test-insights-access";
@@ -166,6 +168,48 @@ export async function listSubmittedSessions(studentId: number): Promise<Submitte
     submittedAt: row.submitted_at,
     lastEditedAt: row.last_edited_at,
   }));
+}
+
+/** The most Insight Sessions a notes copy holds (#579). */
+const NOTES_COPY_LIMIT = 5;
+
+/**
+ * SQL for the notes copy of a Student (#579): a `jsonb` array the Insight
+ * Request module's insert writes as `notes_snapshot` in the same statement,
+ * so the copy and the request row are one write. The placeholders are the
+ * insert's own: `studentIdParam` the Student's `student.id`, and
+ * `academicYearParam` the current academic year.
+ *
+ * The Student's `submitted` Insight Sessions of that academic year, by any
+ * Teacher, newest first (`session_date`, then `submitted_at`, then id), at
+ * most 5. Each element has exactly `session_date` (`YYYY-MM-DD` text),
+ * `areas_of_concern`, `immediate_actions` and `other_notes` (null when
+ * blank), so each value is a string or null by construction, as AI Mentorship
+ * Guide checks. None gives `[]`, never null. Drafts and earlier years never
+ * appear. The copy is never updated afterwards (ADR 0015).
+ */
+export function notesCopySql(studentIdParam: string, academicYearParam: string): string {
+  return `(SELECT COALESCE(
+             jsonb_agg(
+               jsonb_build_object(
+                 'session_date', to_char(c.session_date, 'YYYY-MM-DD'),
+                 'areas_of_concern', c.areas_of_concern,
+                 'immediate_actions', c.immediate_actions,
+                 'other_notes', CASE WHEN c.other_notes ~ '[^[:space:]]' THEN c.other_notes END
+               )
+               ORDER BY c.session_date DESC, c.submitted_at DESC, c.id DESC
+             ),
+             '[]'::jsonb
+           )
+           FROM (
+             SELECT s.id, s.session_date, s.submitted_at, s.areas_of_concern, s.immediate_actions, s.other_notes
+             FROM ai_test_insight_sessions s
+             WHERE s.student_id = ${studentIdParam}
+               AND s.state = 'submitted'
+               AND s.academic_year = ${academicYearParam}
+             ORDER BY s.session_date DESC, s.submitted_at DESC, s.id DESC
+             LIMIT ${NOTES_COPY_LIMIT}
+           ) c)`;
 }
 
 /** A save the module refused: the route maps it to 409 `stale` or 422. */

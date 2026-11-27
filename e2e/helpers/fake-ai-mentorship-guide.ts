@@ -11,6 +11,9 @@ import testInsight from "./fake-ai-test-insight.json";
 // request it holds, and read back the calls it received. A completed
 // request's text and PDF are served by the fake's object store, which the
 // app's artifact reader reads through its endpoint override.
+// Like AI Mentorship Guide, it checks a request's notes copy (#579) before it
+// runs it: a malformed `notes_snapshot` ends the request `failed` with
+// `invalid_request`.
 
 export const FAKE_AI_MENTORSHIP_GUIDE_SCRIPT = path.resolve(__dirname, "fake-ai-mentorship-guide.cjs");
 export const FAKE_AI_MENTORSHIP_GUIDE_PORT = config.port;
@@ -98,7 +101,11 @@ export async function fakeAiMentorshipGuideCalls(): Promise<FakeAiMentorshipGuid
   return (await control("GET", "calls")).json();
 }
 
-/** Ends a request the fake holds as running, as the generator does: completed, or `no_data` or `failed` with an outcome code. */
+/**
+ * Ends a request the fake holds as running, as the generator does: completed
+ * (or `failed` with `invalid_request` when its notes copy fails the check),
+ * or `no_data` or `failed` with an outcome code.
+ */
 export async function endFakeAiMentorshipGuideRequest(requestKey: string, end: FakeAiMentorshipGuideEnd): Promise<void> {
   await control("POST", "end", { requestKey, ...end });
 }

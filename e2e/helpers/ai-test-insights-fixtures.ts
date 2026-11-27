@@ -93,6 +93,8 @@ type SessionFixture = {
   editedAt?: string;
   /** The key of the Student's seeded request the session records. */
   records?: string;
+  /** Other notes; the seed's marker by default. A spec's sessions give their own. */
+  otherNotes?: string | null;
 };
 type RequestFixture = {
   state: "completed" | "failed" | "no_data" | "queued" | "running";
@@ -195,6 +197,50 @@ export const AI_TEST_INSIGHTS_ASHA_HISTORY = [
   ],
   ["AI Summary of 10 Feb 2026", "Made from: an earlier test", "Asked for by E2E ATI Teacher on 10 Feb 2026, 09:30"],
 ];
+
+/**
+ * Insight Sessions a notes copy spec (#579) gives a Student with none, and
+ * the `notes_snapshot` a new request of that Student must then hold, written
+ * by hand: this academic year's `submitted` sessions by any Teacher, newest
+ * first (`session_date`, then `submitted_at`), at most 5, each with exactly
+ * four keys and a blank Other notes as null. Every Other notes differs from
+ * the seed's marker, so {@link removeInsightSessionsMadeBySpecs} removes them.
+ */
+const COPY_MARK = "[e2e-579]";
+export const AI_TEST_INSIGHTS_NOTES_COPY = {
+  /** Only last year's submitted notes, plus a draft: the copy is empty. */
+  lastYearAndDraft: {
+    sessions: [
+      { state: "submitted", date: "2026-03-02", year: LAST_YEAR, concern: `Last year's concern ${COPY_MARK}`, otherNotes: null },
+      { state: "draft", date: "2026-11-26", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Draft concern ${COPY_MARK}`, otherNotes: null },
+    ],
+    copy: [],
+  },
+  /**
+   * Six submitted this year by two Teachers (two on 20 Nov, the later
+   * submitted first; the oldest, 5 Jun, left out), one of last year and a
+   * newer draft, neither in the copy.
+   */
+  sixThisYear: {
+    sessions: [
+      { state: "submitted", date: "2026-06-05", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Jun concern ${COPY_MARK}`, action: `Jun action ${COPY_MARK}`, otherNotes: `Jun other ${COPY_MARK}`, submittedAt: "2026-06-05 06:00:00" },
+      { state: "submitted", date: "2026-11-20", year: CURRENT_ACADEMIC_YEAR, concern: `Nov 20 early concern ${COPY_MARK}`, action: `Nov 20 early action ${COPY_MARK}`, otherNotes: `Nov 20 early other ${COPY_MARK}`, submittedAt: "2026-11-20 06:00:00" },
+      { state: "submitted", date: "2026-09-01", year: CURRENT_ACADEMIC_YEAR, concern: `Sep concern ${COPY_MARK}`, action: `Sep action ${COPY_MARK}`, otherNotes: "   ", submittedAt: "2026-09-01 06:00:00" },
+      { state: "submitted", date: "2026-11-20", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Nov 20 late concern ${COPY_MARK}`, action: `Nov 20 late action ${COPY_MARK}`, otherNotes: null, submittedAt: "2026-11-20 09:00:00" },
+      { state: "submitted", date: "2026-10-15", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Oct concern ${COPY_MARK}`, action: `Oct action ${COPY_MARK}`, otherNotes: `Oct other ${COPY_MARK}`, submittedAt: "2026-10-15 06:00:00" },
+      { state: "submitted", date: "2026-08-10", year: CURRENT_ACADEMIC_YEAR, concern: `Aug concern ${COPY_MARK}`, action: `Aug action ${COPY_MARK}`, otherNotes: `Aug other ${COPY_MARK}`, submittedAt: "2026-08-10 06:00:00" },
+      { state: "submitted", date: "2026-03-20", year: LAST_YEAR, concern: `Last year's concern ${COPY_MARK}`, otherNotes: `Last year's other ${COPY_MARK}` },
+      { state: "draft", date: "2026-11-27", year: CURRENT_ACADEMIC_YEAR, concern: `Draft concern ${COPY_MARK}`, otherNotes: null },
+    ],
+    copy: [
+      { session_date: "2026-11-20", areas_of_concern: `Nov 20 late concern ${COPY_MARK}`, immediate_actions: `Nov 20 late action ${COPY_MARK}`, other_notes: null },
+      { session_date: "2026-11-20", areas_of_concern: `Nov 20 early concern ${COPY_MARK}`, immediate_actions: `Nov 20 early action ${COPY_MARK}`, other_notes: `Nov 20 early other ${COPY_MARK}` },
+      { session_date: "2026-10-15", areas_of_concern: `Oct concern ${COPY_MARK}`, immediate_actions: `Oct action ${COPY_MARK}`, other_notes: `Oct other ${COPY_MARK}` },
+      { session_date: "2026-09-01", areas_of_concern: `Sep concern ${COPY_MARK}`, immediate_actions: `Sep action ${COPY_MARK}`, other_notes: null },
+      { session_date: "2026-08-10", areas_of_concern: `Aug concern ${COPY_MARK}`, immediate_actions: `Aug action ${COPY_MARK}`, other_notes: `Aug other ${COPY_MARK}` },
+    ],
+  },
+} satisfies Record<string, { sessions: SessionFixture[]; copy: unknown[] }>;
 /** The Other notes of every Insight Session the helper seeds, so a cleanup can tell them from a spec's. */
 const SEEDED_SESSION_NOTE = "e2e-ati-fixture";
 const REQUEST_KEY_PREFIX = "e2e-ati-";
@@ -678,48 +724,97 @@ async function insertInsightRequests(pool: Pool, { studentIds, schoolId, authorU
 }
 
 async function insertInsightSessions(pool: Pool, { studentIds, schoolId, authorUserIds }: InsightRowsContext) {
-  const programId = PROGRAM_IDS.COE;
   for (const [key, sessions] of Object.entries(INSIGHT_SESSIONS)) {
     for (const session of sessions) {
-      const submitted = session.state === "submitted";
-      const authorUserId = authorUserIds[session.author ?? "teacher"];
-      const sessionId = await oneId(
-        pool,
-        `INSERT INTO ai_test_insight_sessions
-           (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
-            areas_of_concern, immediate_actions, other_notes, submitted_at, insight_request_id, revision)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::date, $10, $11, $9,
-                 CASE WHEN $8::boolean THEN COALESCE($12::timestamp, ${NOW}) END,
-                 (SELECT id FROM ai_test_insight_requests WHERE request_key = $13 AND student_id = $1),
-                 $14)
-         RETURNING id`,
-        [
-          studentIds[key],
-          schoolId,
-          programId,
-          session.year,
-          authorUserId,
-          session.state,
-          session.date,
-          submitted,
-          SEEDED_SESSION_NOTE,
-          session.concern ?? "E2E concern",
-          session.action ?? "E2E action",
-          session.submittedAt ?? null,
-          session.records ?? null,
-          session.editedAt ? 2 : 1,
-        ],
-        "inserted Insight Session",
-      );
-      if (session.editedAt) {
-        await pool.query(
-          `INSERT INTO ai_test_insight_session_note_audits (session_id, actor_user_id, action, revision, occurred_at, inserted_at)
-           VALUES ($1, $2, 'submitted_edited', 2, $3::timestamp, ${NOW})`,
-          [sessionId, authorUserId, session.editedAt],
-        );
-      }
+      await insertInsightSession(pool, { studentId: studentIds[key], schoolId, authorUserIds }, session);
     }
   }
+}
+
+/**
+ * Adds a spec's declared Insight Sessions for a Student (#579), by the
+ * declared personas, on the main School's CoE Program. Their Other notes are
+ * not the seed's marker, so {@link removeInsightSessionsMadeBySpecs} removes
+ * them. Returns their ids, in the declared order.
+ */
+export async function addInsightSessions(
+  pool: Pool,
+  ids: AiTestInsightsFixtureIds,
+  studentKey: string,
+  sessions: SessionFixture[],
+): Promise<number[]> {
+  if (sessions.some((session) => session.otherNotes === undefined || session.otherNotes === SEEDED_SESSION_NOTE)) {
+    throw new Error("AI Test Insights fixture: a spec's session must give Other notes that are not the seed's");
+  }
+  const authorUserIds = {
+    teacher: ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
+    seatedTeacher: ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.seatedTeacher.email],
+  };
+  const sessionIds: number[] = [];
+  for (const session of sessions) {
+    sessionIds.push(
+      await insertInsightSession(pool, { studentId: ids.studentIds[studentKey], schoolId: ids.schoolId, authorUserIds }, session),
+    );
+  }
+  return sessionIds;
+}
+
+/**
+ * Overwrites a request's `notes_snapshot` (#579), as only a broken writer
+ * could, so a spec can show the fake generator checks the copy.
+ */
+export async function setInsightRequestNotesCopy(pool: Pool, requestKey: string, copy: unknown): Promise<void> {
+  const result = await pool.query(
+    `UPDATE ai_test_insight_requests SET notes_snapshot = $2::jsonb, updated_at = ${NOW} WHERE request_key = $1`,
+    [requestKey, JSON.stringify(copy)],
+  );
+  if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no request to give a notes copy");
+}
+
+/** One declared Insight Session, on the CoE Program, with its edit audit row when it has one. Returns its `id`. */
+async function insertInsightSession(
+  pool: Pool,
+  { studentId, schoolId, authorUserIds }: { studentId: number; schoolId: number; authorUserIds: Record<Author, number> },
+  session: SessionFixture,
+): Promise<number> {
+  const submitted = session.state === "submitted";
+  const authorUserId = authorUserIds[session.author ?? "teacher"];
+  const sessionId = await oneId(
+    pool,
+    `INSERT INTO ai_test_insight_sessions
+       (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
+        areas_of_concern, immediate_actions, other_notes, submitted_at, insight_request_id, revision)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::date, $10, $11, $9,
+             CASE WHEN $8::boolean THEN COALESCE($12::timestamp, ${NOW}) END,
+             (SELECT id FROM ai_test_insight_requests WHERE request_key = $13 AND student_id = $1),
+             $14)
+     RETURNING id`,
+    [
+      studentId,
+      schoolId,
+      PROGRAM_IDS.COE,
+      session.year,
+      authorUserId,
+      session.state,
+      session.date,
+      submitted,
+      session.otherNotes === undefined ? SEEDED_SESSION_NOTE : session.otherNotes,
+      session.concern ?? "E2E concern",
+      session.action ?? "E2E action",
+      session.submittedAt ?? null,
+      session.records ?? null,
+      session.editedAt ? 2 : 1,
+    ],
+    "inserted Insight Session",
+  );
+  if (session.editedAt) {
+    await pool.query(
+      `INSERT INTO ai_test_insight_session_note_audits (session_id, actor_user_id, action, revision, occurred_at, inserted_at)
+       VALUES ($1, $2, 'submitted_edited', 2, $3::timestamp, ${NOW})`,
+      [sessionId, authorUserId, session.editedAt],
+    );
+  }
+  return sessionId;
 }
 
 /**
