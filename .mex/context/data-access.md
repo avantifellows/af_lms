@@ -1139,3 +1139,28 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   Summary could not be found.", anything else or a network error → "The PDF could not be downloaded.
   Please try again.". A modified click (new tab or window) is left to the browser. E2E moves the
   `report_pdf` key out of the Item folder (502) and back, then Retry downloads.
+- **Session Notes drafts (#551 slice #574, 2026-11-27):** `src/lib/ai-test-insights-session-notes.ts`
+  (server-only) is the only reader and writer of `ai_test_insight_sessions`; it does not import the
+  Insight Request module. `readOwnDraft(studentId, authorUserId)` is the one draft read (`state =
+  'draft'`, author = the caller), so a draft reaches nobody but its author. `saveSessionNotes({ mode:
+  "draft", … })`, one `withTransaction` per save: `expectedRevision` 0 inserts at revision 1 with the
+  Student context's School and Program (the page's `centre`), `CURRENT_ACADEMIC_YEAR` and the acting
+  User — unless all three text fields are blank (nothing written, revision 0); a hit on
+  `ati_sessions_author_student_draft_unique` is `stale` with the existing draft's revision, not a 500.
+  1+ updates `WHERE student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft'`
+  with `revision + 1` and `updated_at`; zero rows is `stale` with the caller's current draft revision
+  (0 when none). Text is stored as typed, a blank field as null; no audit row. Routes:
+  `GET …/students/[studentId]/sessions` (view; 200 `{ timeline: [], draft, notesAccess }`, `no-store`;
+  `notesAccess` `write` / `no_linked_user` / `read`, draft read only for an `edit` caller with a User;
+  `timeline` stays `[]` until #576) and `PUT …/sessions/draft` (edit; 200 `{ revision }`, 409
+  `{ code: "stale", currentRevision }`, 422 `{ error, field }`). Both open through
+  `src/lib/ai-test-insights-student-routes.ts` (`withAiTestInsightsStudent` /
+  `withAiTestInsightsStudentWrite`: Student access with `centre`, then body 422, then the shared
+  `actorUserId` lookup 409 `no_linked_user`; a 500 logs only `student.id` and the error name), which
+  Generate's create route now uses too. Labels, the 2,000-character limit, `validateSessionNotes`
+  (draft rule; #575 adds the final rule), `parseSessionNotesRequest`, URL builders and types live in
+  the client-safe `src/lib/ai-test-insights-session-notes-rules.ts`. E2E: seeded sessions carry
+  `other_notes = 'e2e-ati-fixture'`; `readInsightSessions` / `readSessionNoteAudits` read rows back and
+  `removeInsightSessionsMadeBySpecs` deletes every other session of the given Students with its audit
+  rows (one transaction, `SET LOCAL session_replication_role = replica`, test DB only). The mirror was
+  re-diffed against db-service `44b4cac6` on 2026-11-27: identical.

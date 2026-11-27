@@ -129,9 +129,21 @@ describe("AI Test Insights Student page", () => {
     await renderPage("1005");
 
     const regions = screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"));
-    expect(regions).toEqual(["Student", "Performance", "AI Summary"]);
-    const testReads = askedUrls().filter((url) => url.pathname.startsWith("/api/ai-test-insights/"));
+    expect(regions).toEqual(["Student", "Performance", "AI Summary", "Session Notes"]);
+    const testReads = askedUrls().filter((url) => url.pathname.endsWith("/tests"));
     expect(testReads.map((url) => url.pathname)).toEqual(["/api/ai-test-insights/students/1005/tests"]);
+  });
+
+  it("reads a Teacher's Session Notes with the centre only when the page named it", async () => {
+    await renderPage("1005");
+    mockResolveAccess.mockResolvedValue({ authorized: true, student: CONTEXT, centreNamedByPage: true });
+    await renderPage("1005", { centre: "302" });
+
+    const notesReads = askedUrls().filter((url) => url.pathname.endsWith("/sessions"));
+    expect(notesReads.map((url) => `${url.pathname}${url.search}`)).toEqual([
+      "/api/ai-test-insights/students/1005/sessions",
+      "/api/ai-test-insights/students/1005/sessions?centre=302",
+    ]);
   });
 
   it("shows a viewer the test picker read-only", async () => {
@@ -160,6 +172,7 @@ describe("AI Test Insights Student page", () => {
     const checkbox = await within(summary).findByRole("checkbox", { name: /Mock Test 1/ });
     expect(checkbox).toBeChecked();
     expect(checkbox).toBeDisabled();
+    expect(screen.queryByRole("region", { name: "Session Notes" })).not.toBeInTheDocument();
   });
 
   it("keeps the rest of the page when the tests cannot be loaded", async () => {

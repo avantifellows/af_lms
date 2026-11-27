@@ -100,6 +100,8 @@ const INSIGHT_REQUESTS: Record<string, RequestFixture[]> = {
   chirag: [{ state: "running", year: CURRENT_ACADEMIC_YEAR }],
   divya: [{ state: "failed", year: CURRENT_ACADEMIC_YEAR }],
 };
+/** The Other notes of every Insight Session the helper seeds, so a cleanup can tell them from a spec's. */
+const SEEDED_SESSION_NOTE = "e2e-ati-fixture";
 const REQUEST_KEY_PREFIX = "e2e-ati-";
 const INFERENCE_SESSION_MARKER = "e2e-ati-fixture";
 /** The `config_snapshot_json` of every Session the fake generator creates (fake-ai-mentorship-guide.cjs). */
@@ -166,20 +168,29 @@ interface PersonaFixture extends Persona {
   schoolCodes: string[];
   programIds: number[];
   seat?: "coe";
+  readOnly?: boolean;
 }
 
-const persona = (key: string, name: string, role: string, schoolCodes: string[], programIds: number[], seat?: "coe"): PersonaFixture => ({
+const persona = (
+  key: string,
+  name: string,
+  role: string,
+  schoolCodes: string[],
+  programIds: number[],
+  options: { seat?: "coe"; readOnly?: boolean } = {},
+): PersonaFixture => ({
   name,
   email: `e2e-ati-${key}@test.local`,
   role,
   schoolCodes,
   programIds,
-  seat,
+  ...options,
 });
 
 export const AI_TEST_INSIGHTS_PERSONAS = {
   teacher: persona("teacher", "E2E ATI Teacher", "teacher", [SCHOOL.code, NO_CENTRE_SCHOOL.code], [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL]),
-  seatedTeacher: persona("seated-teacher", "E2E ATI Seated Teacher", "teacher", [], [], "coe"),
+  seatedTeacher: persona("seated-teacher", "E2E ATI Seated Teacher", "teacher", [], [], { seat: "coe" }),
+  readOnlyTeacher: persona("read-only-teacher", "E2E ATI Read-only Teacher", "teacher", [SCHOOL.code], [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL], { readOnly: true }),
   otherSchoolTeacher: persona("other-teacher", "E2E ATI Other Teacher", "teacher", [OTHER_SCHOOL.code], [PROGRAM_IDS.COE]),
   nvsOnlyTeacher: persona("nvs-teacher", "E2E ATI NVS Teacher", "teacher", [SCHOOL.code, NO_CENTRE_SCHOOL.code], [PROGRAM_IDS.NVS]),
   pmuManager: persona("pmu-manager", "E2E ATI PMU Manager", "pmu_manager", [SCHOOL.code], [PROGRAM_IDS.NVS]),
@@ -322,8 +333,8 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
     personaUserIds[p.email] = userId;
     await pool.query(
       `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only, user_id, revoked_at)
-       VALUES ($1, 1, $2, $3, $4, NULL, false, $5, NULL)`,
-      [p.email, p.role, p.programIds, p.schoolCodes, userId],
+       VALUES ($1, 1, $2, $3, $4, NULL, $6, $5, NULL)`,
+      [p.email, p.role, p.programIds, p.schoolCodes, userId, p.readOnly === true],
     );
     if (p.seat === "coe") {
       await pool.query(
@@ -513,10 +524,10 @@ async function insertInsightRows(
       await pool.query(
         `INSERT INTO ai_test_insight_sessions
            (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
-            areas_of_concern, immediate_actions, submitted_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::date, 'E2E concern', 'E2E action',
+            areas_of_concern, immediate_actions, other_notes, submitted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::date, 'E2E concern', 'E2E action', $9,
                  CASE WHEN $8::boolean THEN ${NOW} END)`,
-        [studentIds[key], schoolId, programId, session.year, teacherUserId, session.state, session.date, submitted],
+        [studentIds[key], schoolId, programId, session.year, teacherUserId, session.state, session.date, submitted, SEEDED_SESSION_NOTE],
       );
     }
   }
@@ -571,6 +582,127 @@ async function insertInsightRows(
   }
 }
 
+/** An Insight Session row as stored, with its times as seconds since the epoch, read as UTC. */
+export interface StoredInsightSession {
+  id: number;
+  studentId: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  authorUserId: number;
+  state: string;
+  sessionDate: string | null;
+  areasOfConcern: string | null;
+  immediateActions: string | null;
+  otherNotes: string | null;
+  insightRequestId: number | null;
+  revision: number;
+  submittedAt: number | null;
+  insertedAt: number;
+  updatedAt: number;
+}
+
+/** The Student's Insight Sessions, drafts too, oldest first. */
+export async function readInsightSessions(pool: Pool, studentId: number): Promise<StoredInsightSession[]> {
+  const result = await pool.query(
+    `SELECT id, student_id, school_id, program_id, academic_year, author_user_id, state,
+            to_char(session_date, 'YYYY-MM-DD') AS session_date,
+            areas_of_concern, immediate_actions, other_notes, insight_request_id, revision,
+            EXTRACT(EPOCH FROM submitted_at)::float8 AS submitted_at,
+            EXTRACT(EPOCH FROM inserted_at)::float8 AS inserted_at,
+            EXTRACT(EPOCH FROM updated_at)::float8 AS updated_at
+     FROM ai_test_insight_sessions
+     WHERE student_id = $1
+     ORDER BY id`,
+    [studentId],
+  );
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    studentId: Number(row.student_id),
+    schoolId: Number(row.school_id),
+    programId: Number(row.program_id),
+    academicYear: row.academic_year,
+    authorUserId: Number(row.author_user_id),
+    state: row.state,
+    sessionDate: row.session_date,
+    areasOfConcern: row.areas_of_concern,
+    immediateActions: row.immediate_actions,
+    otherNotes: row.other_notes,
+    insightRequestId: row.insight_request_id === null ? null : Number(row.insight_request_id),
+    revision: Number(row.revision),
+    submittedAt: row.submitted_at === null ? null : Number(row.submitted_at),
+    insertedAt: Number(row.inserted_at),
+    updatedAt: Number(row.updated_at),
+  }));
+}
+
+/** A Session Note audit row as stored, with its time as seconds since the epoch, read as UTC. */
+export interface StoredSessionNoteAudit {
+  sessionId: number;
+  actorUserId: number;
+  action: string;
+  revision: number;
+  occurredAt: number;
+}
+
+/** The audit rows of the Student's Insight Sessions, oldest first. */
+export async function readSessionNoteAudits(pool: Pool, studentId: number): Promise<StoredSessionNoteAudit[]> {
+  const result = await pool.query(
+    `SELECT a.session_id, a.actor_user_id, a.action, a.revision,
+            EXTRACT(EPOCH FROM a.occurred_at)::float8 AS occurred_at
+     FROM ai_test_insight_session_note_audits a
+     JOIN ai_test_insight_sessions s ON s.id = a.session_id
+     WHERE s.student_id = $1
+     ORDER BY a.id`,
+    [studentId],
+  );
+  return result.rows.map((row) => ({
+    sessionId: Number(row.session_id),
+    actorUserId: Number(row.actor_user_id),
+    action: row.action,
+    revision: Number(row.revision),
+    occurredAt: Number(row.occurred_at),
+  }));
+}
+
+/**
+ * Deletes the Insight Sessions matching `where` (placeholders from `$1`) and
+ * their audit rows, in one transaction. Audit rows are append-only (a
+ * trigger) and a session with one cannot be deleted, so the trigger is
+ * skipped for this test-database cleanup only.
+ */
+async function deleteInsightSessions(pool: Pool, where: string, params: unknown[]): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      `DELETE FROM ai_test_insight_session_note_audits
+       WHERE session_id IN (SELECT id FROM ai_test_insight_sessions WHERE ${where})`,
+      params,
+    );
+    await client.query(`DELETE FROM ai_test_insight_sessions WHERE ${where}`, params);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Removes the Insight Sessions a spec made for these Students (every one the
+ * helper did not seed), drafts and submitted ones, with their audit rows, so
+ * the next spec finds the Students as seeded.
+ */
+export async function removeInsightSessionsMadeBySpecs(pool: Pool, studentIds: number[]): Promise<void> {
+  await deleteInsightSessions(pool, `student_id = ANY($1::bigint[]) AND other_notes IS DISTINCT FROM $2`, [
+    studentIds,
+    SEEDED_SESSION_NOTE,
+  ]);
+}
+
 /**
  * Removes the Insight Requests a spec made for a Student (those whose key the
  * fixture did not write), so the next spec finds the Student as seeded.
@@ -605,9 +737,9 @@ async function removeFakeGeneratorItems(pool: Pool, studentIds: number[]): Promi
 export async function removeAiTestInsightsFixture(pool: Pool): Promise<void> {
   const users = await pool.query<{ id: number }>(`SELECT id FROM "user" WHERE email = ANY($1)`, [ALL_EMAILS]);
   const userIds = users.rows.map((row) => Number(row.id));
-  await pool.query(
-    `DELETE FROM ai_test_insight_sessions
-     WHERE student_id IN (SELECT id FROM student WHERE user_id = ANY($1)) OR author_user_id = ANY($1)`,
+  await deleteInsightSessions(
+    pool,
+    `student_id IN (SELECT id FROM student WHERE user_id = ANY($1)) OR author_user_id = ANY($1)`,
     [userIds],
   );
   await pool.query(

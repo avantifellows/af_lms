@@ -17,6 +17,7 @@ import {
   validateHolisticChallengeCategories, type HolisticChallengeCategoryCode, type HolisticChallengeCategoryGroup,
 } from "@/lib/holistic-challenge-categories";
 import { HOLISTIC_ANSWER_MAX_LENGTH } from "@/lib/holistic-answer-limit";
+import { useDraftAutosave, useDraftAutosaveRefs } from "@/hooks/use-draft-autosave";
 import { appendDictation } from "@/lib/holistic-dictation-text";
 import { HOLISTIC_FOLLOW_UP_QUESTIONS, type HolisticFollowUpQuestionKey } from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
@@ -459,16 +460,13 @@ function useNotesEditorRefs(
   props: NotesEditorProps,
   state: Pick<NotesEditorState, "initialValue" | "initialRevision">
 ) {
-  const savedRef = useRef(JSON.stringify(state.initialValue));
-  const queuedRef = useRef<NotesValue | null>(null);
-  const inFlightRef = useRef<Promise<boolean> | null>(null);
-  const autosaveTimerRef = useRef<number | null>(null);
+  const autosaveRefs = useDraftAutosaveRefs<NotesValue>(state.initialValue);
   const textareasRef = useRef<Record<number, HTMLTextAreaElement | null>>({});
   const categoryFieldsetsRef = useRef<Partial<Record<HolisticChallengeCategoryGroup, HTMLFieldSetElement | null>>>({});
   const hydratedServerRevisionRef = useRef(initialNotesRevision(props));
   const mutationRevisionRef = useRef(state.initialRevision);
   return {
-    savedRef, queuedRef, inFlightRef, autosaveTimerRef, textareasRef, categoryFieldsetsRef,
+    ...autosaveRefs, textareasRef, categoryFieldsetsRef,
     hydratedServerRevisionRef, mutationRevisionRef,
   };
 }
@@ -560,65 +558,29 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
   autosaveEnabled: boolean;
 }) {
   const { value: notesValue, status, setStatus, setError, setConflict, setSavedValue, failSave, frozenRef } = state;
-  const { queuedRef, inFlightRef, autosaveTimerRef, savedRef } = refs;
-  const pump = useCallback(() => {
-    if (inFlightRef.current) return inFlightRef.current;
-    const work = (async () => {
-      while (queuedRef.current) {
-        // Frozen while a save was in flight: what was queued behind it is never sent.
-        if (frozenRef.current) {
-          queuedRef.current = null;
-          return false;
-        }
-        const value = queuedRef.current;
-        queuedRef.current = null;
-        setStatus("saving");
-        setError("");
-        setConflict(false);
-        try {
-          await mutate("draft", value);
-          markCurrentNotesForRefresh();
-          savedRef.current = JSON.stringify(value);
-          setSavedValue(value);
-        } catch (caught) {
-          failSave(caught, "Could not save Notes");
-          return false;
-        }
-      }
-      setStatus("saved");
-      return true;
-    })().finally(() => { inFlightRef.current = null; });
-    inFlightRef.current = work;
-    return work;
-  }, [failSave, frozenRef, inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedValue, setStatus]);
-
-  const cancelAutosaveTimer = useCallback(() => {
-    if (autosaveTimerRef.current === null) return;
-    window.clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = null;
-  }, [autosaveTimerRef]);
-
-  const flushDraft = useCallback(async () => {
-    cancelAutosaveTimer();
-    if (!canAutosave) return true;
-    if (JSON.stringify(notesValue) !== savedRef.current || status === "failed") queuedRef.current = notesValue;
-    while (queuedRef.current || inFlightRef.current) {
-      if (!(await pump())) return false;
-    }
-    return true;
-  }, [notesValue, canAutosave, cancelAutosaveTimer, inFlightRef, pump, queuedRef, savedRef, status]);
-
-  useEffect(() => {
-    if (!autosaveEnabled || JSON.stringify(notesValue) === savedRef.current) return;
-    autosaveTimerRef.current = window.setTimeout(() => {
-      autosaveTimerRef.current = null;
-      queuedRef.current = notesValue;
-      void pump();
-    }, 750);
-    return cancelAutosaveTimer;
-  }, [notesValue, autosaveEnabled, autosaveTimerRef, cancelAutosaveTimer, pump, queuedRef, savedRef]);
-
-  return flushDraft;
+  const { savedRef, queuedRef, inFlightRef, timerRef } = refs;
+  return useDraftAutosave({
+    value: notesValue,
+    refs: { savedRef, queuedRef, inFlightRef, timerRef },
+    enabled: autosaveEnabled,
+    canFlush: canAutosave,
+    failed: status === "failed",
+    delayMs: 750,
+    save: (value) => mutate("draft", value),
+    // Frozen while a save was in flight: what was queued behind it is never sent.
+    isStopped: () => frozenRef.current,
+    onSaving: () => {
+      setStatus("saving");
+      setError("");
+      setConflict(false);
+    },
+    onSaved: (value) => {
+      markCurrentNotesForRefresh();
+      setSavedValue(value);
+    },
+    onFailed: (caught) => failSave(caught, "Could not save Notes"),
+    onDrained: () => setStatus("saved"),
+  });
 }
 
 // The Post-Session Notes recorder. The words land at the end of the box's

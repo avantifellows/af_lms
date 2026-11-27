@@ -27,11 +27,23 @@ const TESTS = [
 
 type Reply = { status: number; body: unknown };
 
-/** Stubs fetch, answering each call with the next reply (the last repeats). */
+/** What the Session Notes read answers a Teacher with no draft. */
+const NO_DRAFT: Reply = { status: 200, body: { timeline: [], draft: null, notesAccess: "write" } };
+
+/**
+ * Stubs fetch, answering each read of the test picker route with the next
+ * reply (the last repeats), and the Session Notes read with `NO_DRAFT`.
+ * Returns the picker route's calls.
+ */
 function stubFetch(...replies: Reply[]) {
   let call = 0;
-  const fetchMock = vi.fn(() => {
-    const reply = replies[Math.min(call++, replies.length - 1)];
+  const pickerCalls = vi.fn();
+  const fetchMock = vi.fn((url: string) => {
+    let reply = NO_DRAFT;
+    if (url.endsWith("/tests")) {
+      pickerCalls(url);
+      reply = replies[Math.min(call++, replies.length - 1)];
+    }
     return Promise.resolve({
       ok: reply.status >= 200 && reply.status < 300,
       status: reply.status,
@@ -39,7 +51,7 @@ function stubFetch(...replies: Reply[]) {
     });
   });
   vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  return pickerCalls;
 }
 
 const newestTestLine = () => {
@@ -48,9 +60,9 @@ const newestTestLine = () => {
 };
 const summary = () => screen.getByRole("region", { name: "AI Summary" });
 
-function renderSections(canEdit = true) {
+function renderSections(canEdit = true, centreId: number | null = null) {
   render(
-    <AiTestInsightsStudentSections student={CARD} studentId={1005} canEdit={canEdit}>
+    <AiTestInsightsStudentSections student={CARD} studentId={1005} canEdit={canEdit} centreId={centreId}>
       <section aria-label="Performance" />
     </AiTestInsightsStudentSections>,
   );
@@ -69,16 +81,38 @@ describe("AiTestInsightsStudentSections", () => {
     expect(within(summary()).getByRole("checkbox", { name: /Major Test 2/ })).not.toBeChecked();
     expect(newestTestLine()).toBe("Mock Test 1 · 2 Nov 2026");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe("/api/ai-test-insights/students/1005/tests");
+    expect(fetchMock).toHaveBeenCalledWith("/api/ai-test-insights/students/1005/tests");
   });
 
-  it("puts the Student card first, the other cards next, and the AI Summary card last", async () => {
+  it("puts the Student card first, the other cards next, then the AI Summary card and Session Notes below it", async () => {
     stubFetch({ status: 200, body: { tests: TESTS } });
     renderSections();
 
     const regions = screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"));
-    expect(regions).toEqual(["Student", "Performance", "AI Summary"]);
+    expect(regions).toEqual(["Student", "Performance", "AI Summary", "Session Notes"]);
     await within(summary()).findAllByRole("checkbox");
+  });
+
+  it("reads Session Notes through the history route with the page's centre", async () => {
+    stubFetch({ status: 200, body: { tests: TESTS } });
+    renderSections(true, 302);
+
+    const notes = screen.getByRole("region", { name: "Session Notes" });
+    expect(await within(notes).findByLabelText("Areas of concern")).toBeInTheDocument();
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      "/api/ai-test-insights/students/1005/sessions?centre=302",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    await within(summary()).findAllByRole("checkbox");
+  });
+
+  it("shows a viewer no Session Notes section and reads no notes", async () => {
+    stubFetch({ status: 200, body: { tests: TESTS } });
+    renderSections(false);
+
+    await within(summary()).findAllByRole("checkbox");
+    expect(screen.queryByRole("region", { name: "Session Notes" })).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual(["/api/ai-test-insights/students/1005/tests"]);
   });
 
   it("shows a dash on the newest test line when the Student has no test", async () => {

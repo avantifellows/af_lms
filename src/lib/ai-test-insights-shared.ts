@@ -183,13 +183,24 @@ export interface AiTestInsightsSummaryResponse {
 /** The 409 code of a login whose permission links no User and no User has its email. */
 export const NO_LINKED_USER_CODE = "no_linked_user";
 
+/** What a Teacher with no User sees instead of Generate's answer or the Session Notes form. */
+export const NO_LINKED_USER_MESSAGE = "Your login is not linked to a user record. Contact your program admin.";
+
 /** The 503 code of Generate without the delivery settings, and of the summary route without the reader's settings. */
 export const NOT_CONFIGURED_CODE = "not_configured";
 
+/**
+ * A route under a Student's AI Test Insights API path (`student.id`), such as
+ * `requests` or `sessions/draft`; a centre the page named carries over.
+ */
+export function aiTestInsightsStudentApiUrl(studentId: number, path: string, centreId?: number | null): string {
+  const base = `/api/ai-test-insights/students/${studentId}/${path}`;
+  return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
+}
+
 /** The create route for a Student (`student.id`); a centre the page named carries over. */
 export function aiTestInsightsRequestsUrl(studentId: number, centreId?: number | null): string {
-  const base = `/api/ai-test-insights/students/${studentId}/requests`;
-  return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
+  return aiTestInsightsStudentApiUrl(studentId, "requests", centreId);
 }
 
 /**

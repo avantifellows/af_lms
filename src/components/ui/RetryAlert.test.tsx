@@ -13,4 +13,16 @@ describe("RetryAlert", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it("names its button as asked", () => {
+    const onRetry = vi.fn();
+    render(
+      <RetryAlert onRetry={onRetry} retryLabel="Reload notes">
+        These notes were changed in another tab.
+      </RetryAlert>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload notes" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });

@@ -73,6 +73,7 @@ import {
   formatInsightSessionDate,
   isInsightRequestInProgress,
   NO_LINKED_USER_CODE,
+  NO_LINKED_USER_MESSAGE,
   NOT_CONFIGURED_CODE,
   type AiTestInsightsCreateRequestResponse,
   type AiTestInsightsPdfResponse,
@@ -91,7 +92,6 @@ const IN_PROGRESS_MESSAGES = {
   running: "Writing the AI Summary. This usually takes about 4 minutes.",
 } as const;
 
-const NO_LINKED_USER_MESSAGE = "Your login is not linked to a user record. Contact your program admin.";
 const NOT_CONFIGURED_MESSAGE = "AI Summary generation is not set up in this environment.";
 const REQUEST_FAILED_MESSAGE = "The AI Summary could not be requested. Try again.";
 const EXISTING_NOTE = "An AI Summary for these tests already exists";

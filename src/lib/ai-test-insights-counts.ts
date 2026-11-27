@@ -2,6 +2,7 @@
 // read the AI Test Insights Tab and the Student page both use, so the two can
 // never disagree. Server-only (uses `@/lib/db`).
 import { query } from "@/lib/db";
+import { readSubmittedSessionCounts } from "@/lib/ai-test-insights-session-notes";
 import type { AiTestInsightsCounts } from "@/lib/ai-test-insights-shared";
 
 const NO_INSIGHTS: AiTestInsightsCounts = {
@@ -27,16 +28,7 @@ export async function readAiTestInsightsCounts(studentIds: number[]): Promise<Ma
   if (studentIds.length === 0) return counts;
 
   const [sessions, requests] = await Promise.all([
-    query<{ student_id: string | number; sessions_completed: string | number; last_session_date: string | null }>(
-      `SELECT student_id,
-              COUNT(*)::int AS sessions_completed,
-              TO_CHAR(MAX(session_date), 'YYYY-MM-DD') AS last_session_date
-       FROM ai_test_insight_sessions
-       WHERE student_id = ANY($1::bigint[])
-         AND state = 'submitted'
-       GROUP BY student_id`,
-      [studentIds],
-    ),
+    readSubmittedSessionCounts(studentIds),
     query<{ student_id: string | number; tests_generated: string | number }>(
       `SELECT student_id, COUNT(*)::int AS tests_generated
        FROM ai_test_insight_requests
@@ -48,10 +40,10 @@ export async function readAiTestInsightsCounts(studentIds: number[]): Promise<Ma
   ]);
 
   for (const row of sessions) {
-    const entry = counts.get(Number(row.student_id));
+    const entry = counts.get(row.studentId);
     if (!entry) continue;
-    entry.insightSessionsCompleted = Number(row.sessions_completed);
-    entry.lastInsightSessionDate = row.last_session_date;
+    entry.insightSessionsCompleted = row.completed;
+    entry.lastInsightSessionDate = row.lastSessionDate;
   }
   for (const row of requests) {
     const entry = counts.get(Number(row.student_id));
