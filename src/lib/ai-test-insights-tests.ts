@@ -13,27 +13,13 @@ import {
 import { academicYearStart } from "@/lib/student-support-rules";
 
 // Aliases unlike the table's own column names, so GROUP BY and ORDER BY can
-// only mean the picker's values.
+// only mean the picker's values. The read casts the id and the date to
+// strings, so each row is already the picker's shape.
 interface TestRow {
-  picker_test_id: unknown;
+  picker_test_id: string;
   picker_test_name: string | null;
-  picker_test_format: string | null;
-  picker_test_date: unknown;
-}
-
-const FORMATS: readonly string[] = AI_TEST_INSIGHTS_TEST_FORMATS;
-
-/** A BigQuery date comes as a string or as `{ value }`; the picker wants `YYYY-MM-DD`. */
-function dateOf(value: unknown): string {
-  const text = typeof value === "string" ? value : ((value as { value?: unknown } | null)?.value ?? "");
-  return String(text).slice(0, 10);
-}
-
-/** Newest first; tests of the same day by `test_id`, descending (as the read orders them). */
-function newestFirst(a: AiTestInsightsTest, b: AiTestInsightsTest): number {
-  if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-  if (a.id === b.id) return 0;
-  return a.id < b.id ? 1 : -1;
+  picker_test_format: AiTestInsightsTestFormat;
+  picker_test_date: string;
 }
 
 /**
@@ -73,20 +59,12 @@ export async function readAiTestInsightsTests(userId: number): Promise<AiTestIns
     types: { formats: ["STRING"] },
   });
 
-  // One row per test even if a row repeats: the newest sitting wins.
-  const byId = new Map<string, AiTestInsightsTest>();
-  for (const row of rows as TestRow[]) {
-    const id = row.picker_test_id;
-    if (id === null || id === undefined || id === "") continue;
-    if (!FORMATS.includes(row.picker_test_format ?? "")) continue;
-    const test: AiTestInsightsTest = {
-      id: String(id),
-      name: row.picker_test_name ?? "",
-      date: dateOf(row.picker_test_date),
-      format: row.picker_test_format as AiTestInsightsTestFormat,
-    };
-    const seen = byId.get(test.id);
-    if (!seen || test.date > seen.date) byId.set(test.id, test);
-  }
-  return [...byId.values()].sort(newestFirst);
+  // The read already gives one row per test (GROUP BY), only the three
+  // formats, no missing id, newest first, ids and dates as strings.
+  return (rows as TestRow[]).map((row) => ({
+    id: row.picker_test_id,
+    name: row.picker_test_name ?? "",
+    date: row.picker_test_date,
+    format: row.picker_test_format,
+  }));
 }

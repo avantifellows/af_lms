@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // The AI Summary card's test picker (#559) reads one Student's tests from the
 // warehouse. BigQuery is stubbed by a fake that answers the read as the
 // warehouse would, from hand-written `fact_student_test_results_overall`
-// sittings: it keeps the rows the read's conditions and parameters select and
-// returns them one per sitting, so the reader's own grouping, ordering and
-// id handling decide what the picker shows.
+// sittings: each condition, the grouping, the newest-sitting date, the casts
+// and the order apply only when the read's SQL asks for them, so the read's
+// own SQL decides what the picker shows (the reader adds nothing on top).
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 vi.mock("@/lib/bigquery", () => ({
   getBigQueryClient: () => ({ query: mockQuery }),
@@ -54,13 +54,27 @@ function warehouse(sittings: Sitting[]) {
       .filter((row) => !query.includes("academic_year = @academicYear") || row.academic_year === params.academicYear)
       .filter((row) => !query.includes("SAFE_CAST(@yearStart AS DATE)") || date(row) >= params.yearStart)
       .filter((row) => !query.includes("has_quiz_ended IS NOT FALSE") || row.has_quiz_ended !== false)
+      .filter((row) => !query.includes("test_id IS NOT NULL") || row.test_id !== null)
       .map((row) => ({
-        picker_test_id: row.test_id,
+        picker_test_id: query.includes("CAST(test_id AS STRING) AS picker_test_id") ? String(row.test_id) : row.test_id,
         picker_test_name: row.test_name,
         picker_test_format: row.test_format,
-        picker_test_date: row.start_date,
+        picker_test_date: query.includes("CAST(MAX(SAFE_CAST(start_date AS DATE)) AS STRING)") ? date(row) : row.start_date,
       }));
-    return [rows];
+    // GROUP BY the id, with the newest sitting's date (MAX).
+    const grouped = /GROUP BY picker_test_id\s+ORDER BY/.test(query)
+      ? [...new Map(rows.map((row) => [row.picker_test_id, rows
+          .filter((other) => other.picker_test_id === row.picker_test_id)
+          .reduce((newest, other) => (String(other.picker_test_date) > String(newest.picker_test_date) ? other : newest))])).values()]
+      : rows;
+    if (query.includes("ORDER BY picker_test_date DESC, picker_test_id DESC")) {
+      grouped.sort((a, b) =>
+        a.picker_test_date !== b.picker_test_date
+          ? String(b.picker_test_date).localeCompare(String(a.picker_test_date))
+          : String(b.picker_test_id) < String(a.picker_test_id) ? -1 : 1,
+      );
+    }
+    return [grouped];
   });
 }
 
