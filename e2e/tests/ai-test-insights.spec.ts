@@ -1779,6 +1779,44 @@ test.describe("AI Test Insights tab", () => {
         await expect(notesOf(olderTab).getByLabel("Areas of concern")).toHaveValue(CONCERN);
       });
 
+      test("keeps typing left less than a second before the Back link as a draft, and asks before leaving a failed save", async ({
+        page,
+      }) => {
+        const TYPED = "Typed just before Back [fix580]";
+        const backToTab = new RegExp(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}\\?tab=ai_test_insights$`);
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await page.goto(studentUrl("bhavya"));
+        const notes = notesOf(page);
+        const back = page.getByRole("link", { name: "Back to AI Test Insights" });
+
+        await notes.getByLabel("Areas of concern").fill(TYPED);
+        await back.click();
+        await expect(page).toHaveURL(backToTab);
+        expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => [row.state, row.areasOfConcern])).toEqual([
+          ["draft", TYPED],
+        ]);
+
+        // Every draft save now fails.
+        await page.route(`**${draftRoute("bhavya")}*`, (route) => route.fulfill({ status: 500, json: { error: "failed" } }));
+        await page.goto(studentUrl("bhavya"));
+        await expect(notes.getByLabel("Areas of concern")).toHaveValue(TYPED);
+        await notes.getByLabel("Immediate actions").fill(ACTIONS);
+        await expect(notes.getByRole("alert")).toContainText("These notes could not be saved.");
+        const questions: string[] = [];
+        page.once("dialog", (dialog) => {
+          questions.push(dialog.message());
+          void dialog.dismiss();
+        });
+        await back.click();
+        await expect.poll(() => questions).toEqual(["Your Session Notes are not saved. Leave this page anyway?"]);
+        await expect(page).toHaveURL(new RegExp(`/ai-test-insights/students/${ids.studentIds.bhavya}$`));
+        await expect(notes.getByLabel("Immediate actions")).toHaveValue(ACTIONS);
+
+        page.once("dialog", (dialog) => void dialog.accept());
+        await back.click();
+        await expect(page).toHaveURL(backToTab);
+      });
+
       test("refuses a tab still holding a submitted draft, so the next draft is never overwritten or submitted twice", async ({
         page,
       }) => {

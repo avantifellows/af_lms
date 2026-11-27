@@ -18,6 +18,7 @@ import {
 } from "@/lib/holistic-challenge-categories";
 import { HOLISTIC_ANSWER_MAX_LENGTH } from "@/lib/holistic-answer-limit";
 import { useDraftAutosave, useDraftAutosaveRefs } from "@/hooks/use-draft-autosave";
+import { useNotesNavigationGuard } from "@/hooks/use-notes-navigation-guard";
 import { appendDictation } from "@/lib/holistic-dictation-text";
 import { HOLISTIC_FOLLOW_UP_QUESTIONS, type HolisticFollowUpQuestionKey } from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
@@ -66,24 +67,11 @@ type NotesValue = {
 type CategoryGroup = (typeof HOLISTIC_CHALLENGE_CATEGORY_GROUPS)[number];
 type OpenSelectedPhase = Extract<HolisticStudentPhaseDetail["selectedPhase"], { guidanceMarkdown: string }>;
 type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
-type BrowserNavigation = EventTarget & {
-  traverseTo: (key: string) => { committed: Promise<unknown> };
-};
-type BrowserNavigateEvent = Event & {
-  navigationType: string;
-  destination: { key: string };
-};
 type NotesSnapshot = Pick<NotesEditorProps, "notes" | "notesRevision">;
-type NotesRouter = ReturnType<typeof useRouter>;
-type BeforeNotesNavigation = () => boolean | Promise<boolean>;
 const NOTES_REFRESH_URLS = "holistic-notes-refresh-urls";
 const SUBMIT_BLANK_ANSWER_ERROR = "Answer every Question before submitting";
 const SAVE_BLANK_ANSWER_ERROR = "Answer every Question before saving";
 const PROFILE_STATUS_POLL_MS = 2_000;
-
-function browserNavigation() {
-  return (window as typeof window & { navigation?: BrowserNavigation }).navigation ?? null;
-}
 
 function notesRefreshUrls() {
   try {
@@ -102,6 +90,11 @@ function markCurrentNotesForRefresh() {
   } catch {
     // The navigation guard still protects the write when session storage is unavailable.
   }
+}
+
+/** A draft editor marks its page for a refresh when the navigation guard lets the Mentor leave. */
+function refreshOnLeave(draftEditor: boolean) {
+  return draftEditor ? markCurrentNotesForRefresh : undefined;
 }
 
 function notesRefreshPending() {
@@ -306,107 +299,6 @@ function shouldHydrateNotes({ serverRevision, acceptedRevision, authoritative, b
   if (serverRevision < acceptedRevision) return false;
   if (!authoritative && serverRevision === acceptedRevision) return null;
   return !busy;
-}
-
-function clickedNavigationAnchor(event: MouseEvent) {
-  const modified = [event.metaKey, event.ctrlKey, event.shiftKey, event.altKey].some(Boolean);
-  if (event.defaultPrevented || event.button !== 0 || modified) return null;
-  const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>("a") ?? null;
-  if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return null;
-  return anchor;
-}
-
-function followNavigationAnchor(anchor: HTMLAnchorElement, router: NotesRouter) {
-  const target = new URL(anchor.href, window.location.href);
-  if (target.origin === window.location.origin && !target.pathname.startsWith("/api/")) {
-    router.push(`${target.pathname}${target.search}${target.hash}`);
-    return;
-  }
-  window.location.assign(target.href);
-}
-
-function useNotesNavigationGuard({ beforeNavigation, guardNeeded, draftEditor, router }: {
-  beforeNavigation: BeforeNotesNavigation;
-  guardNeeded: boolean;
-  draftEditor: boolean;
-  router: NotesRouter;
-}) {
-  const historyGuardInFlight = useRef(false);
-  const replayingHistory = useRef(false);
-  const guardNeededRef = useRef(guardNeeded);
-  const beforeNavigationRef = useRef(beforeNavigation);
-  const draftEditorRef = useRef(draftEditor);
-
-  useEffect(() => {
-    guardNeededRef.current = guardNeeded;
-    beforeNavigationRef.current = beforeNavigation;
-    draftEditorRef.current = draftEditor;
-  }, [beforeNavigation, draftEditor, guardNeeded]);
-
-  useEffect(() => {
-    const navigation = browserNavigation();
-    if (!navigation) return;
-    const handleHistoryNavigation = (rawEvent: Event) => {
-      const event = rawEvent as BrowserNavigateEvent;
-      const cannotGuard = [replayingHistory.current, !guardNeededRef.current,
-        !event.cancelable, !event.destination.key].some(Boolean);
-      if (event.navigationType !== "traverse" || cannotGuard) return;
-      event.preventDefault();
-      if (historyGuardInFlight.current) return;
-      historyGuardInFlight.current = true;
-      const finishGuard = (allowed: boolean) => {
-        if (!allowed) {
-          historyGuardInFlight.current = false;
-          return;
-        }
-        if (draftEditorRef.current) markCurrentNotesForRefresh();
-        replayingHistory.current = true;
-        window.setTimeout(() => {
-          try {
-            void navigation.traverseTo(event.destination.key).committed.then(() => {
-              router.refresh();
-            }).catch(() => undefined).finally(() => {
-              replayingHistory.current = false;
-              historyGuardInFlight.current = false;
-            });
-          } catch {
-            replayingHistory.current = false;
-            historyGuardInFlight.current = false;
-          }
-        }, 0);
-      };
-      const decision = beforeNavigationRef.current();
-      if (typeof decision === "boolean") finishGuard(decision);
-      else void decision.then(finishGuard).catch(() => finishGuard(false));
-    };
-    navigation.addEventListener("navigate", handleHistoryNavigation);
-    return () => navigation.removeEventListener("navigate", handleHistoryNavigation);
-  }, [router]);
-
-  useEffect(() => {
-    if (!guardNeeded) return;
-    const handleClick = (event: MouseEvent) => {
-      const anchor = clickedNavigationAnchor(event);
-      if (!anchor) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void Promise.resolve(beforeNavigation()).then((allowed) => {
-        if (!allowed) return;
-        if (draftEditorRef.current) markCurrentNotesForRefresh();
-        followNavigationAnchor(anchor, router);
-      });
-    };
-    const handleUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    document.addEventListener("click", handleClick, true);
-    window.addEventListener("beforeunload", handleUnload);
-    return () => {
-      document.removeEventListener("click", handleClick, true);
-      window.removeEventListener("beforeunload", handleUnload);
-    };
-  }, [beforeNavigation, guardNeeded, router]);
 }
 
 function useNotesEditorState(props: NotesEditorProps) {
@@ -684,7 +576,12 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   }, [closedWhileWriting, discardSubmittedChanges, draftNeedsGuard, finalWriting, flushDraft, submittedEditDirty]);
 
   const guardNeeded = notesGuardNeeded(closedWhileWriting, submittedEditDirty, draftNeedsGuard);
-  useNotesNavigationGuard({ beforeNavigation, guardNeeded, draftEditor: canAutosave, router });
+  useNotesNavigationGuard({
+    beforeNavigation,
+    guardNeeded,
+    onLeave: refreshOnLeave(canAutosave),
+    router,
+  });
 
   const retry = () => {
     void flushDraft();

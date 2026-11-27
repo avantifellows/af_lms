@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush, refresh: vi.fn() }) }));
+
 import AiTestInsightsSessionNotes from "./AiTestInsightsSessionNotes";
 import { useAiTestInsightsSessions } from "@/hooks/use-ai-test-insights-sessions";
 import type { InsightRequestView } from "@/lib/ai-test-insights-shared";
@@ -98,17 +101,23 @@ const COMPLETED: InsightRequestView = {
 
 let onSubmitted: ReturnType<typeof vi.fn<() => void>>;
 
-/** The section with the page's read of the history route, as the Student page gives it. */
+/** Where the Student page's in-app "Back to AI Test Insights" link goes. */
+const BACK_PATH = "/school/JNV001?tab=ai_test_insights";
+
+/** The section with the page's read of the history route, as the Student page gives it, under its Back link. */
 function NotesWithRead({ openRequest }: { openRequest: InsightRequestView | null }) {
   const sessions = useAiTestInsightsSessions(SESSIONS_URL);
   return (
-    <AiTestInsightsSessionNotes
-      sessions={sessions}
-      sessionsUrl={SESSIONS_URL}
-      draftUrl={DRAFT_URL}
-      openRequest={openRequest}
-      onSubmitted={onSubmitted}
-    />
+    <>
+      <a href={BACK_PATH}>Back to AI Test Insights</a>
+      <AiTestInsightsSessionNotes
+        sessions={sessions}
+        sessionsUrl={SESSIONS_URL}
+        draftUrl={DRAFT_URL}
+        openRequest={openRequest}
+        onSubmitted={onSubmitted}
+      />
+    </>
   );
 }
 
@@ -341,6 +350,96 @@ describe("AiTestInsightsSessionNotes", () => {
     fireEvent.click(within(section()).getByRole("button", { name: "Retry" }));
     await tick(0);
     expect(leave()).toBe(false);
+  });
+
+  describe("the page's in-app Back link", () => {
+    const back = () => fireEvent.click(screen.getByRole("link", { name: "Back to AI Test Insights" }));
+    let confirmSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      mockPush.mockReset();
+      confirmSpy = vi.spyOn(window, "confirm");
+    });
+
+    afterEach(() => {
+      confirmSpy.mockRestore();
+    });
+
+    it("saves typing left less than a second before Back, then leaves, asking nothing", async () => {
+      await renderNotes();
+
+      type("Areas of concern", `Typed just before Back ${MARKER}`);
+      await tick(200);
+      back();
+      await tick(0);
+
+      expect(savedBodies()).toEqual([expect.objectContaining({ areasOfConcern: `Typed just before Back ${MARKER}` })]);
+      expect(mockPush).toHaveBeenCalledWith(BACK_PATH);
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it("asks before leaving after a failed save, tries the save again first, and stays when the Teacher says no", async () => {
+      saves = [{ status: 500, body: {} }, { status: 500, body: {} }, { status: 500, body: {} }];
+      await renderNotes();
+      type("Areas of concern", `Not saved yet ${MARKER}`);
+      await tick(1000);
+      expect(within(section()).getByRole("alert")).toHaveTextContent("These notes could not be saved.");
+
+      confirmSpy.mockReturnValue(false);
+      back();
+      await tick(0);
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(field("Areas of concern").value).toBe(`Not saved yet ${MARKER}`);
+      expect(savedBodies()).toHaveLength(2);
+
+      confirmSpy.mockReturnValue(true);
+      back();
+      await tick(0);
+      expect(mockPush).toHaveBeenCalledWith(BACK_PATH);
+    });
+
+    it("leaves with no question when the save tried again on Back succeeds", async () => {
+      saves = [{ status: 500, body: {} }];
+      await renderNotes();
+      type("Areas of concern", `Saved on the way out ${MARKER}`);
+      await tick(1000);
+
+      back();
+      await tick(0);
+
+      expect(savedBodies()).toHaveLength(2);
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(mockPush).toHaveBeenCalledWith(BACK_PATH);
+    });
+
+    it("asks, sending nothing, before leaving notes another tab changed", async () => {
+      saves = [{ status: 409, body: { error: "These notes were changed in another tab.", code: "stale", currentRevision: 2 } }];
+      await renderNotes();
+      type("Areas of concern", "Older text");
+      await tick(1000);
+      confirmSpy.mockReturnValue(false);
+
+      back();
+      await tick(0);
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(savedBodies()).toHaveLength(1);
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it("asks before leaving a field over the limit, which cannot be saved", async () => {
+      await renderNotes();
+      type("Areas of concern", "a".repeat(2001));
+      confirmSpy.mockReturnValue(false);
+
+      back();
+      await tick(0);
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(savedBodies()).toEqual([]);
+      expect(mockPush).not.toHaveBeenCalled();
+    });
   });
 
   it("replaces the form with the no-linked-user message", async () => {

@@ -16,8 +16,13 @@
 // time, the newest value next. A field over the 2,000-character limit is
 // marked and nothing is sent until it fits; the form never cuts text. When
 // another tab saved first (409 `stale`), autosave stops and the typed text
-// stays until "Reload notes". Leaving with an unsaved or failed draft asks the
-// browser to confirm. Labels, the limit and the rule come from the shared
+// stays until "Reload notes". Leaving with an unsaved or failed draft is
+// guarded by the leave guard Holistic notes share (`useNotesNavigationGuard`):
+// an in-app link (the page's "Back to AI Test Insights") first saves what is
+// pending and goes on once it is saved; when it cannot be saved (the save
+// fails again, another tab changed the notes, a field is over the limit, or a
+// submit is running) it asks to confirm. A reload or a closed tab gets the
+// browser's own prompt. Labels, the limit and the rule come from the shared
 // Session Notes rules.
 //
 // Submit (#575) turns the draft into an Insight Session linked to the AI
@@ -31,7 +36,8 @@
 // again (dated today) and the page is told (`onSubmitted`), so the Student
 // card's counts move. A stale submit shows the same other-tab message as a
 // stale save.
-import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useRef, useState } from "react";
 
 import SessionNotesInputs, {
   asSessionNotes,
@@ -41,6 +47,7 @@ import SessionNotesInputs, {
 import { Button, Card } from "@/components/ui";
 import { RetryAlert } from "@/components/ui/RetryAlert";
 import { useDraftAutosave, useDraftAutosaveRefs } from "@/hooks/use-draft-autosave";
+import { useNotesNavigationGuard } from "@/hooks/use-notes-navigation-guard";
 import type { SessionsRead } from "@/hooks/use-ai-test-insights-sessions";
 import {
   openInsightRequestKey,
@@ -61,6 +68,7 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 /** How long after the last change the draft saves. */
 const AUTOSAVE_DELAY_MS = 1000;
 const SUBMIT_FAILED_MESSAGE = "These notes could not be submitted. Please try again.";
+const LEAVE_UNSAVED_QUESTION = "Your Session Notes are not saved. Leave this page anyway?";
 
 function initialValues(draft: SessionNotesDraft | null): SessionNotesFormValues {
   return {
@@ -93,16 +101,6 @@ async function putDraft(url: string, values: SessionNotesFormValues, seen: Draft
     throw new Error("Session Notes could not be saved");
   }
   return { draftId, revision: body.revision };
-}
-
-/** Asks the browser to confirm leaving the page while `unsaved`. */
-function useLeaveGuard(unsaved: boolean) {
-  useEffect(() => {
-    if (!unsaved) return;
-    const confirmLeaving = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", confirmLeaving);
-    return () => window.removeEventListener("beforeunload", confirmLeaving);
-  }, [unsaved]);
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "failed";
@@ -150,10 +148,9 @@ function useSessionNotesDraft(draft: SessionNotesDraft | null, draftUrl: string)
   }
 
   const changed = JSON.stringify(values) !== JSON.stringify(savedValues);
-  useLeaveGuard(changed || status === "failed" || status === "saving");
   const update = (field: SessionNotesField, value: string) =>
     setValues((current) => ({ ...current, [field]: value }));
-  return { values, update, status, stale, changed, retry, markStale, version: () => versionRef.current };
+  return { values, update, status, stale, sendable, changed, retry, markStale, version: () => versionRef.current };
 }
 
 /** "Saving…", "Saved" once nothing is left to send, or nothing. */
@@ -181,8 +178,22 @@ function SessionNotesForm({
   /** The draft became an Insight Session. */
   onSubmitted: () => void;
 }) {
-  const { values, update, status, stale, changed, retry, markStale, version } = useSessionNotesDraft(draft, draftUrl);
+  const { values, update, status, stale, sendable, changed, retry, markStale, version } = useSessionNotesDraft(
+    draft,
+    draftUrl,
+  );
   const [submitting, setSubmitting] = useState(false);
+  const router = useRouter();
+  // Leaving saves what is pending first, and asks only when it cannot be saved.
+  const beforeNavigation = useCallback(
+    async () => (!submitting && sendable && (await retry())) || window.confirm(LEAVE_UNSAVED_QUESTION),
+    [submitting, sendable, retry],
+  );
+  useNotesNavigationGuard({
+    beforeNavigation,
+    guardNeeded: changed || status === "failed" || status === "saving" || submitting,
+    router,
+  });
   const [submitFailed, setSubmitFailed] = useState(false);
   const today = getTodayIST();
   const canSubmit =
