@@ -5,10 +5,11 @@
 // the centre id; the tab loads its own list when shown. A failed load shows an
 // error with Retry, never an empty list.
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { Card, Input, Select } from "@/components/ui";
 import { RetryAlert } from "@/components/ui/RetryAlert";
+import { useFetchWithRetry } from "@/hooks/use-fetch-with-retry";
 import {
   aiTestInsightsListUrl,
   aiTestInsightsStudentPageUrl,
@@ -17,38 +18,11 @@ import {
   type AiTestInsightsStudent,
 } from "@/lib/ai-test-insights-shared";
 
-type LoadState =
-  | { status: "loading" }
-  | { status: "failed" }
-  | { status: "loaded"; students: AiTestInsightsStudent[] };
+type LoadState = { status: "failed" } | { status: "loaded"; students: AiTestInsightsStudent[] };
 
-function useAiTestInsightsList(schoolCode: string, centreId: number | undefined) {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
-  // Only the latest request may set state, and none after unmount.
-  const latestRequest = useRef(0);
-
-  const load = useCallback(async () => {
-    const request = ++latestRequest.current;
-    setState({ status: "loading" });
-    try {
-      const response = await fetch(aiTestInsightsListUrl(schoolCode, centreId));
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = (await response.json()) as AiTestInsightsListResponse;
-      if (request === latestRequest.current) setState({ status: "loaded", students: data.students });
-    } catch {
-      if (request === latestRequest.current) setState({ status: "failed" });
-    }
-  }, [schoolCode, centreId]);
-
-  useEffect(() => {
-    const requests = latestRequest;
-    void load();
-    return () => {
-      requests.current++;
-    };
-  }, [load]);
-
-  return { state, retry: load };
+async function readList(response: Response): Promise<LoadState> {
+  const body = (await response.json().catch(() => null)) as Partial<AiTestInsightsListResponse> | null;
+  return response.ok && Array.isArray(body?.students) ? { status: "loaded", students: body.students } : { status: "failed" };
 }
 
 function StudentTable({ students, centreId }: { students: AiTestInsightsStudent[]; centreId?: number }) {
@@ -156,14 +130,15 @@ export default function AiTestInsightsTab({
   /** Set on a Centre page: the list narrows to that centre. */
   centreId?: number;
 }) {
-  const { state, retry } = useAiTestInsightsList(schoolCode, centreId);
+  // Reads the list once, and again on each Retry; an unmount or a newer read drops an older answer.
+  const { state, retry } = useFetchWithRetry(aiTestInsightsListUrl(schoolCode, centreId), readList);
 
   if (state.status === "loading") {
     return <p className="py-8 text-center text-sm text-text-muted">Loading AI Test Insights…</p>;
   }
 
   if (state.status === "failed") {
-    return <RetryAlert onRetry={() => void retry()}>Couldn&apos;t load AI Test Insights. Please try again.</RetryAlert>;
+    return <RetryAlert onRetry={retry}>Couldn&apos;t load AI Test Insights. Please try again.</RetryAlert>;
   }
 
   return (

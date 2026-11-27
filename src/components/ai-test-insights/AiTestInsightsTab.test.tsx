@@ -68,7 +68,8 @@ describe("AiTestInsightsTab", () => {
     render(<AiTestInsightsTab schoolCode="JNV001" />);
 
     await screen.findByRole("table", { name: "AI Test Insights students" });
-    expect(mockFetch).toHaveBeenCalledWith("/api/school/JNV001/ai-test-insights");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/school/JNV001/ai-test-insights");
   });
 
   it("asks for the centre's list on a Centre page", async () => {
@@ -77,7 +78,8 @@ describe("AiTestInsightsTab", () => {
     render(<AiTestInsightsTab schoolCode="JNV001" centreId={301} />);
 
     await screen.findByRole("table", { name: "AI Test Insights students" });
-    expect(mockFetch).toHaveBeenCalledWith("/api/school/JNV001/ai-test-insights?centre_id=301");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/school/JNV001/ai-test-insights?centre_id=301");
   });
 
   it("lists each Student with their name, Student ID, Grade and Insight counts, in the order given", async () => {
