@@ -6,17 +6,14 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { SAFE_MARKDOWN_COMPONENTS } from "@/components/safe-markdown-components";
+
 const COMPONENTS: Components = {
   h1: ({ children }) => <h3 className="text-lg font-bold">{children}</h3>,
   h2: ({ children }) => <h4 className="text-base font-semibold">{children}</h4>,
   h3: ({ children }) => <h5 className="font-semibold">{children}</h5>,
   h4: ({ children }) => <h6 className="font-semibold">{children}</h6>,
-  ul: ({ children }) => <ul className="list-disc space-y-1 pl-5">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal space-y-1 pl-5">{children}</ol>,
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-border pl-3 text-text-secondary">{children}</blockquote>
-  ),
-  hr: () => <hr className="border-border" />,
+  ...SAFE_MARKDOWN_COMPONENTS,
   table: ({ children }) => (
     <div className="overflow-x-auto">
       <table className="min-w-full border-collapse text-left text-sm">{children}</table>
@@ -32,21 +29,6 @@ const COMPONENTS: Components = {
       {children}
     </td>
   ),
-  img: () => null,
-  a: ({ href, children }) =>
-    href && /^https?:\/\//i.test(href) ? (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-medium text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      >
-        {children}
-        <span className="sr-only"> (opens in a new tab)</span>
-      </a>
-    ) : (
-      <>{children}</>
-    ),
 };
 
 export default function TestInsightText({ markdown }: { markdown: string }) {
