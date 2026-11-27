@@ -25,7 +25,7 @@ import {
   SESSION_NOTES_EDIT_FAILED_MESSAGE,
   SESSION_NOTES_STALE_MESSAGE,
   validateSessionNotes,
-  type SessionNotesDraftRequest,
+  type SessionNotesEditRequest,
   type SessionNotesField,
 } from "@/lib/ai-test-insights-session-notes-rules";
 import type { TimelineEntry } from "@/lib/ai-test-insights-timeline";
@@ -65,7 +65,7 @@ export default function SessionNotesEdit({
 
   async function save() {
     setState("saving");
-    const request: SessionNotesDraftRequest = { ...asSessionNotes(values), expectedRevision: entry.revision };
+    const request: SessionNotesEditRequest = { ...asSessionNotes(values), expectedRevision: entry.revision };
     const outcome = await sendSessionNotes(editUrl, "PATCH", request);
     if (outcome === "ok") {
       onSaved();

@@ -15,6 +15,8 @@ import type { InsightRequestView } from "@/lib/ai-test-insights-shared";
 const SESSIONS_URL = "/api/ai-test-insights/students/1005/sessions?centre=302";
 const DRAFT_URL = "/api/ai-test-insights/students/1005/sessions/draft?centre=302";
 const MARKER = "[marker-574-form]";
+/** The id of the draft every save answers with, unless a test says otherwise. */
+const DRAFT_ID = 61;
 
 type Reply = { status: number; body: unknown };
 type Deferred = { reply: Promise<Reply>; resolve: (reply: Reply) => void };
@@ -68,7 +70,7 @@ beforeEach(() => {
     if (url === DRAFT_URL && init?.method === "PUT") {
       return answerFrom(saves, () => {
         revision = Math.max(revision, expectedRevision()) + 1;
-        return { status: 200, body: { revision } };
+        return { status: 200, body: { draftId: DRAFT_ID, revision } };
       });
     }
     throw new Error(`Unexpected fetch ${url}`);
@@ -144,6 +146,7 @@ describe("AiTestInsightsSessionNotes", () => {
   it("reads the history route, never cached, and shows the Teacher's draft in the four fields", async () => {
     reads = [
       writeAccess({
+        draftId: 40,
         revision: 3,
         sessionDate: "2026-11-20",
         areasOfConcern: `Weak in optics ${MARKER}`,
@@ -183,7 +186,7 @@ describe("AiTestInsightsSessionNotes", () => {
 
     await tick(1);
     expect(within(section()).getByText("Saving…")).toBeInTheDocument();
-    await act(async () => save.resolve({ status: 200, body: { revision: 1 } }));
+    await act(async () => save.resolve({ status: 200, body: { draftId: DRAFT_ID, revision: 1 } }));
 
     expect(within(section()).getByText("Saved")).toBeInTheDocument();
     expect(savedBodies()).toEqual([
@@ -192,14 +195,15 @@ describe("AiTestInsightsSessionNotes", () => {
         areasOfConcern: `Weak in optics ${MARKER}`,
         immediateActions: "Two worksheets",
         otherNotes: "",
+        draftId: null,
         expectedRevision: 0,
       },
     ]);
   });
 
   it("sends the revision each save answered with on the next save", async () => {
-    reads = [writeAccess({ revision: 4, sessionDate: "2026-11-20", areasOfConcern: "a", immediateActions: null, otherNotes: null })];
-    saves = [{ status: 200, body: { revision: 5 } }, { status: 200, body: { revision: 6 } }];
+    reads = [writeAccess({ draftId: 40, revision: 4, sessionDate: "2026-11-20", areasOfConcern: "a", immediateActions: null, otherNotes: null })];
+    saves = [{ status: 200, body: { draftId: 40, revision: 5 } }, { status: 200, body: { draftId: 40, revision: 6 } }];
     await renderNotes();
 
     type("Areas of concern", "ab");
@@ -207,7 +211,10 @@ describe("AiTestInsightsSessionNotes", () => {
     type("Areas of concern", "abc");
     await tick(1000);
 
-    expect(savedBodies().map((body) => body.expectedRevision)).toEqual([4, 5]);
+    expect(savedBodies().map((body) => [body.draftId, body.expectedRevision])).toEqual([
+      [40, 4],
+      [40, 5],
+    ]);
   });
 
   it("sends no date as null", async () => {
@@ -233,12 +240,12 @@ describe("AiTestInsightsSessionNotes", () => {
     await tick(1000);
     expect(savedBodies()).toHaveLength(1);
 
-    await act(async () => first.resolve({ status: 200, body: { revision: 1 } }));
+    await act(async () => first.resolve({ status: 200, body: { draftId: DRAFT_ID, revision: 1 } }));
     await tick(0);
 
-    expect(savedBodies().map((body) => [body.areasOfConcern, body.expectedRevision])).toEqual([
-      ["one", 0],
-      ["three", 1],
+    expect(savedBodies().map((body) => [body.areasOfConcern, body.draftId, body.expectedRevision])).toEqual([
+      ["one", null, 0],
+      ["three", DRAFT_ID, 1],
     ]);
     expect(within(section()).getByText("Saved")).toBeInTheDocument();
   });
@@ -264,7 +271,7 @@ describe("AiTestInsightsSessionNotes", () => {
     saves = [{ status: 409, body: { error: "These notes were changed in another tab.", code: "stale", currentRevision: 2 } }];
     reads = [
       writeAccess(),
-      writeAccess({ revision: 2, sessionDate: "2026-11-27", areasOfConcern: "Newer text", immediateActions: null, otherNotes: null }),
+      writeAccess({ draftId: 41, revision: 2, sessionDate: "2026-11-27", areasOfConcern: "Newer text", immediateActions: null, otherNotes: null }),
     ];
     await renderNotes();
 
@@ -285,7 +292,7 @@ describe("AiTestInsightsSessionNotes", () => {
     expect(within(section()).queryByRole("alert")).not.toBeInTheDocument();
     type("Areas of concern", "Newer text, edited");
     await tick(1000);
-    expect(savedBodies().at(-1)).toMatchObject({ areasOfConcern: "Newer text, edited", expectedRevision: 2 });
+    expect(savedBodies().at(-1)).toMatchObject({ areasOfConcern: "Newer text, edited", draftId: 41, expectedRevision: 2 });
   });
 
   it("shows how many of the 2,000 characters each text field uses", async () => {
@@ -420,7 +427,7 @@ describe("AiTestInsightsSessionNotes", () => {
       expect(within(section()).getByText("Saving…")).toBeInTheDocument();
       expect(submitButton()).toBeDisabled();
 
-      await act(async () => save.resolve({ status: 200, body: { revision: 1 } }));
+      await act(async () => save.resolve({ status: 200, body: { draftId: DRAFT_ID, revision: 1 } }));
       expect(submitButton()).toBeEnabled();
     });
 
@@ -438,14 +445,15 @@ describe("AiTestInsightsSessionNotes", () => {
         otherNotes: "",
       };
       expect(writes()).toEqual([
-        ["PUT", { ...notes, expectedRevision: 0 }],
-        ["POST", { ...notes, expectedRevision: 1, openRequestKey: "req-completed-1005" }],
+        ["PUT", { ...notes, draftId: null, expectedRevision: 0 }],
+        ["POST", { ...notes, draftId: DRAFT_ID, expectedRevision: 1, openRequestKey: "req-completed-1005" }],
       ]);
     });
 
     it("submits a loaded draft at its revision, with no save when nothing changed", async () => {
       reads = [
         writeAccess({
+          draftId: 40,
           revision: 4,
           sessionDate: "2026-11-20",
           areasOfConcern: "Weak in optics",
@@ -466,6 +474,7 @@ describe("AiTestInsightsSessionNotes", () => {
             areasOfConcern: "Weak in optics",
             immediateActions: "Two worksheets",
             otherNotes: "",
+            draftId: 40,
             expectedRevision: 4,
             openRequestKey: null,
           },
@@ -527,7 +536,10 @@ describe("AiTestInsightsSessionNotes", () => {
 
       type("Areas of concern", "Next conversation");
       await tick(1000);
-      expect(writes().at(-1)).toEqual(["PUT", expect.objectContaining({ areasOfConcern: "Next conversation", expectedRevision: 0 })]);
+      expect(writes().at(-1)).toEqual([
+        "PUT",
+        expect.objectContaining({ areasOfConcern: "Next conversation", draftId: null, expectedRevision: 0 }),
+      ]);
     });
 
     it("is off while the submit is running", async () => {

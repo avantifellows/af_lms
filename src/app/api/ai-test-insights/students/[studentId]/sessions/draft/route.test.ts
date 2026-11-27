@@ -159,18 +159,22 @@ beforeEach(() => {
         revision: 1,
       };
       sessions.push(inserted);
-      return { rows: [{ revision: 1 }] };
+      expect(sql).toMatch(/RETURNING id, revision/);
+      return { rows: [{ id: String(inserted.id), revision: 1 }] };
     }
     if (/UPDATE ai_test_insight_sessions/.test(sql)) {
-      // The author's draft of the Student at the expected revision, as the WHERE says.
-      const [studentId, author, revision, date, areas, actions, other] = params as [
-        number, number, number, string | null, string | null, string | null, string | null,
+      // The author's draft of the Student by its id, at the expected revision, as the WHERE says.
+      const [studentId, author, revision, date, areas, actions, other, draftId] = params as [
+        number, number, number, string | null, string | null, string | null, string | null, number,
       ];
-      expect(sql).toMatch(/author_user_id = \$2/);
-      expect(sql).toMatch(/revision = \$3/);
-      expect(sql).toMatch(/state = 'draft'/);
+      expect(sql).toMatch(/WHERE id = \$8 AND student_id = \$1 AND author_user_id = \$2 AND revision = \$3 AND state = 'draft'/);
       const target = sessions.find(
-        (s) => s.student_id === studentId && s.author_user_id === author && s.revision === revision && s.state === "draft",
+        (s) =>
+          s.id === draftId &&
+          s.student_id === studentId &&
+          s.author_user_id === author &&
+          s.revision === revision &&
+          s.state === "draft",
       );
       if (!target) return { rows: [] };
       Object.assign(target, {
@@ -207,10 +211,10 @@ async function put(studentId: string, body: unknown, search = "") {
 describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => {
   describe("the first save", () => {
     it("inserts the Teacher's draft at revision 1 with the centre's School and Program and this year, and answers 200 { revision: 1 }", async () => {
-      const response = await put("1001", { ...NOTES, expectedRevision: 0 });
+      const response = await put("1001", { ...NOTES, draftId: null, expectedRevision: 0 });
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ revision: 1 });
+      expect(await response.json()).toEqual({ draftId: 60, revision: 1 });
       expect(sessions).toEqual([
         {
           id: 60,
@@ -270,7 +274,7 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
       });
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ revision: 0 });
+      expect(await response.json()).toEqual({ draftId: null, revision: 0 });
       expect(writes()).toHaveLength(0);
     });
 
@@ -299,10 +303,10 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
     it("updates the Teacher's draft at the expected revision, moves it to the next revision and sets updated_at", async () => {
       sessions = [storedDraft({ revision: 3 })];
 
-      const response = await put("1001", { ...NOTES, otherNotes: "Parents informed", expectedRevision: 3 });
+      const response = await put("1001", { ...NOTES, otherNotes: "Parents informed", draftId: 50, expectedRevision: 3 });
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ revision: 4 });
+      expect(await response.json()).toEqual({ draftId: 50, revision: 4 });
       expect(sessions).toEqual([
         storedDraft({
           session_date: "2026-11-27",
@@ -325,10 +329,11 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
         areasOfConcern: "",
         immediateActions: "",
         otherNotes: "",
+        draftId: 50,
         expectedRevision: 2,
       });
 
-      expect(await response.json()).toEqual({ revision: 3 });
+      expect(await response.json()).toEqual({ draftId: 50, revision: 3 });
       expect(sessions[0]).toMatchObject({
         session_date: null,
         areas_of_concern: null,
@@ -341,7 +346,7 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
     it("answers 409 stale with the current revision and changes no row when the revision is older", async () => {
       sessions = [storedDraft({ revision: 5 })];
 
-      const response = await put("1001", { ...NOTES, expectedRevision: 4 });
+      const response = await put("1001", { ...NOTES, draftId: 50, expectedRevision: 4 });
 
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({
@@ -355,7 +360,7 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
     it("answers 409 stale with revision 0 when the Teacher has no draft any more", async () => {
       sessions = [storedDraft({ state: "submitted", revision: 2 })];
 
-      const response = await put("1001", { ...NOTES, expectedRevision: 2 });
+      const response = await put("1001", { ...NOTES, draftId: 50, expectedRevision: 2 });
 
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({ code: "stale", currentRevision: 0 });
@@ -365,10 +370,27 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
     it("never touches another Teacher's draft of the same Student", async () => {
       sessions = [storedDraft({ author_user_id: 888, revision: 1 })];
 
-      const response = await put("1001", { ...NOTES, expectedRevision: 1 });
+      const response = await put("1001", { ...NOTES, draftId: 50, expectedRevision: 1 });
 
       expect(response.status).toBe(409);
       expect(sessions).toEqual([storedDraft({ author_user_id: 888, revision: 1 })]);
+    });
+
+    it("answers 409 stale and never touches the next draft when a tab still holds a draft already submitted", async () => {
+      // Tab 1 submitted draft 50 at revision 1 and began draft 51, also at
+      // revision 1. Tab 2 still holds draft 50 at revision 1.
+      const submitted = storedDraft({ id: 50, state: "submitted", revision: 2 });
+      const next = storedDraft({ id: 51, revision: 1, areas_of_concern: `Next conversation ${MARKER}` });
+      sessions = [submitted, next];
+
+      const response = await put("1001", { ...NOTES, draftId: 50, expectedRevision: 1 });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "stale", currentRevision: 1 });
+      expect(sessions).toEqual([
+        storedDraft({ id: 50, state: "submitted", revision: 2 }),
+        storedDraft({ id: 51, revision: 1, areas_of_concern: `Next conversation ${MARKER}` }),
+      ]);
     });
   });
 
@@ -417,6 +439,11 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
       ["a fractional expectedRevision", { ...NOTES, expectedRevision: 1.5 }, "expectedRevision"],
       ["a string expectedRevision", { ...NOTES, expectedRevision: "1" }, "expectedRevision"],
       ["no expectedRevision", { ...NOTES }, "expectedRevision"],
+      ["no draftId for a saved draft", { ...NOTES, expectedRevision: 2 }, "draftId"],
+      ["a null draftId for a saved draft", { ...NOTES, draftId: null, expectedRevision: 2 }, "draftId"],
+      ["a draftId with expectedRevision 0", { ...NOTES, draftId: 50, expectedRevision: 0 }, "draftId"],
+      ["a string draftId", { ...NOTES, draftId: "50", expectedRevision: 2 }, "draftId"],
+      ["a draftId of 0", { ...NOTES, draftId: 0, expectedRevision: 2 }, "draftId"],
     ])("answers 422 to %s, naming the field, and writes nothing", async (_label, body, field) => {
       const response = await put("1001", body);
 

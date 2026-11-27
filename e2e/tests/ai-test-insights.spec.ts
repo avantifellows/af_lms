@@ -1411,8 +1411,9 @@ test.describe("AI Test Insights tab", () => {
             const notes = { sessionDate: "2026-11-20", areasOfConcern: CONCERN, immediateActions: ACTIONS, otherNotes: null };
             const draft = await page.request.put(`${sessionsRoute()}/draft`, { data: { ...notes, expectedRevision: 0 } });
             expect(draft.status()).toBe(200);
+            const saved = (await draft.json()) as { draftId: number; revision: number };
             const submitted = await page.request.post(sessionsRoute(), {
-              data: { ...notes, expectedRevision: (await draft.json()).revision, openRequestKey: request.requestKey },
+              data: { ...notes, draftId: saved.draftId, expectedRevision: saved.revision, openRequestKey: request.requestKey },
             });
             expect(submitted.status()).toBe(201);
             const callsBefore = await enqueueOrWakeCalls();
@@ -1686,6 +1687,7 @@ test.describe("AI Test Insights tab", () => {
         expect(await ownRead.json()).toEqual({
           timeline: [],
           draft: {
+            draftId: (await readInsightSessions(pool, ids.studentIds.bhavya))[0].id,
             revision: 1,
             sessionDate: "2026-11-20",
             areasOfConcern: CONCERN,
@@ -1775,6 +1777,53 @@ test.describe("AI Test Insights tab", () => {
 
         await alert.getByRole("button", { name: "Reload notes" }).click();
         await expect(notesOf(olderTab).getByLabel("Areas of concern")).toHaveValue(CONCERN);
+      });
+
+      test("refuses a tab still holding a submitted draft, so the next draft is never overwritten or submitted twice", async ({
+        page,
+      }) => {
+        const NEXT_CONCERN = "Next conversation: optics [fix580]";
+        const notes = notesOf(page);
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await page.goto(studentUrl("bhavya"));
+        await notes.getByLabel("Areas of concern").fill(CONCERN);
+        await notes.getByLabel("Immediate actions").fill(ACTIONS);
+        await expect(notes.getByText("Saved", { exact: true })).toBeVisible();
+        // Tabs 2 and 3 open draft A at revision 1, as tab 1 saved it.
+        const tabs = [await page.context().newPage(), await page.context().newPage()];
+        for (const tab of tabs) {
+          await tab.goto(studentUrl("bhavya"));
+          await expect(notesOf(tab).getByLabel("Immediate actions")).toHaveValue(ACTIONS);
+        }
+        const [autosaveTab, submitTab] = tabs;
+
+        // Tab 1 submits A and starts draft B, also at revision 1.
+        await notes.getByRole("button", { name: "Submit" }).click();
+        await expect(notes.getByLabel("Areas of concern")).toHaveValue("");
+        await notes.getByLabel("Areas of concern").fill(NEXT_CONCERN);
+        await expect(notes.getByText("Saved", { exact: true })).toBeVisible();
+        const [submittedA, draftB] = await readInsightSessions(pool, ids.studentIds.bhavya);
+        expect([draftB.state, draftB.areasOfConcern, draftB.revision]).toEqual(["draft", NEXT_CONCERN, 1]);
+
+        // Tab 2's autosave of A is refused.
+        const refusedSave = autosaveTab.waitForResponse(
+          (response) => response.url().endsWith(draftRoute("bhavya")) && response.request().method() === "PUT",
+        );
+        await notesOf(autosaveTab).getByLabel("Other notes (optional)").fill("Stale tab text [fix580]");
+        expect((await refusedSave).status()).toBe(409);
+        await expect(notesOf(autosaveTab).getByRole("alert")).toContainText("These notes were changed in another tab.");
+
+        // Tab 3's Submit of A, unchanged so it saves nothing first, is refused.
+        const refusedSubmit = submitTab.waitForResponse(
+          (response) => response.url().endsWith(sessionsRoute("bhavya")) && response.request().method() === "POST",
+        );
+        await notesOf(submitTab).getByRole("button", { name: "Submit" }).click();
+        expect((await refusedSubmit).status()).toBe(409);
+        await expect(notesOf(submitTab).getByRole("alert")).toContainText("These notes were changed in another tab.");
+
+        expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([submittedA, draftB]);
+        expect((await readSessionNoteAudits(pool, ids.studentIds.bhavya)).map((audit) => audit.action)).toEqual(["submitted"]);
+        for (const tab of tabs) await tab.close();
       });
 
       test("answers 404 to a Teacher of another School and to a seat-confined Teacher outside their centre, and 403 to a PMU user", async ({
@@ -1963,7 +2012,7 @@ test.describe("AI Test Insights tab", () => {
           const [draft] = await readInsightSessions(pool, ids.studentIds.esha);
 
           const refused = await page.request.post(sessionsRoute("esha"), {
-            data: submitBody({ expectedRevision: draft.revision, openRequestKey: failed.requestKey }),
+            data: submitBody({ draftId: draft.id, expectedRevision: draft.revision, openRequestKey: failed.requestKey }),
           });
           expect(refused.status()).toBe(422);
           expect(await refused.json()).toMatchObject({ field: "openRequestKey" });
@@ -2002,10 +2051,14 @@ test.describe("AI Test Insights tab", () => {
           const [draft] = await readInsightSessions(pool, ids.studentIds.bhavya);
 
           const refusals = [
-            { body: submitBody({ expectedRevision: draft.revision, areasOfConcern: "  " }), field: "areasOfConcern" },
-            { body: submitBody({ expectedRevision: draft.revision, immediateActions: "" }), field: "immediateActions" },
+            { body: submitBody({ draftId: draft.id, expectedRevision: draft.revision, areasOfConcern: "  " }), field: "areasOfConcern" },
+            { body: submitBody({ draftId: draft.id, expectedRevision: draft.revision, immediateActions: "" }), field: "immediateActions" },
             {
-              body: submitBody({ expectedRevision: draft.revision, sessionDate: tomorrow.toISOString().slice(0, 10) }),
+              body: submitBody({
+                draftId: draft.id,
+                expectedRevision: draft.revision,
+                sessionDate: tomorrow.toISOString().slice(0, 10),
+              }),
               field: "sessionDate",
             },
           ];
@@ -2046,9 +2099,11 @@ test.describe("AI Test Insights tab", () => {
 
         /** Saves a draft for the Student and submits it as `page`'s Teacher: the session at revision 2. */
         async function submitFor(page: Page, key: string, openRequestKey: string | null = null): Promise<number> {
-          expect((await page.request.put(draftRoute(key), { data: draftBody() })).status()).toBe(200);
+          const saved = await page.request.put(draftRoute(key), { data: draftBody() });
+          expect(saved.status()).toBe(200);
+          const { draftId } = (await saved.json()) as { draftId: number };
           const submitted = await page.request.post(sessionsRoute(key), {
-            data: submitBody({ expectedRevision: 1, openRequestKey }),
+            data: submitBody({ draftId, expectedRevision: 1, openRequestKey }),
           });
           expect(submitted.status()).toBe(201);
           return ((await submitted.json()) as { sessionId: number }).sessionId;

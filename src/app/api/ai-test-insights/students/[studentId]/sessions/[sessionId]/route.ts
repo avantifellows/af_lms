@@ -4,7 +4,7 @@ import { parseAiTestInsightsId } from "@/lib/ai-test-insights-access";
 import { saveSessionNotes } from "@/lib/ai-test-insights-session-notes";
 import {
   parseSessionNotesEditRequest,
-  type SessionNotesDraftRequest,
+  type SessionNotesEditRequest,
   type SessionNotesEditResponse,
 } from "@/lib/ai-test-insights-session-notes-rules";
 import { sessionNotesRefusalResponse, withAiTestInsightsStudentWrite } from "@/lib/ai-test-insights-student-routes";
@@ -27,7 +27,7 @@ type Params = { studentId: string; sessionId: string };
 // School, Program, academic year and author. No log line holds note text: a
 // failure logs the Student's `student.id`, the session id, the status and the
 // error name.
-export const PATCH = withAiTestInsightsStudentWrite<SessionNotesDraftRequest, Params>(
+export const PATCH = withAiTestInsightsStudentWrite<SessionNotesEditRequest, Params>(
   {
     log: "AI Test Insights session edit failed",
     message: "Session Notes could not be saved",

@@ -181,17 +181,23 @@ beforeEach(() => {
       };
     }
     if (/UPDATE ai_test_insight_sessions/.test(sql)) {
-      // The author's draft of the Student at the expected revision, as the WHERE says.
-      expect(sql).toMatch(/WHERE student_id = \$1 AND author_user_id = \$2 AND revision = \$3 AND state = 'draft'/);
+      // The author's draft of the Student by its id, at the expected revision, as the WHERE says.
+      expect(sql).toMatch(
+        /WHERE id = \$12 AND student_id = \$1 AND author_user_id = \$2 AND revision = \$3 AND state = 'draft'/,
+      );
       expect(sql).toMatch(/state = 'submitted'/);
       expect(sql).toMatch(/revision = revision \+ 1/);
       expect(sql).toMatch(/submitted_at = \(now\(\) AT TIME ZONE 'UTC'\)/);
       expect(sql).toMatch(/updated_at = \(now\(\) AT TIME ZONE 'UTC'\)/);
-      const [studentId, author, revision, date, areas, actions, other, requestId, schoolId, programId, year] = params as [
-        number, number, number, string, string, string, string | null, number | null, number, number, string,
-      ];
+      const [studentId, author, revision, date, areas, actions, other, requestId, schoolId, programId, year, draftId] =
+        params as [number, number, number, string, string, string, string | null, number | null, number, number, string, number];
       const target = sessions.find(
-        (s) => s.student_id === studentId && s.author_user_id === author && s.revision === revision && s.state === "draft",
+        (s) =>
+          s.id === draftId &&
+          s.student_id === studentId &&
+          s.author_user_id === author &&
+          s.revision === revision &&
+          s.state === "draft",
       );
       if (!target) return { rows: [] };
       Object.assign(target, {
@@ -236,7 +242,7 @@ async function post(studentId: string, body: unknown, search = "") {
   );
 }
 
-const SUBMIT = { ...NOTES, expectedRevision: 3, openRequestKey: "req-completed-1001" };
+const SUBMIT = { ...NOTES, draftId: 50, expectedRevision: 3, openRequestKey: "req-completed-1001" };
 
 describe("POST /api/ai-test-insights/students/[studentId]/sessions", () => {
   describe("a submit", () => {
@@ -347,6 +353,24 @@ describe("POST /api/ai-test-insights/students/[studentId]/sessions", () => {
       expect(audits).toHaveLength(1);
     });
 
+    it("answers 409 stale and makes no second session when a tab still holds a draft already submitted", async () => {
+      // Tab 1 submitted draft 50 at revision 1 and began draft 51, also at
+      // revision 1. Tab 2 still holds draft 50 at revision 1 and presses Submit.
+      const submitted = storedDraft({ id: 50, state: "submitted", revision: 2 });
+      const next = storedDraft({ id: 51, revision: 1, areas_of_concern: `Next conversation ${MARKER}` });
+      sessions = [submitted, next];
+
+      const response = await post("1001", { ...SUBMIT, expectedRevision: 1 });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "stale", currentRevision: 1 });
+      expect(sessions).toEqual([
+        storedDraft({ id: 50, state: "submitted", revision: 2 }),
+        storedDraft({ id: 51, revision: 1, areas_of_concern: `Next conversation ${MARKER}` }),
+      ]);
+      expect(audits).toEqual([]);
+    });
+
     it("never submits another Teacher's draft of the same Student", async () => {
       sessions = [storedDraft({ author_user_id: 888 })];
 
@@ -392,7 +416,11 @@ describe("POST /api/ai-test-insights/students/[studentId]/sessions", () => {
       ["a fractional expectedRevision", { ...SUBMIT, expectedRevision: 1.5 }, "expectedRevision"],
       ["a string expectedRevision", { ...SUBMIT, expectedRevision: "3" }, "expectedRevision"],
       ["no expectedRevision", { ...NOTES, openRequestKey: null }, "expectedRevision"],
-      ["no openRequestKey", { ...NOTES, expectedRevision: 3 }, "openRequestKey"],
+      ["no draftId", { ...NOTES, expectedRevision: 3, openRequestKey: null }, "draftId"],
+      ["a null draftId", { ...SUBMIT, draftId: null }, "draftId"],
+      ["a string draftId", { ...SUBMIT, draftId: "50" }, "draftId"],
+      ["a fractional draftId", { ...SUBMIT, draftId: 50.5 }, "draftId"],
+      ["no openRequestKey", { ...NOTES, draftId: 50, expectedRevision: 3 }, "openRequestKey"],
       ["an openRequestKey that is a number", { ...SUBMIT, openRequestKey: 70 }, "openRequestKey"],
       ["an empty openRequestKey", { ...SUBMIT, openRequestKey: "" }, "openRequestKey"],
       ["an openRequestKey of 201 characters", { ...SUBMIT, openRequestKey: "k".repeat(201) }, "openRequestKey"],

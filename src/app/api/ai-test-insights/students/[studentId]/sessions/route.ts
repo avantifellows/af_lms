@@ -55,11 +55,12 @@ export const GET = withAiTestInsightsStudent(
 // session, 422 bad id, 403 no `ai_test_insights` view, 403 access not `edit`
 // (before any Student read), 404 Student missing, not listed or out of scope;
 // then the body (422 with the failing field: the final rule, with today in
-// India from the server's clock; an `expectedRevision` below 1; a bad
-// `openRequestKey`); then the acting User (409 `no_linked_user`). Then the
-// Session Notes module's answer: 201 `{ sessionId, revision }`; 409 `stale`
-// with `currentRevision` (0 when the caller has no draft) when there is no
-// draft at that revision, so a second press makes no second session; 422
+// India from the server's clock; an `expectedRevision` below 1; no `draftId`;
+// a bad `openRequestKey`); then the acting User (409 `no_linked_user`). Then
+// the Session Notes module's answer: 201 `{ sessionId, revision }`; 409
+// `stale` with `currentRevision` (0 when the caller has no draft) when there
+// is no draft with that id at that revision, so a second press (or a second
+// tab) makes no second session; 422
 // `openRequestKey` when the key is not a `completed` request of this Student.
 // No log line holds note text.
 //
@@ -69,13 +70,14 @@ export const POST = withAiTestInsightsStudentWrite(
   { log: "AI Test Insights session submit failed", message: "Session Notes could not be submitted" },
   (raw) => parseSessionNotesSubmitRequest(raw, getTodayIST()),
   async ({ student, actorUserId: author, body }) => {
-    const { expectedRevision, openRequestKey, ...notes } = body;
+    const { expectedRevision, draftId, openRequestKey, ...notes } = body;
     const result = await saveSessionNotes({
       mode: "submit",
       student,
       actorUserId: author,
       notes,
       expectedRevision,
+      draftId,
       openRequestKey,
     });
     if (result.outcome !== "submitted") return sessionNotesRefusalResponse(result);

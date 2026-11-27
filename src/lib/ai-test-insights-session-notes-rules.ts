@@ -146,6 +146,8 @@ export const SESSION_NOTES_EDIT_FAILED_MESSAGE = "These changes could not be sav
 
 /** The caller's own draft for a Student, as the history route returns it. */
 export interface SessionNotesDraft extends SessionNotesFields {
+  /** The draft's id; the next save and the submit send it as `draftId`. */
+  draftId: number;
   /** The draft's revision; the next save sends it as `expectedRevision`. */
   revision: number;
 }
@@ -165,13 +167,24 @@ export interface AiTestInsightsSessionsResponse {
   notesAccess: SessionNotesAccess;
 }
 
-/** `PUT …/sessions/draft`: the four fields and the revision the form last saw (0 for none). */
-export interface SessionNotesDraftRequest extends SessionNotesFields {
+/** `PATCH …/sessions/[sessionId]`: the four fields and the revision the edit started from. */
+export interface SessionNotesEditRequest extends SessionNotesFields {
   expectedRevision: number;
 }
 
-/** `POST …/sessions`: a submit of the draft at `expectedRevision`, linked to the open AI Summary. */
-export interface SessionNotesSubmitRequest extends SessionNotesDraftRequest {
+/**
+ * `PUT …/sessions/draft`: the four fields, and the draft the form last saw:
+ * its id and revision, or null and 0 for none yet. The id keeps a tab that
+ * still holds a submitted draft from saving over the next one, which also
+ * starts at revision 1.
+ */
+export interface SessionNotesDraftRequest extends SessionNotesEditRequest {
+  draftId: number | null;
+}
+
+/** `POST …/sessions`: a submit of the draft with that id at `expectedRevision`, linked to the open AI Summary. */
+export interface SessionNotesSubmitRequest extends SessionNotesEditRequest {
+  draftId: number;
   /** The key of the `completed` Insight Request the AI Summary card shows, or null when none is open. */
   openRequestKey: string | null;
 }
@@ -190,17 +203,36 @@ function parseExpectedRevision(raw: Record<string, unknown>, min: number): Parse
   return { ok: true, value: expectedRevision };
 }
 
+const DRAFT_ID_ERROR = "draftId must be the saved draft's id, or null before the first save.";
+
+/** `draftId`: a whole number 1 or more; absent or null too when `optional`. */
+function parseDraftId(raw: Record<string, unknown>, optional: boolean): ParsedRequest<number | null> {
+  const { draftId } = raw;
+  if (optional && (draftId === undefined || draftId === null)) return { ok: true, value: null };
+  if (typeof draftId !== "number" || !Number.isSafeInteger(draftId) || draftId < 1) {
+    return { ok: false, field: "draftId", error: DRAFT_ID_ERROR };
+  }
+  return { ok: true, value: draftId };
+}
+
 /**
- * A draft save body: the four fields under the draft rule, and
- * `expectedRevision`, a whole number 0 or more. Returns the first failing
- * field; never echoes a value.
+ * A draft save body: the four fields under the draft rule, `expectedRevision`
+ * (a whole number 0 or more) and `draftId`: null or absent with revision 0,
+ * else the saved draft's id. Returns the first failing field; never echoes a
+ * value.
  */
 export function parseSessionNotesRequest(raw: unknown, rule: "draft"): ParsedRequest<SessionNotesDraftRequest> {
   const checked = validateSessionNotes(raw, rule);
   if (!checked.ok) return checked;
-  const revision = parseExpectedRevision(raw as Record<string, unknown>, 0);
+  const body = raw as Record<string, unknown>;
+  const revision = parseExpectedRevision(body, 0);
   if (!revision.ok) return revision;
-  return { ok: true, value: { ...checked.notes, expectedRevision: revision.value } };
+  const draftId = parseDraftId(body, revision.value === 0);
+  if (!draftId.ok) return draftId;
+  if (revision.value === 0 && body.draftId !== undefined && body.draftId !== null) {
+    return { ok: false, field: "draftId", error: DRAFT_ID_ERROR };
+  }
+  return { ok: true, value: { ...checked.notes, expectedRevision: revision.value, draftId: draftId.value } };
 }
 
 /**
@@ -210,7 +242,7 @@ export function parseSessionNotesRequest(raw: unknown, rule: "draft"): ParsedReq
  * field; never echoes a value. A submit body is the same plus its open
  * request key.
  */
-export function parseSessionNotesEditRequest(raw: unknown, today: string): ParsedRequest<SessionNotesDraftRequest> {
+export function parseSessionNotesEditRequest(raw: unknown, today: string): ParsedRequest<SessionNotesEditRequest> {
   const checked = validateSessionNotes(raw, "final", today);
   if (!checked.ok) return checked;
   const revision = parseExpectedRevision(raw as Record<string, unknown>, 1);
@@ -220,12 +252,15 @@ export function parseSessionNotesEditRequest(raw: unknown, today: string): Parse
 
 /**
  * A submit body: the edit body (the final rule, `expectedRevision` 1 or more:
- * a submit needs a saved draft), and `openRequestKey`, null or a key of 1 to
- * 200 characters. Returns the first failing field; never echoes a value.
+ * a submit needs a saved draft), the saved draft's `draftId`, and
+ * `openRequestKey`, null or a key of 1 to 200 characters. Returns the first
+ * failing field; never echoes a value.
  */
 export function parseSessionNotesSubmitRequest(raw: unknown, today: string): ParsedRequest<SessionNotesSubmitRequest> {
   const checked = parseSessionNotesEditRequest(raw, today);
   if (!checked.ok) return checked;
+  const draftId = parseDraftId(raw as Record<string, unknown>, false);
+  if (!draftId.ok) return draftId;
   const { openRequestKey } = raw as Record<string, unknown>;
   if (
     openRequestKey !== null &&
@@ -233,11 +268,12 @@ export function parseSessionNotesSubmitRequest(raw: unknown, today: string): Par
   ) {
     return { ok: false, field: "openRequestKey", error: "openRequestKey must be a request key or null." };
   }
-  return { ok: true, value: { ...checked.value, openRequestKey } };
+  return { ok: true, value: { ...checked.value, draftId: draftId.value as number, openRequestKey } };
 }
 
-/** `PUT …/sessions/draft` 200: the draft's revision now (0 while nothing is stored). */
+/** `PUT …/sessions/draft` 200: the draft's id and revision now (null and 0 while nothing is stored). */
 export interface SessionNotesDraftResponse {
+  draftId: number | null;
   revision: number;
 }
 

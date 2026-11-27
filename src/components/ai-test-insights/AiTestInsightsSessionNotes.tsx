@@ -72,20 +72,26 @@ function initialValues(draft: SessionNotesDraft | null): SessionNotesFormValues 
 
 class StaleNotesError extends Error {}
 
-/** Saves the draft at `expectedRevision`; returns the revision the route answered. */
-async function putDraft(url: string, values: SessionNotesFormValues, expectedRevision: number): Promise<number> {
-  const request: SessionNotesDraftRequest = { ...asSessionNotes(values), expectedRevision };
+/** The draft the form last saw: its id (null before the first save) and revision. */
+type DraftVersion = { draftId: number | null; revision: number };
+
+/** Saves the draft as `seen`; returns the draft id and revision the route answered. */
+async function putDraft(url: string, values: SessionNotesFormValues, seen: DraftVersion): Promise<DraftVersion> {
+  const request: SessionNotesDraftRequest = { ...asSessionNotes(values), draftId: seen.draftId, expectedRevision: seen.revision };
   const response = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
-  const body = (await response.json().catch(() => null)) as { revision?: unknown; code?: unknown } | null;
+  const body = (await response.json().catch(() => null)) as { draftId?: unknown; revision?: unknown; code?: unknown } | null;
   if (response.status === 409 && body?.code === SESSION_NOTES_STALE_CODE) {
     throw new StaleNotesError(SESSION_NOTES_STALE_MESSAGE);
   }
-  if (!response.ok || typeof body?.revision !== "number") throw new Error("Session Notes could not be saved");
-  return body.revision;
+  const draftId = body?.draftId ?? null;
+  if (!response.ok || typeof body?.revision !== "number" || (draftId !== null && typeof draftId !== "number")) {
+    throw new Error("Session Notes could not be saved");
+  }
+  return { draftId, revision: body.revision };
 }
 
 /** Asks the browser to confirm leaving the page while `unsaved`. */
@@ -112,7 +118,7 @@ function useSessionNotesDraft(draft: SessionNotesDraft | null, draftUrl: string)
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [stale, setStale] = useState(false);
   const staleRef = useRef(false);
-  const revisionRef = useRef(draft?.revision ?? 0);
+  const versionRef = useRef<DraftVersion>({ draftId: draft?.draftId ?? null, revision: draft?.revision ?? 0 });
   const refs = useDraftAutosaveRefs(initial);
 
   const sendable = validateSessionNotes(asSessionNotes(values), "draft").ok && !stale;
@@ -124,7 +130,7 @@ function useSessionNotesDraft(draft: SessionNotesDraft | null, draftUrl: string)
     failed: status === "failed",
     delayMs: AUTOSAVE_DELAY_MS,
     save: async (next) => {
-      revisionRef.current = await putDraft(draftUrl, next, revisionRef.current);
+      versionRef.current = await putDraft(draftUrl, next, versionRef.current);
     },
     isStopped: () => staleRef.current,
     onSaving: () => setStatus("saving"),
@@ -146,7 +152,7 @@ function useSessionNotesDraft(draft: SessionNotesDraft | null, draftUrl: string)
   useLeaveGuard(changed || status === "failed" || status === "saving");
   const update = (field: SessionNotesField, value: string) =>
     setValues((current) => ({ ...current, [field]: value }));
-  return { values, update, status, stale, changed, retry, markStale, revision: () => revisionRef.current };
+  return { values, update, status, stale, changed, retry, markStale, version: () => versionRef.current };
 }
 
 /** "Saving…", "Saved" once nothing is left to send, or nothing. */
@@ -174,7 +180,7 @@ function SessionNotesForm({
   /** The draft became an Insight Session. */
   onSubmitted: () => void;
 }) {
-  const { values, update, status, stale, changed, retry, markStale, revision } = useSessionNotesDraft(draft, draftUrl);
+  const { values, update, status, stale, changed, retry, markStale, version } = useSessionNotesDraft(draft, draftUrl);
   const [submitting, setSubmitting] = useState(false);
   const [submitFailed, setSubmitFailed] = useState(false);
   const today = getTodayIST();
@@ -189,9 +195,12 @@ function SessionNotesForm({
       setSubmitting(false);
       return;
     }
+    const { draftId, revision } = version();
     const request: SessionNotesSubmitRequest = {
       ...asSessionNotes(values),
-      expectedRevision: revision(),
+      // A saved draft always has an id; 0 is refused like a missing draft.
+      draftId: draftId ?? 0,
+      expectedRevision: revision,
       openRequestKey: openInsightRequestKey(openRequest),
     };
     const outcome = await sendSessionNotes(sessionsUrl, "POST", request);

@@ -33,6 +33,7 @@ const UTC_NOW = "(now() AT TIME ZONE 'UTC')";
 const ONE_DRAFT_INDEX = "ati_sessions_author_student_draft_unique";
 
 type DraftRow = {
+  id: string | number;
   revision: number;
   session_date: string | null;
   areas_of_concern: string | null;
@@ -46,7 +47,8 @@ type DraftRow = {
  */
 export async function readOwnDraft(studentId: number, authorUserId: number): Promise<SessionNotesDraft | null> {
   const rows = await query<DraftRow>(
-    `SELECT revision,
+    `SELECT id,
+            revision,
             to_char(session_date, 'YYYY-MM-DD') AS session_date,
             areas_of_concern,
             immediate_actions,
@@ -58,6 +60,7 @@ export async function readOwnDraft(studentId: number, authorUserId: number): Pro
   const row = rows[0];
   if (!row) return null;
   return {
+    draftId: Number(row.id),
     revision: Number(row.revision),
     sessionDate: row.session_date,
     areasOfConcern: row.areas_of_concern,
@@ -217,8 +220,8 @@ export type SessionNotesRefusal =
   | { outcome: "stale"; currentRevision: number }
   | { outcome: "invalid"; field: SessionNotesField | "openRequestKey"; error: string };
 
-/** What a draft save did. */
-type DraftSaveResult = { outcome: "saved"; revision: number } | SessionNotesRefusal;
+/** What a draft save did: the draft's id (null while nothing is stored) and revision now. */
+type DraftSaveResult = { outcome: "saved"; draftId: number | null; revision: number } | SessionNotesRefusal;
 /** What a submit did. */
 type SubmitResult = { outcome: "submitted"; sessionId: number; revision: number } | SessionNotesRefusal;
 /**
@@ -247,8 +250,9 @@ type SaveBase = {
   notes: unknown;
   expectedRevision: number;
 };
-type DraftParams = SaveBase & { mode: "draft" };
-type SubmitParams = SaveBase & { mode: "submit"; openRequestKey: string | null };
+/** `draftId`: the id of the draft the caller last saw (null with revision 0). */
+type DraftParams = SaveBase & { mode: "draft"; draftId: number | null };
+type SubmitParams = SaveBase & { mode: "submit"; draftId: number; openRequestKey: string | null };
 type EditParams = SaveBase & { mode: "edit"; sessionId: number };
 
 /**
@@ -261,14 +265,16 @@ type EditParams = SaveBase & { mode: "edit"; sessionId: number };
  *   fields are blank nothing is written and the revision is 0. When the
  *   author already has a draft (the one-draft unique index), stale with that
  *   draft's revision.
- * - 1 or more: updates the author's draft of that Student at that revision
- *   to the next one. No row updated is stale, with the current revision (0
- *   when the author has no draft).
+ * - 1 or more: updates the author's draft of that Student with that id
+ *   (`draftId`) at that revision to the next one. No row updated is stale,
+ *   with the current revision (0 when the author has no draft). The id
+ *   matters: every new draft starts at revision 1, so a tab still holding a
+ *   draft submitted elsewhere would otherwise save over the next one.
  *
  * Text is stored as typed; a blank field is stored as null. No audit row.
  *
  * `submit` mode (the final rule, with today in India from the server's
- * clock): turns the author's draft of that Student at `expectedRevision` into
+ * clock): turns the author's draft of that Student with that id at `expectedRevision` into
  * a `submitted` Insight Session at the next revision, with the text trimmed (a
  * blank Other notes is null), `submitted_at`, the School, Program and current
  * academic year of the Student context, and the open request linked; and
@@ -323,20 +329,20 @@ async function saveDraft(params: DraftParams, notes: SessionNotesFields): Promis
   });
 
   if (expectedRevision === 0) {
-    if (text.every((value) => value === null)) return { outcome: "saved", revision: 0 };
+    if (text.every((value) => value === null)) return { outcome: "saved", draftId: null, revision: 0 };
     try {
-      const revision = await withTransaction(async (client) => {
-        const inserted = await client.query<{ revision: number }>(
+      const saved = await withTransaction(async (client) => {
+        const inserted = await client.query<{ id: string | number; revision: number }>(
           `INSERT INTO ai_test_insight_sessions
              (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
               areas_of_concern, immediate_actions, other_notes, revision, inserted_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, 'draft', $6::date, $7, $8, $9, 1, ${UTC_NOW}, ${UTC_NOW})
-           RETURNING revision`,
+           RETURNING id, revision`,
           [student.studentId, student.school.id, student.programId, CURRENT_ACADEMIC_YEAR, actorUserId, sessionDate, ...text],
         );
-        return Number(inserted.rows[0].revision);
+        return { draftId: Number(inserted.rows[0].id), revision: Number(inserted.rows[0].revision) };
       });
-      return { outcome: "saved", revision };
+      return { outcome: "saved", ...saved };
     } catch (error) {
       if (!isOneDraftConflict(error)) throw error;
       return stale(student.studentId, actorUserId);
@@ -352,18 +358,18 @@ async function saveDraft(params: DraftParams, notes: SessionNotesFields): Promis
            other_notes = $7,
            revision = revision + 1,
            updated_at = ${UTC_NOW}
-       WHERE student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft'
+       WHERE id = $8 AND student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft'
        RETURNING revision`,
-      [student.studentId, actorUserId, expectedRevision, sessionDate, ...text],
+      [student.studentId, actorUserId, expectedRevision, sessionDate, ...text, params.draftId],
     );
     return updated.rows[0] ? Number(updated.rows[0].revision) : null;
   });
   if (revision === null) return stale(student.studentId, actorUserId);
-  return { outcome: "saved", revision };
+  return { outcome: "saved", draftId: params.draftId, revision };
 }
 
 async function submitDraft(params: SubmitParams, notes: SessionNotesFields): Promise<SubmitResult> {
-  const { student, actorUserId, expectedRevision, openRequestKey } = params;
+  const { student, actorUserId, expectedRevision, draftId, openRequestKey } = params;
   const text = trimmedText(notes);
 
   const result = await withTransaction(async (client): Promise<SubmitResult | null> => {
@@ -395,7 +401,7 @@ async function submitDraft(params: SubmitParams, notes: SessionNotesFields): Pro
            submitted_at = ${UTC_NOW},
            revision = revision + 1,
            updated_at = ${UTC_NOW}
-       WHERE student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft'
+       WHERE id = $12 AND student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft'
        RETURNING id, revision`,
       [
         student.studentId,
@@ -407,6 +413,7 @@ async function submitDraft(params: SubmitParams, notes: SessionNotesFields): Pro
         student.school.id,
         student.programId,
         CURRENT_ACADEMIC_YEAR,
+        draftId,
       ],
     );
     const row = updated.rows[0];
@@ -423,7 +430,7 @@ async function submitDraft(params: SubmitParams, notes: SessionNotesFields): Pro
   return result ?? stale(student.studentId, actorUserId);
 }
 
-type StoredSubmittedRow = DraftRow & { author_user_id: string | number };
+type StoredSubmittedRow = Omit<DraftRow, "id"> & { author_user_id: string | number };
 
 async function editSubmitted(params: EditParams, notes: SessionNotesFields): Promise<EditResult> {
   const { student, actorUserId, expectedRevision, sessionId } = params;

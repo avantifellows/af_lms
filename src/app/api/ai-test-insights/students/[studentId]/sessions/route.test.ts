@@ -52,6 +52,7 @@ const NO_FEATURE_ROLES = [
 type DraftRow = {
   student_id: number;
   author_user_id: number;
+  id: string;
   state: string;
   revision: number;
   session_date: string | null;
@@ -79,6 +80,7 @@ function row(role: string, overrides: Record<string, unknown> = {}) {
 }
 
 const draftOf = (author: number, overrides: Partial<DraftRow> = {}): DraftRow => ({
+  id: "50",
   student_id: 1001,
   author_user_id: author,
   state: "draft",
@@ -132,6 +134,7 @@ describe("GET /api/ai-test-insights/students/[studentId]/sessions", () => {
     expect(await response.json()).toEqual({
       timeline: [],
       draft: {
+        draftId: 50,
         revision: 2,
         sessionDate: "2026-11-26",
         areasOfConcern: `Concern ${MARKER}`,
