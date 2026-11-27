@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 
+import AiTestInsightsPerformanceCard from "@/components/ai-test-insights/AiTestInsightsPerformanceCard";
 import AiTestInsightsStudentCard from "@/components/ai-test-insights/AiTestInsightsStudentCard";
 import PageHeader from "@/components/PageHeader";
 import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
 import { readAiTestInsightsStudentCard } from "@/lib/ai-test-insights-student-card";
 import { authOptions } from "@/lib/auth";
+import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 // The AI Test Insights Student page (#550, physical centres only). Student
 // access gates it: no session goes to the sign-in page, and any refusal —
@@ -50,6 +52,12 @@ export default async function AiTestInsightsStudentPage({ params, searchParams }
           <span aria-hidden="true">←</span> Back to AI Test Insights
         </Link>
         <AiTestInsightsStudentCard student={card} />
+        <AiTestInsightsPerformanceCard
+          schoolUdise={student.school.udise || student.school.code}
+          grade={student.grade}
+          program={PROGRAM_ID_TO_LABEL[student.programId] ?? null}
+          uid={String(student.userId)}
+        />
       </main>
     </div>
   );

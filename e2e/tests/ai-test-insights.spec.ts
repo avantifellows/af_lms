@@ -68,6 +68,47 @@ async function expectNotFound(page: Page, url: string) {
   await expect(page.getByRole("region", { name: "Student" })).toHaveCount(0);
 }
 
+// A Student Report written by hand. The warehouse is not available in e2e, so,
+// as the Performance specs do, the browser's Student Report request is
+// answered with it.
+const STUDENT_REPORT = {
+  student: {
+    uid: "0", studentId: "E2E-ATI-ESHA", name: "Esha Ekka", gender: null, category: null, stream: "engineering",
+    examStream: "engineering", predicted: "M1", mode: "M2", status: "Improving", latestAl: null,
+    toNext: { kind: "none" }, change: null, latestPct: 45, results: {},
+    trend: { points: [38, 45], direction: "Improving", slope: 7, recent: 2 },
+  },
+  chapters: [],
+  tests: [
+    {
+      sessionId: "s3", name: "Major Test 2", date: "2026-10-12", exam: "JEE Main", absent: false, retest: false,
+      level: "M2", rank: 4, takers: 38, change: 7,
+      overall: { marks: 135, max: 300, pct: 45, correct: 36, wrong: 9, partial: 0, skipped: 30 },
+      subjects: [{ subject: "Physics", marks: 40, max: 100, pct: 40, correct: 11, wrong: 4, partial: 0, skipped: 10 }],
+    },
+    {
+      sessionId: "s2", name: "Part Test 3", date: "2026-09-20", exam: "JEE Main", absent: true, retest: false,
+      level: null, rank: null, takers: null, change: null, overall: null, subjects: [],
+    },
+    {
+      sessionId: "s1", name: "Major Test 1", date: "2026-08-10", exam: "JEE Main", absent: false, retest: false,
+      level: "M3", rank: 9, takers: 40, change: null,
+      overall: { marks: 114, max: 300, pct: 38, correct: 30, wrong: 6, partial: 0, skipped: 39 },
+      subjects: [],
+    },
+  ],
+};
+
+/** Answers the browser's Student Report request; returns the URLs it asked for. */
+async function answerStudentReport(page: Page, status: number, json: unknown): Promise<URL[]> {
+  const asked: URL[] = [];
+  await page.route("**/api/quiz-analytics/*/student-report?*", async (route) => {
+    asked.push(new URL(route.request().url()));
+    await route.fulfill({ status, json });
+  });
+  return asked;
+}
+
 function expectAfterTeacherFeedback(names: string[]) {
   // Teacher Feedback is not a Teacher's tab; Quiz Sessions comes before it.
   const before = names.includes("Teacher Feedback") ? "Teacher Feedback" : "Quiz Sessions";
@@ -277,6 +318,55 @@ test.describe("AI Test Insights tab", () => {
         "href",
         `/school/${AI_TEST_INSIGHTS_SCHOOL.code}?tab=ai_test_insights`,
       );
+    });
+
+    test("shows the performance card from the Student Report of the Student's School, Grade and Program", async ({
+      adminPage,
+    }) => {
+      const asked = await answerStudentReport(adminPage, 200, STUDENT_REPORT);
+      await adminPage.goto(studentUrl("esha", ids.nodalCentreId));
+
+      const performance = adminPage.getByRole("region", { name: "Performance" });
+      const table = performance.getByRole("table");
+      await expect(table.locator("tbody tr")).toHaveCount(3);
+      expect(await table.locator("tbody tr td:first-child").allTextContents()).toEqual([
+        "▸2026-10-12 · Major Test 2",
+        "2026-09-20 · Part Test 3",
+        "▸2026-08-10 · Major Test 1",
+      ]);
+      await expect(performance.getByRole("img", { name: "Score trend: Improving over the last 2 tests" })).toBeVisible();
+      await expect(performance.getByText("Predicted")).toHaveCount(0);
+
+      await performance.getByRole("button", { name: /Major Test 2/ }).click();
+      await expect(table.locator("tbody tr")).toHaveCount(4);
+      await expect(table.getByRole("cell", { name: "Physics" })).toBeVisible();
+
+      // Esha opened from the Nodal centre: its School, her Grade, the Nodal Program and her user id.
+      const userId = (await pool.query<{ user_id: string }>("SELECT user_id FROM student WHERE id = $1", [ids.studentIds.esha]))
+        .rows[0].user_id;
+      expect(asked).toHaveLength(1);
+      expect(asked[0].pathname).toBe(`/api/quiz-analytics/${AI_TEST_INSIGHTS_SCHOOL.udise}/student-report`);
+      expect(Object.fromEntries(asked[0].searchParams)).toEqual({ grade: "11", program: "JNV Nodal", student: String(userId) });
+    });
+
+    test('shows "No test results yet" when the Student Report does not find the Student', async ({ adminPage }) => {
+      await answerStudentReport(adminPage, 404, { error: "Student not found in this grade" });
+      await adminPage.goto(studentUrl("asha"));
+
+      await expect(adminPage.getByRole("region", { name: "Performance" }).getByText("No test results yet")).toBeVisible();
+    });
+
+    test("keeps the Student card when the Student Report fails, and Retry asks again", async ({ adminPage }) => {
+      const asked = await answerStudentReport(adminPage, 500, { error: "Failed to fetch the student report" });
+      await adminPage.goto(studentUrl("asha"));
+
+      const performance = adminPage.getByRole("region", { name: "Performance" });
+      await expect(performance.getByRole("alert")).toContainText("Test results could not be loaded");
+      expect(await studentCard(adminPage)).toEqual(AI_TEST_INSIGHTS_CARDS.asha);
+
+      await performance.getByRole("button", { name: "Retry" }).click();
+      await expect.poll(() => asked.length).toBe(2);
+      await expect(performance.getByRole("alert")).toBeVisible();
     });
 
     test("shows the page to a Teacher, Program Manager, Program Admin and Admin", async ({

@@ -1001,3 +1001,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `is_current`, `group_id = batch.id`) whose `batch.program_id` is the context's Program; Grade
   comes from the context, and the session values from `readAiTestInsightsCounts`. Null when the
   Student is gone (page → not found).
+- **Performance card (#558):** no new read. The Student page's client card asks the existing
+  Student Report endpoint (`/api/quiz-analytics/[udise]/student-report`, gate and data unchanged)
+  with `school.udise || school.code`, the context's Grade, `PROGRAM_ID_TO_LABEL[programId]` and
+  `student=<user.id>` (the warehouse's `enrollment_user_id`), and shows only the score graph and
+  the per-test table. It lists every test the report lists; limiting to Major, Full Syllabus and
+  Mock is the test picker's job.
