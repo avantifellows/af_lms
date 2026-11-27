@@ -26,7 +26,8 @@
 // says who reads submitted notes. Submit is off while a required field is
 // blank, the date is empty or after today in India, a field is over the
 // limit, or a save or submit is running. It first saves any pending change,
-// then submits at the draft's revision. After a submit the form is blank
+// then submits at the draft's revision; the fields are locked meanwhile, as
+// the submit sends what they held when pressed. After a submit the form is blank
 // again (dated today) and the page is told (`onSubmitted`), so the Student
 // card's counts move. A stale submit shows the same other-tab message as a
 // stale save.
@@ -230,7 +231,7 @@ function SessionNotesForm({
 
   return (
     <div className="space-y-4">
-      <SessionNotesInputs values={values} onChange={update} today={today} />
+      <SessionNotesInputs values={values} onChange={update} today={today} disabled={submitting} />
       {saveState}
       <div className="space-y-1 text-sm text-text-secondary">
         <p>{sessionNotesLinkText(openRequest)}</p>

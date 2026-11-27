@@ -5,7 +5,8 @@
 // fields as the Session Notes form, filled with the entry's notes, with "Save
 // changes" and Cancel. Nothing saves by itself. "Save changes" is off while
 // the final rule fails (a required field blank, the date empty or after today
-// in India, a field over the limit) or a save is running; it sends the fields
+// in India, a field over the limit) or a save is running, and the fields and
+// Cancel are locked while it runs, so nothing typed is lost; it sends the fields
 // at the entry's revision to the session's edit route. After a save the page
 // reads the timeline again (`onSaved`). Cancel puts the entry back and sends
 // nothing. A 409 `stale` (another tab saved first) shows the other-tab message
@@ -80,6 +81,7 @@ export default function SessionNotesEdit({
         values={values}
         onChange={(field: SessionNotesField, value: string) => setValues((current) => ({ ...current, [field]: value }))}
         today={today}
+        disabled={state === "saving"}
       />
       {state === "stale" && (
         <RetryAlert onRetry={onReload} retryLabel="Reload notes">
@@ -95,7 +97,7 @@ export default function SessionNotesEdit({
         <Button onClick={() => void save()} disabled={!canSave}>
           Save changes
         </Button>
-        <Button variant="secondary" onClick={onCancel}>
+        <Button variant="secondary" onClick={onCancel} disabled={state === "saving"}>
           Cancel
         </Button>
       </div>

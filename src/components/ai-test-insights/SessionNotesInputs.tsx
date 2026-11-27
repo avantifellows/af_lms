@@ -79,11 +79,13 @@ function TextField({
   value,
   onChange,
   error,
+  disabled,
 }: {
   field: SessionNotesTextField;
   value: string;
   onChange: (value: string) => void;
   error: string | null;
+  disabled: boolean;
 }) {
   const id = useId();
   return (
@@ -95,6 +97,7 @@ function TextField({
         id={id}
         rows={4}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         aria-invalid={error ? true : undefined}
         aria-describedby={`${id}-count${error ? ` ${id}-error` : ""}`}
@@ -112,7 +115,17 @@ function TextField({
   );
 }
 
-function DateField({ value, onChange, error }: { value: string; onChange: (value: string) => void; error: string | null }) {
+function DateField({
+  value,
+  onChange,
+  error,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  error: string | null;
+  disabled: boolean;
+}) {
   const id = useId();
   return (
     <div>
@@ -123,6 +136,7 @@ function DateField({ value, onChange, error }: { value: string; onChange: (value
         id={id}
         type="date"
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         aria-invalid={error ? true : undefined}
         className={`mt-1 min-h-[44px] ${baseInputClasses}`}
@@ -132,15 +146,21 @@ function DateField({ value, onChange, error }: { value: string; onChange: (value
   );
 }
 
-/** The four inputs, in the form's order. `today` is today in India, `YYYY-MM-DD`. */
+/**
+ * The four inputs, in the form's order. `today` is today in India,
+ * `YYYY-MM-DD`. `disabled` locks them while a submit or an edit's save is
+ * sending what they hold, so nothing typed meanwhile is lost.
+ */
 export default function SessionNotesInputs({
   values,
   onChange,
   today,
+  disabled = false,
 }: {
   values: SessionNotesFormValues;
   onChange: (field: SessionNotesField, value: string) => void;
   today: string;
+  disabled?: boolean;
 }) {
   return (
     <>
@@ -148,6 +168,7 @@ export default function SessionNotesInputs({
         value={values.sessionDate}
         onChange={(value) => onChange("sessionDate", value)}
         error={dateError(values, today)}
+        disabled={disabled}
       />
       {SESSION_NOTES_TEXT_FIELDS.map((field) => (
         <TextField
@@ -156,6 +177,7 @@ export default function SessionNotesInputs({
           value={values[field]}
           onChange={(value) => onChange(field, value)}
           error={fieldError(field, values)}
+          disabled={disabled}
         />
       ))}
     </>

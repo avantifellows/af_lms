@@ -503,6 +503,23 @@ describe("AiTestInsightsHistory Edit", () => {
     });
   });
 
+  it("locks the four fields and Cancel while a save is running, and unlocks them when it fails", async () => {
+    const pending = deferred();
+    edits = [pending];
+    const entry = editAshasEntry();
+    const labels = ["Date of conversation", "Areas of concern", "Immediate actions", "Other notes (optional)"];
+
+    fireEvent.click(saveButton(entry));
+    await tick(0);
+    for (const label of labels) expect(field(entry, label)).toBeDisabled();
+    expect(within(entry).getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    pending.resolve({ status: 500, body: { error: "Session Notes could not be saved" } });
+    await tick(0);
+    for (const label of labels) expect(field(entry, label)).toBeEnabled();
+    expect(within(entry).getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
+
   it("puts the entry back as it was on Cancel and sends nothing", () => {
     const entry = editAshasEntry();
     type(entry, "Areas of concern", "Changed my mind");

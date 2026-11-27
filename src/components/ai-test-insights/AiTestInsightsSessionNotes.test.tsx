@@ -542,6 +542,36 @@ describe("AiTestInsightsSessionNotes", () => {
       ]);
     });
 
+    it("locks the four fields while the submit is running, and unlocks them when it fails", async () => {
+      const submit = deferredSave();
+      submits = [submit];
+      await renderNotes();
+      fillRequired();
+      const labels = ["Date of conversation", "Areas of concern", "Immediate actions", "Other notes (optional)"];
+
+      fireEvent.click(submitButton());
+      await tick(0);
+      for (const label of labels) expect(field(label)).toBeDisabled();
+
+      await act(async () => submit.resolve({ status: 500, body: { error: "Session Notes could not be submitted" } }));
+      for (const label of labels) expect(field(label)).toBeEnabled();
+    });
+
+    it("locks the four fields while the pending save runs before the submit", async () => {
+      const save = deferredSave();
+      saves = [save];
+      await renderNotes();
+      fillRequired();
+
+      fireEvent.click(submitButton());
+      await tick(0);
+      expect(field("Areas of concern")).toBeDisabled();
+
+      await act(async () => save.resolve({ status: 200, body: { draftId: DRAFT_ID, revision: 1 } }));
+      await tick(0);
+      expect(onSubmitted).toHaveBeenCalledTimes(1);
+    });
+
     it("is off while the submit is running", async () => {
       const submit = deferredSave();
       submits = [submit];
