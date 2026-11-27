@@ -12,7 +12,7 @@ edges:
     condition: when the e2e run itself fails
   - target: context/data-access.md
     condition: for which tables LMS reads and writes directly
-last_updated: 2026-10-28
+last_updated: 2026-11-27
 ---
 
 # Mirror db-service schema in e2e
@@ -58,6 +58,11 @@ and `20261030120000_add_blended_learning_screener_feedback.sql`, 2026-10-28; col
   `pg_dump` prints a random `\restrict` token per dump; drop those lines before diffing.
 - Function bodies are compared verbatim, so copy them exactly. Comments inside a body show up
   in the diff.
+- A later migration that replaces a CHECK (as db-service `20260616173000` does for
+  `am_eval_benchmarks_status_check`) goes in the same fixture file after the table, in a `DO` block
+  that drops and re-adds the CHECK only while `pg_get_constraintdef` still lacks the new value, so a
+  second run changes nothing (`20261127120000_add_ai_test_insights_schema.sql`, #554). Confirm which
+  migrations touch the tables with `git -C ../db-service grep -l <table prefix> <ref> -- priv/repo/migrations`.
 
 ## Verify
 - [ ] `diff` of the two schema dumps is empty.

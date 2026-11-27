@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-25
+last_updated: 2026-11-27
 ---
 
 # Data Access
@@ -31,7 +31,7 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 ## 1. PostgreSQL — `query()` (the default)
 `import { query } from "@/lib/db"` → `query<RowType>(sql, params)`. Returns `rows`.
 - **All reads** (lists, dashboards, detail pages, scope resolution).
-- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum (including Curriculum Plans: `lms_curriculum_plans`, `lms_curriculum_plan_chapters`, `lms_curriculum_plan_assignments`, written through `src/lib/curriculum-plans.ts` (Plan Assignments, by plan and by Centre, plus Centre coverage through `src/lib/curriculum-plan-assignments.ts`) in `withTransaction()` with the plan row locked `FOR UPDATE`; the plan schema preflight (`checkCurriculumPlansSchema`) lists every column those writes use, audit columns included, so a partly applied migration 503s; db-service owns their migrations, mirrored by `e2e/fixtures/migrations/20261019120000_add_lms_curriculum_plans.sql` and `20261023091700_widen_lms_curriculum_plan_exam_tracks.sql`, which lets `exam_tracks` include `cet` and indexes the remaining foreign keys), permissions/centre tables, Academic Mentor-Mentee Mappings, Holistic Mentorship product records, and intervention flags (`lms_student_intervention_flags` + append-only `lms_student_intervention_flag_updates`; a DB trigger allows only clearing `body`; mirrored for e2e, idempotently, by `e2e/fixtures/migrations/20261027130000_add_lms_student_intervention_flags.sql`).
+- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum (including Curriculum Plans: `lms_curriculum_plans`, `lms_curriculum_plan_chapters`, `lms_curriculum_plan_assignments`, written through `src/lib/curriculum-plans.ts` (Plan Assignments, by plan and by Centre, plus Centre coverage through `src/lib/curriculum-plan-assignments.ts`) in `withTransaction()` with the plan row locked `FOR UPDATE`; the plan schema preflight (`checkCurriculumPlansSchema`) lists every column those writes use, audit columns included, so a partly applied migration 503s; db-service owns their migrations, mirrored by `e2e/fixtures/migrations/20261019120000_add_lms_curriculum_plans.sql` and `20261023091700_widen_lms_curriculum_plan_exam_tracks.sql`, which lets `exam_tracks` include `cet` and indexes the remaining foreign keys), permissions/centre tables, Academic Mentor-Mentee Mappings, Holistic Mentorship product records, and intervention flags (`lms_student_intervention_flags` + append-only `lms_student_intervention_flag_updates`; a DB trigger allows only clearing `body`; mirrored for e2e, idempotently, by `e2e/fixtures/migrations/20261027130000_add_lms_student_intervention_flags.sql`), and AI Test Insights requests and sessions (`ai_test_insight_*`, db-service-owned DDL; see "AI Test Insights tables" below).
 - Holistic Profile regeneration first records an attributable request atomically in Postgres, then calls the configured ETL collection endpoint at `/{request_key}/enqueue` with the matching `APP_ENV` in the body. No Student data is sent. Ambiguous network outcomes remain queued for retry; confirmed rejection is recorded as failed without replacing the previous Profile.
 - Curriculum eligible Centres (#417) have one definition: `src/lib/curriculum-eligible-centres.ts`. `ELIGIBLE_CENTRE_TRACKS_FROM_SQL` (`centres c` + `school s` + `centre_exam_tracks cet`) and `ELIGIBLE_CENTRE_SQL` (active, physical, JNV) are static fragments. Plan assignment (by plan, by Centre, Centre coverage) and the Curriculum Summary's `scoped_centres` both build their queries from them, so the Centres you can assign match the Centres the Summary shows. `loadTracksWithContent(db, { gradeIds } | { gradeNumbers })` returns the Grade's in-syllabus LMS Chapter Exam Config tracks, keyed by Grade number. Change the rule there, never in a copy.
 - Multi-statement writes: `withTransaction(async (client) => { ... })` (no nesting — it throws).
@@ -947,3 +947,26 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
   Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
   `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.
+
+## AI Test Insights tables (#550; e2e mirror #554, 2026-11-27)
+
+- **Ownership (ADR 0015):** db-service owns the DDL (PR #884, migration
+  `20261126120504_create_ai_test_insight_tables`) and exposes no API for these tables. The LMS
+  reads and writes `ai_test_insight_requests`, `ai_test_insight_sessions` and
+  `ai_test_insight_session_note_audits` through its own Postgres boundary (`query()` /
+  `withTransaction()`, `$n` placeholders), never through a DB Service HTTP call. AI Mentorship Guide
+  updates only a request's progress (state, Item link, times, outcome code) and owns the
+  `acad_mentorship_*` tables; the LMS only reads its Items and Item File rows.
+- **What the database enforces:** one `queued`/`running` request per Student
+  (`ati_requests_active_student_unique`; a second insert is a unique violation), lifecycle CHECKs on
+  requests and sessions, the composite FK `(inference_item_id, student_id)` onto
+  `am_items_id_student_unique` (the Item is the same Student's), and append-only Session Note audits
+  (trigger `ati_session_note_audits_immutable`, `23514`). Times are `timestamp(0)` UTC: write and
+  compare with `now() AT TIME ZONE 'UTC'` and set `updated_at` yourself (no trigger).
+- **E2E fixture schema:** `e2e/fixtures/migrations/20261127120000_add_ai_test_insights_schema.sql`
+  mirrors, idempotently and pg_dump-identically, db-service `20260616100000_create_academic_mentorship_tables`
+  (all 14 `acad_mentorship_*` tables plus its seeded `global` runtime-settings row),
+  `20260616173000_allow_scoring_status_in_eval_run_benchmarks` and
+  `20261126120504_create_ai_test_insight_tables`, read from `origin/feat/issue-880-ai-test-insights-tables`.
+  It seeds no Insight Request or Session rows. Re-diff with `patterns/mirror-db-service-schema-in-e2e.md`
+  whenever db-service PR #884 changes.
