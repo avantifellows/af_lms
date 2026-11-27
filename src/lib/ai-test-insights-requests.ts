@@ -20,6 +20,8 @@ const isoUtc = (column: string) => `to_char(${column}, 'YYYY-MM-DD"T"HH24:MI:SS"
 const ACTIVE_STUDENT_INDEX = "ati_requests_active_student_unique";
 /** Each delivery call's limit when a Teacher presses Generate. */
 const GENERATE_DELIVERY_TIMEOUT_MS = 10_000;
+/** Each delivery call's limit when a status poll re-delivers a request. */
+const REDELIVERY_TIMEOUT_MS = 5_000;
 
 type RequestRow = {
   request_key: string;
@@ -203,4 +205,36 @@ async function markEnqueueRejected(requestKey: string): Promise<void> {
      WHERE request_key = $1 AND state = 'queued'`,
     [requestKey],
   );
+}
+
+/**
+ * Repeats wake and enqueue for a request that is still `queued`, in case the
+ * first enqueue call was missed while the generator booted. Called by the
+ * status route for a caller with edit access, after it has checked that the
+ * request belongs to the Student.
+ *
+ * At most once every 30 seconds per request: one conditional update stamps
+ * `updated_at` where the request is `queued` and `updated_at` is at least 30
+ * seconds old, and only the caller whose update changed the row delivers.
+ * The outcome is handled as on Generate, each call limited to 5 seconds.
+ * Returns whether this call delivered. Not configured: nothing happens.
+ */
+export async function redeliver(requestKey: string): Promise<boolean> {
+  const delivery = aiTestInsightsDeliverySettings();
+  if (!delivery) return false;
+
+  const claimed = await query<{ request_key: string }>(
+    `UPDATE ai_test_insight_requests
+     SET updated_at = ${UTC_NOW}
+     WHERE request_key = $1
+       AND state = 'queued'
+       AND updated_at <= ${UTC_NOW} - interval '30 seconds'
+     RETURNING request_key`,
+    [requestKey],
+  );
+  if (claimed.length === 0) return false;
+
+  const outcome = await deliverInsightRequest(delivery, requestKey, REDELIVERY_TIMEOUT_MS);
+  if (outcome === "rejected") await markEnqueueRejected(requestKey);
+  return true;
 }

@@ -145,6 +145,11 @@ export interface AiTestInsightsCreateRequestResponse {
   request: InsightRequestView;
 }
 
+/** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]`: the request the card polls. */
+export interface AiTestInsightsRequestStatusResponse {
+  request: InsightRequestView;
+}
+
 /** The 409 code of a login whose permission links no User and no User has its email. */
 export const NO_LINKED_USER_CODE = "no_linked_user";
 
@@ -155,4 +160,13 @@ export const NOT_CONFIGURED_CODE = "not_configured";
 export function aiTestInsightsRequestsUrl(studentId: number, centreId?: number | null): string {
   const base = `/api/ai-test-insights/students/${studentId}/requests`;
   return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
+}
+
+/**
+ * The status route of one request, from the Student's create route: the
+ * request key joins the path, and a centre the page named carries over.
+ */
+export function aiTestInsightsRequestStatusUrl(requestsUrl: string, requestKey: string): string {
+  const [path, search] = requestsUrl.split("?", 2);
+  return `${path}/${encodeURIComponent(requestKey)}${search ? `?${search}` : ""}`;
 }

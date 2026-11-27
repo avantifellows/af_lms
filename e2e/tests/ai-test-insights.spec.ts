@@ -12,6 +12,7 @@ import {
   AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
+  backdateInsightRequestUpdate,
   endInsightRequestWithoutSummary,
   markInsightRequestRunning,
   readInsightRequests,
@@ -21,6 +22,7 @@ import {
   type AiTestInsightsFixtureIds,
 } from "../helpers/ai-test-insights-fixtures";
 import {
+  endFakeAiMentorshipGuideRequest,
   fakeAiMentorshipGuideCalls,
   resetFakeAiMentorshipGuide,
   steerFakeAiMentorshipGuide,
@@ -748,6 +750,110 @@ test.describe("AI Test Insights tab", () => {
         await page.reload();
         await expect(summary.getByText(GENERAL, { exact: true })).toBeVisible();
         await expect(summary.getByRole("button", { name: "Try again" })).toBeVisible();
+      });
+
+      // The page follows a request by itself (#563): it polls every 10
+      // seconds while the request is queued or running, and a Teacher's poll
+      // re-delivers a request whose first enqueue call was missed.
+      test.describe("Following a request", () => {
+        const WRITING = "Writing the AI Summary. This usually takes about 4 minutes.";
+        const NO_SUMMARY = "No AI Summary could be made";
+        const NO_CATEGORY = "This student has no category on record. Add it in Edit Student, then try again.";
+        const INTERRUPTED = "The run was interrupted.";
+        // Up to two 10-second polls.
+        const POLLED = { timeout: 25_000 };
+
+        const enqueueCalls = async () => (await fakeAiMentorshipGuideCalls()).filter((call) => call.kind === "enqueue");
+        const statusPath = (requestKey: string) =>
+          `/api/ai-test-insights/students/${ids.studentIds.esha}/requests/${requestKey}`;
+
+        test("re-delivers a request the asleep generator missed, on a Teacher's poll only, and the page moves to writing", async ({
+          page,
+          pmPage,
+        }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "asleep" });
+          const summary = await generateForEsha(page);
+          await expect(summary.getByText(WAITING)).toBeVisible();
+          const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(await enqueueCalls()).toHaveLength(1);
+
+          // The generator wakes. The Teacher leaves; the request was last
+          // touched over 30 seconds ago (back-dated, so as not to wait).
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "hold" });
+          await page.goto("about:blank");
+          await backdateInsightRequestUpdate(pool, request.requestKey, 60);
+
+          // A viewer's poll never re-delivers.
+          await answerTestPicker(pmPage, 200, { tests: PICKER_TESTS });
+          const viewerPoll = pmPage.waitForResponse(
+            (response) => new URL(response.url()).pathname === statusPath(request.requestKey),
+            POLLED,
+          );
+          await pmPage.goto(studentUrl("esha"));
+          await expect(pmPage.getByRole("region", { name: "AI Summary" }).getByText(WAITING)).toBeVisible();
+          expect((await viewerPoll).status()).toBe(200);
+          expect(await enqueueCalls()).toHaveLength(1);
+          await pmPage.goto("about:blank");
+
+          // The Teacher's page polls, re-delivers once, and the generator
+          // claims the request: waiting, then writing, with no reload.
+          await page.goto(studentUrl("esha"));
+          await expect(summary.getByText(WAITING)).toBeVisible();
+          await expect(summary.getByText(WRITING)).toBeVisible(POLLED);
+          await expect(summary.getByText(WAITING)).toHaveCount(0);
+          expect(await enqueueCalls()).toEqual([
+            { kind: "enqueue", requestKey: request.requestKey, authorization: BEARER, body: BODY, status: 503 },
+            { kind: "enqueue", requestKey: request.requestKey, authorization: BEARER, body: BODY, status: 202 },
+          ]);
+          const nowSeconds = Date.now() / 1000;
+          const [claimed] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(claimed).toMatchObject({ requestKey: request.requestKey, state: "running", outcomeCode: null });
+          expect(Math.abs((claimed.startedAt as number) - nowSeconds)).toBeLessThan(60);
+          expect(Math.abs(claimed.updatedAt - nowSeconds)).toBeLessThan(60);
+
+          // Running survives a reload.
+          await page.reload();
+          await expect(summary.getByText(WRITING)).toBeVisible();
+          await expect(summary.getByRole("button", { name: "Generate" })).toHaveCount(0);
+        });
+
+        test("shows why a request ended without an AI Summary, and Try again, with no reload", async ({ page }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "hold" });
+          const summary = await generateForEsha(page);
+          const tryAgain = summary.getByRole("button", { name: "Try again" });
+          await expect(summary.getByText(WRITING)).toBeVisible(POLLED);
+          const [first] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(first.state).toBe("running");
+
+          // The generator ends it with no data.
+          await endFakeAiMentorshipGuideRequest(first.requestKey, {
+            state: "no_data",
+            outcomeCode: "missing_category_for_cutoff",
+          });
+          await expect(summary.getByText(NO_SUMMARY, { exact: true })).toBeVisible(POLLED);
+          await expect(summary.getByText(NO_CATEGORY, { exact: true })).toBeVisible();
+          await expect(tryAgain).toBeVisible();
+          await expect(summary.getByText(WRITING)).toHaveCount(0);
+
+          // Try again, and this time the generator fails it as soon as it starts.
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "failed", outcomeCode: "interrupted" });
+          await tryAgain.click();
+          await expect(summary.getByText(INTERRUPTED, { exact: true })).toBeVisible(POLLED);
+          await expect(tryAgain).toBeVisible();
+          await expect(summary.getByText(NO_SUMMARY, { exact: true })).toHaveCount(0);
+
+          const nowSeconds = Date.now() / 1000;
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows).toHaveLength(2);
+          expect(rows[0]).toMatchObject({ state: "no_data", outcomeCode: "missing_category_for_cutoff" });
+          expect(rows[1]).toMatchObject({ state: "failed", outcomeCode: "interrupted", selectedTestIds: ["T9"] });
+          for (const row of rows) {
+            expect(Math.abs((row.finishedAt as number) - nowSeconds)).toBeLessThan(90);
+            expect(Math.abs((row.startedAt as number) - nowSeconds)).toBeLessThan(90);
+          }
+        });
       });
     });
 

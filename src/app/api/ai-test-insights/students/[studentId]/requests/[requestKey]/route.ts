@@ -1,0 +1,48 @@
+import { NextResponse, type NextRequest } from "next/server";
+
+import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
+import { redeliver, requestByKey } from "@/lib/ai-test-insights-requests";
+import type { AiTestInsightsRequestStatusResponse } from "@/lib/ai-test-insights-shared";
+
+// The status of one Insight Request (#563, physical centres only), which the
+// AI Summary card polls every 10 seconds while the request is `queued` or
+// `running`. Student access gates first, as a read: 401 no session, 422 bad
+// id, 403 no `ai_test_insights` view, 404 Student missing, not listed or out
+// of scope. A request key that does not belong to that Student answers 404.
+//
+// The one read with a side effect: for a caller with edit access, a poll of a
+// `queued` request runs the re-delivery claim (`redeliver`), at most once
+// every 30 seconds per request, so a request whose first enqueue call was
+// missed while the generator booted is not lost. A viewer's poll never
+// re-delivers. The answer is `{ request }` either way, as the request reads
+// after any re-delivery; a failed re-delivery is logged and never changes it.
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ studentId: string; requestKey: string }> },
+) {
+  const { studentId, requestKey } = await params;
+  const access = await resolveAiTestInsightsStudentAccess(studentId, {
+    centre: request.nextUrl.searchParams.get("centre"),
+  });
+  if (!access.authorized) return access.response;
+  const { student } = access;
+
+  let found = await requestByKey(student.studentId, requestKey);
+  if (!found) return NextResponse.json({ error: "Request not found" }, { status: 404 });
+
+  if (student.canEdit && found.state === "queued") {
+    try {
+      if (await redeliver(found.requestKey)) found = (await requestByKey(student.studentId, requestKey)) ?? found;
+    } catch (error) {
+      // Only the request key, the Student's id and the error name.
+      console.error(
+        `AI Test Insights re-delivery failed: request=${found.requestKey} student=${student.studentId} error=${
+          error instanceof Error ? error.name : "unknown"
+        }`,
+      );
+    }
+  }
+
+  const response: AiTestInsightsRequestStatusResponse = { request: found };
+  return NextResponse.json(response);
+}

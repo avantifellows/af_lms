@@ -1047,3 +1047,16 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   ends a row as AI Mentorship Guide does (`WHERE state IN ('queued', 'running')`, UTC
   `finished_at` / `updated_at`, `started_at` kept or set); `readInsightRequests` also returns
   `outcomeCode` and `finishedAt`.
+- **Status route and re-delivery (#563):** `GET /api/ai-test-insights/students/[studentId]/requests/[requestKey]`
+  reads `requestByKey` after Student access (a read), so another Student's key is 404, and answers
+  `{ request }` (`AiTestInsightsRequestStatusResponse`). It is the one read with a side effect: for
+  `student.canEdit` and a `queued` request it calls `redeliver(requestKey)`, one of the three updates the PRD lets
+  the LMS make after insert (with `enqueue_rejected` and, later, the stall close): `UPDATE … SET
+  updated_at = now() AT TIME ZONE 'UTC' WHERE request_key = $1 AND state = 'queued' AND updated_at
+  <= now() AT TIME ZONE 'UTC' - interval '30 seconds' RETURNING request_key`. Only a returned row
+  delivers (5 s per call), so two polls inside 30 s make one enqueue call; a rejection marks
+  `enqueue_rejected` with the same `state = 'queued'` guard. Not configured → no claim. The route
+  re-reads the row after a delivery; any error in the side effect is logged and the answer stays
+  `{ request }`. E2E `backdateInsightRequestUpdate` moves `updated_at` back; `readInsightRequests`
+  also returns `startedAt`. The fake generator claims (`WHERE state = 'queued'`) and ends
+  (`WHERE state IN ('queued', 'running')`) rows as AI Mentorship Guide does, in UTC with `updated_at`.

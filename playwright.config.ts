@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 import {
   FAKE_AI_MENTORSHIP_GUIDE_APP_ENV,
+  FAKE_AI_MENTORSHIP_GUIDE_DATABASE_ENV,
   FAKE_AI_MENTORSHIP_GUIDE_ORIGIN,
   FAKE_AI_MENTORSHIP_GUIDE_PORT,
   FAKE_AI_MENTORSHIP_GUIDE_SCRIPT,
@@ -120,12 +121,17 @@ export default defineConfig({
       },
     },
     {
-      // The fake generator: one Node process on 127.0.0.1 (no database).
+      // The fake generator: one Node process on 127.0.0.1. Its database side
+      // claims and ends request rows in the e2e database, like AI Mentorship
+      // Guide; it refuses any host but localhost.
       command: `node "${FAKE_AI_MENTORSHIP_GUIDE_SCRIPT}"`,
       url: `${FAKE_AI_MENTORSHIP_GUIDE_ORIGIN}/__fake/health`,
       reuseExistingServer: false,
       timeout: 10_000,
-      env: { FAKE_AI_MENTORSHIP_GUIDE_PORT: String(FAKE_AI_MENTORSHIP_GUIDE_PORT) },
+      env: {
+        FAKE_AI_MENTORSHIP_GUIDE_PORT: String(FAKE_AI_MENTORSHIP_GUIDE_PORT),
+        ...FAKE_AI_MENTORSHIP_GUIDE_DATABASE_ENV,
+      },
     },
   ],
 });

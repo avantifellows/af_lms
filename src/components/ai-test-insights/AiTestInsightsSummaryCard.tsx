@@ -25,15 +25,24 @@
 // generator refused comes back `failed` (`enqueue_rejected`) and shows as any
 // failed request. An environment without the delivery settings answers 503
 // `not_configured`, and the card says so in plain words.
-import { useState, useSyncExternalStore } from "react";
+//
+// The card follows its request by itself (#563): while the request is
+// `queued` or `running` it polls the status route every 10 seconds and shows
+// each answer, so it moves from waiting to writing to a final state with no
+// reload, and stops on any final state. A failed poll keeps the last state
+// shown and the next tick tries again. A Teacher's poll may also re-deliver a
+// request the generator missed; the route decides that, not the card.
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { Button, Card } from "@/components/ui";
 import {
+  aiTestInsightsRequestStatusUrl,
   formatInsightSessionDate,
   isInsightRequestInProgress,
   NO_LINKED_USER_CODE,
   NOT_CONFIGURED_CODE,
   type AiTestInsightsCreateRequestResponse,
+  type AiTestInsightsRequestStatusResponse,
   type AiTestInsightsTest,
   type AiTestInsightsTestFormat,
   type AiTestInsightsTestsState,
@@ -57,6 +66,9 @@ const IN_PROGRESS_MESSAGES = {
 const NO_LINKED_USER_MESSAGE = "Your login is not linked to a user record. Contact your program admin.";
 const NOT_CONFIGURED_MESSAGE = "AI Summary generation is not set up in this environment.";
 const REQUEST_FAILED_MESSAGE = "The AI Summary could not be requested. Try again.";
+
+/** How often the card asks for the status of a `queued` or `running` request. */
+const POLL_INTERVAL_MS = 10_000;
 
 /** `65_000` → `1 min 5 s`; under a minute, seconds only. */
 function formatElapsed(ms: number): string {
@@ -328,6 +340,51 @@ async function postGenerate(
   return { error: REQUEST_FAILED_MESSAGE };
 }
 
+/** The request as the status route reads it now; null when the poll failed. */
+async function pollRequest(url: string): Promise<InsightRequestView | null> {
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) return null;
+    const body = (await response.json().catch(() => null)) as Partial<AiTestInsightsRequestStatusResponse> | null;
+    return body?.request ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Polls the shown request every 10 seconds while it is `queued` or `running`
+ * and hands each answer for the same request to `onUpdate`. Stops when the
+ * request reaches a final state, another request is shown or the card goes.
+ * A failed poll changes nothing; the next tick tries again. One poll at a time.
+ */
+function useRequestPolling(
+  requestsUrl: string,
+  request: InsightRequestView | null,
+  onUpdate: (request: InsightRequestView) => void,
+) {
+  const inProgress = isInsightRequestInProgress(request);
+  const requestKey = request?.requestKey ?? null;
+
+  useEffect(() => {
+    if (!inProgress || requestKey === null) return;
+    const url = aiTestInsightsRequestStatusUrl(requestsUrl, requestKey);
+    let active = true;
+    let polling = false;
+    const timer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      const next = await pollRequest(url);
+      polling = false;
+      if (active && next?.requestKey === requestKey) onUpdate(next);
+    }, POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [requestsUrl, requestKey, inProgress, onUpdate]);
+}
+
 export default function AiTestInsightsSummaryCard({
   tests,
   canEdit,
@@ -349,6 +406,7 @@ export default function AiTestInsightsSummaryCard({
   const [request, setRequest] = useState<InsightRequestView | null>(initialRequest);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useRequestPolling(requestsUrl, request, setRequest);
 
   async function generate(selectedTestIds: string[]) {
     setSubmitting(true);

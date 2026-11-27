@@ -358,6 +358,7 @@ export interface StoredInsightRequest {
   requestedAt: number;
   insertedAt: number;
   updatedAt: number;
+  startedAt: number | null;
   finishedAt: number | null;
 }
 
@@ -369,6 +370,7 @@ export async function readInsightRequests(pool: Pool, studentId: number): Promis
             EXTRACT(EPOCH FROM requested_at)::float8 AS requested_at,
             EXTRACT(EPOCH FROM inserted_at)::float8 AS inserted_at,
             EXTRACT(EPOCH FROM updated_at)::float8 AS updated_at,
+            EXTRACT(EPOCH FROM started_at)::float8 AS started_at,
             EXTRACT(EPOCH FROM finished_at)::float8 AS finished_at
      FROM ai_test_insight_requests
      WHERE student_id = $1
@@ -388,8 +390,21 @@ export async function readInsightRequests(pool: Pool, studentId: number): Promis
     requestedAt: Number(row.requested_at),
     insertedAt: Number(row.inserted_at),
     updatedAt: Number(row.updated_at),
+    startedAt: row.started_at === null ? null : Number(row.started_at),
     finishedAt: row.finished_at === null ? null : Number(row.finished_at),
   }));
+}
+
+/**
+ * Moves a request's `updated_at` back by this many seconds, so a spec need not
+ * wait out the 30 seconds between re-deliveries.
+ */
+export async function backdateInsightRequestUpdate(pool: Pool, requestKey: string, seconds: number): Promise<void> {
+  const result = await pool.query(
+    `UPDATE ai_test_insight_requests SET updated_at = updated_at - make_interval(secs => $2) WHERE request_key = $1`,
+    [requestKey, seconds],
+  );
+  if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no request to back-date");
 }
 
 /** Moves a `queued` request to `running`, as AI Mentorship Guide does when it claims it. */

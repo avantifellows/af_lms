@@ -502,3 +502,174 @@ describe("AiTestInsightsSummaryCard", () => {
     });
   });
 });
+
+// The card follows a request by itself (#563): it polls the status route every
+// 10 seconds while the request is queued or running, and stops on a final
+// state.
+describe("AiTestInsightsSummaryCard polling", () => {
+  const LOADED = { status: "loaded", tests: TESTS } as const;
+  const WAITING = "Waiting to start. This can take about 2 minutes if the server was asleep.";
+  const WRITING = "Writing the AI Summary. This usually takes about 4 minutes.";
+  const STATUS_URL = "/api/ai-test-insights/students/1001/requests/key-1";
+
+  const request = (overrides: Partial<InsightRequestView> = {}): InsightRequestView => ({
+    requestKey: "key-1",
+    state: "queued",
+    outcomeCode: null,
+    selectedTestIds: ["T9", "T4"],
+    requestedAt: "2026-11-27T05:30:00Z",
+    requestedByName: "Asha Teacher",
+    finishedAt: null,
+    ...overrides,
+  });
+
+  /** Answers each status poll with the next of these; a number is a failed answer with that status, `null` a network error. */
+  function answerPolls(...answers: Array<InsightRequestView | number | null>) {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>(() => {
+      const next = answers.length > 1 ? answers.shift() : answers[0];
+      if (next === null || next === undefined) return Promise.reject(new TypeError("fetch failed"));
+      if (typeof next === "number") return Promise.resolve({ ok: false, status: next, json: () => Promise.resolve({}) });
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ request: next }) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  function renderWith(initialRequest: InsightRequestView, props: { canEdit?: boolean; requestsUrl?: string } = {}) {
+    return render(
+      <AiTestInsightsSummaryCard
+        tests={LOADED}
+        canEdit={props.canEdit ?? true}
+        onRetry={() => {}}
+        requestsUrl={props.requestsUrl ?? URL}
+        initialRequest={initialRequest}
+      />,
+    );
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("polls the request's status every 10 seconds while it is queued", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = answerPolls(request());
+    renderWith(request());
+
+    await tick(9_999);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await tick(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(STATUS_URL);
+    await tick(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("carries the page's centre to the status route", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = answerPolls(request());
+    renderWith(request(), { requestsUrl: `${URL}?centre=302` });
+
+    await tick(10_000);
+    expect(fetchMock.mock.calls[0][0]).toBe(`${STATUS_URL}?centre=302`);
+  });
+
+  it("moves from waiting to writing with no reload", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    answerPolls(request({ state: "running" }));
+    renderWith(request());
+
+    expect(within(card()).getByText(WAITING)).toBeInTheDocument();
+    await tick(10_000);
+    expect(within(card()).getByText(WRITING)).toBeInTheDocument();
+    expect(within(card()).queryByText(WAITING)).not.toBeInTheDocument();
+  });
+
+  it("keeps polling while the request is running", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = answerPolls(request({ state: "running" }));
+    renderWith(request({ state: "running" }));
+
+    await tick(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["no_data", "missing_category_for_cutoff", "This student has no category on record. Add it in Edit Student, then try again."],
+    ["failed", "interrupted", "The run was interrupted."],
+    ["completed", null, null],
+  ] as const)("stops polling once the request is %s", async (state, outcomeCode, message) => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = answerPolls(request({ state, outcomeCode, finishedAt: "2026-11-27T05:34:00Z" }));
+    renderWith(request({ state: "running" }));
+
+    await tick(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(card()).queryByText(WRITING)).not.toBeInTheDocument();
+    if (message) {
+      expect(within(card()).getByText(message)).toBeInTheDocument();
+      expect(within(card()).getByRole("button", { name: "Try again" })).toBeEnabled();
+    }
+    await tick(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["completed", "no_data", "failed"] as const)("does not poll a request that is already %s", async (state) => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = answerPolls(request());
+    renderWith(request({ state, outcomeCode: state === "completed" ? null : "interrupted", finishedAt: "2026-11-27T05:34:00Z" }));
+
+    await tick(60_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a 500", 500],
+    ["a network error", null],
+  ] as const)("keeps the last state after %s, and the next tick tries again", async (_label, failure) => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = answerPolls(failure, request({ state: "running" }));
+    renderWith(request());
+
+    await tick(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(card()).getByText(WAITING)).toBeInTheDocument();
+    expect(within(card()).queryByRole("alert")).not.toBeInTheDocument();
+    await tick(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(within(card()).getByText(WRITING)).toBeInTheDocument();
+  });
+
+  it("polls for a viewer too", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const fetchMock = answerPolls(request({ state: "running" }));
+    renderWith(request(), { canEdit: false });
+
+    await tick(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(card()).getByText(WRITING)).toBeInTheDocument();
+  });
+
+  it("starts polling the request Generate returned", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-27T05:30:05Z") });
+    const created = request({ requestKey: "key-new" });
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<unknown>>((url) =>
+      Promise.resolve(
+        url === URL
+          ? { ok: true, status: 201, json: () => Promise.resolve({ outcome: "created", request: created }) }
+          : { ok: true, status: 200, json: () => Promise.resolve({ request: { ...created, state: "running" } }) },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AiTestInsightsSummaryCard tests={LOADED} canEdit onRetry={() => {}} requestsUrl={URL} />);
+
+    await act(async () => within(card()).getByRole("button", { name: "Generate" }).click());
+    expect(within(card()).getByText(WAITING)).toBeInTheDocument();
+    await tick(10_000);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([URL, "/api/ai-test-insights/students/1001/requests/key-new"]);
+    expect(within(card()).getByText(WRITING)).toBeInTheDocument();
+  });
+});
