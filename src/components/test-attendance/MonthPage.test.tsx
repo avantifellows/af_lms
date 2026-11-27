@@ -216,7 +216,9 @@ describe("MonthPage — Students list", () => {
     await user.click(listFilter("All"));
     expect(studentRows()).toHaveLength(25);
     expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
-  });
+    // Renders 30 rows three times. It runs in about 1 s locally but passed the
+    // default 5 s on the CI runner under coverage (three audit runs on PR #573).
+  }, 20_000);
 
   it("lays the same rows out as cards for phones, in the same order", async () => {
     const { user } = renderMonth(november);
