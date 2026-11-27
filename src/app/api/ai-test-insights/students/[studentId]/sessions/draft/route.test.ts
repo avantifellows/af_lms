@@ -541,6 +541,22 @@ describe("PUT /api/ai-test-insights/students/[studentId]/sessions/draft", () => 
       expect(logged()).not.toContain(email);
     });
 
+    it("answers the usual JSON 500 when the access check fails on the database, logging the Student as unresolved", async () => {
+      mockQuery.mockImplementation(async () => {
+        throw Object.assign(new Error(`connection reset near "${MARKER}"`), { name: "DatabaseError", code: "08006" });
+      });
+
+      const response = await put("1001", { ...NOTES, expectedRevision: 0 });
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Session Notes could not be saved" });
+      expect(vi.mocked(console.error).mock.calls).toEqual([
+        ["AI Test Insights session draft save failed: student=unresolved status=500 error=DatabaseError"],
+      ]);
+      expect(logged()).not.toContain(MARKER);
+      expect(writes()).toHaveLength(0);
+    });
+
     it("logs no note text on a save, a stale save or a refused body", async () => {
       await put("1001", { ...NOTES, expectedRevision: 0 });
       await put("1001", { ...NOTES, expectedRevision: 0 });

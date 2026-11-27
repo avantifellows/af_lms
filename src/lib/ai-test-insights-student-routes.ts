@@ -7,8 +7,9 @@
 // bad id, 403 no `ai_test_insights` view, (a write: 403 access not `edit`,
 // before any Student read), 404 Student missing, not listed or out of scope.
 // A write then checks its body (422) and the acting User (409
-// `no_linked_user`). A database error answers 500 and logs only the Student's
-// `student.id` and the error name: a database message can quote values, and a
+// `no_linked_user`). A database error, in the access check too, answers 500
+// and logs only the Student's `student.id` (`unresolved` before access found
+// the Student) and the error name: a database message can quote values, and a
 // request body is never logged.
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -64,17 +65,19 @@ export function withAiTestInsightsStudent<P extends StudentRouteParams = Student
 ): StudentRoute<P> {
   return async (request, context) => {
     const params = await context.params;
-    const access = await resolveAiTestInsightsStudentAccess(params.studentId, {
-      centre: request.nextUrl.searchParams.get("centre"),
-      write: options.write,
-    });
-    if (!access.authorized) return access.response;
-
+    // The Student's `student.id` once access resolved it; a failure before that logs `unresolved`.
+    let studentId: number | null = null;
     try {
+      const access = await resolveAiTestInsightsStudentAccess(params.studentId, {
+        centre: request.nextUrl.searchParams.get("centre"),
+        write: options.write,
+      });
+      if (!access.authorized) return access.response;
+      studentId = access.student.studentId;
       return await handle({ student: access.student, actor: access.actor, params }, request);
     } catch (error) {
       const ids = failure.logIds ? ` ${failure.logIds(params)}` : "";
-      console.error(`${failure.log}: student=${access.student.studentId}${ids} status=500 error=${errorName(error)}`);
+      console.error(`${failure.log}: student=${studentId ?? "unresolved"}${ids} status=500 error=${errorName(error)}`);
       return NextResponse.json({ error: failure.message }, { status: 500, headers: failure.headers });
     }
   };
