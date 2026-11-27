@@ -3,6 +3,7 @@ import {
   CURRENT_ACADEMIC_YEAR,
 } from "./constants";
 import { parse } from "csv-parse/sync";
+import { actorUserId } from "./actor-user";
 import { query, withTransaction } from "./db";
 import {
   canAccessSchoolSync,
@@ -988,17 +989,12 @@ function buildAcademicMentorshipImportErrorCsv(
   return `${lines.join("\n")}\n`;
 }
 
+/** The acting user's `user.id`; the rule is `actorUserId` in `@/lib/actor-user`. */
 export async function getAcademicMentorshipActorUserId(
   email: string,
   permission: UserPermission
 ): Promise<number | null> {
-  if (permission.user_id != null) return Number(permission.user_id);
-
-  const rows = await query<{ id: number | string }>(
-    `SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) ORDER BY id LIMIT 1`,
-    [email]
-  );
-  return rows.length > 0 ? Number(rows[0].id) : null;
+  return actorUserId(email, permission.user_id);
 }
 
 export async function endAcademicMentorshipMapping(params: {

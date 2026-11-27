@@ -156,20 +156,6 @@ async function completedRequestOfTests(studentId: number, selectedTestIds: strin
   return rows[0] ? toView(rows[0]) : null;
 }
 
-/**
- * The actor's User: the permission's linked User, otherwise the lowest-id
- * User with the same email (case-insensitive), as the existing actor lookup
- * does. Null when there is neither.
- */
-export async function resolveActorUserId(actor: { email: string; linkedUserId: number | null }): Promise<number | null> {
-  if (actor.linkedUserId !== null) return actor.linkedUserId;
-  const rows = await query<{ id: number | string }>(
-    `SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) ORDER BY id LIMIT 1`,
-    [actor.email],
-  );
-  return rows.length > 0 ? Number(rows[0].id) : null;
-}
-
 export type CreateRequestResult =
   | { outcome: "created"; request: InsightRequestView }
   | { outcome: "already_running"; request: InsightRequestView }

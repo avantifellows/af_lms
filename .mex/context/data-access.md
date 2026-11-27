@@ -1036,8 +1036,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `CURRENT_ACADEMIC_YEAR`, `requested_by_user_id`, `selected_test_ids` as sent (newest first,
   `$7::jsonb`), `notes_snapshot '[]'`, `state 'queued'` and `requested_at` / `inserted_at` /
   `updated_at` = `now() AT TIME ZONE 'UTC'`. The actor's User is `user_permission.user_id`, else
-  the lowest-id `user` with the same email (`resolveActorUserId`, as
-  `getAcademicMentorshipActorUserId`); neither → 409 `no_linked_user`. The Student page reads
+  the lowest-id `user` with the same email (`actorUserId` in `src/lib/actor-user.ts`, which
+  `getAcademicMentorshipActorUserId` also uses since the PR #573 review); neither → 409 `no_linked_user`. The Student page reads
   `latestRequest` on the server (no "page data" route). E2E: `readInsightRequests` and
   `markInsightRequestRunning` in `e2e/helpers/ai-test-insights-fixtures.ts`.
 - **Same tests again (#567):** step 2 of `createRequest`, after the already-running check and

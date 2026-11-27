@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { actorUserId } from "@/lib/actor-user";
 import { resolveAiTestInsightsStudentAccess } from "@/lib/ai-test-insights-access";
 import { errorName } from "@/lib/ai-test-insights-env";
-import { createRequest, resolveActorUserId } from "@/lib/ai-test-insights-requests";
+import { createRequest } from "@/lib/ai-test-insights-requests";
 import {
   NO_LINKED_USER_CODE,
   NOT_CONFIGURED_CODE,
@@ -61,15 +62,15 @@ export async function POST(
   if (!body) return NextResponse.json({ error: "Invalid request body" }, { status: 422 });
 
   try {
-    const actorUserId = await resolveActorUserId(access.actor);
-    if (actorUserId === null) {
+    const actorUser = await actorUserId(access.actor.email, access.actor.linkedUserId);
+    if (actorUser === null) {
       return NextResponse.json(
         { error: "Your login is not linked to a user record.", code: NO_LINKED_USER_CODE },
         { status: 409 },
       );
     }
 
-    const result = await createRequest({ student, actorUserId, ...body });
+    const result = await createRequest({ student, actorUserId: actorUser, ...body });
     if (result.outcome === "not_configured") {
       return NextResponse.json(
         { error: "AI Summary generation is not set up in this environment.", code: NOT_CONFIGURED_CODE },

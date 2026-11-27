@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: mockQuery, withTransaction: vi.fn() }));
 
-import { insightRequestAsShown, latestRequest, requestByKey, resolveActorUserId } from "./ai-test-insights-requests";
+import { insightRequestAsShown, latestRequest, requestByKey } from "./ai-test-insights-requests";
 
 const ROW = {
   request_key: "key-1",
@@ -62,26 +62,6 @@ describe("requestByKey", () => {
     mockQuery.mockResolvedValue([]);
 
     expect(await requestByKey(1001, "someone-elses")).toBeNull();
-  });
-});
-
-describe("resolveActorUserId", () => {
-  it("uses the permission's linked User without a lookup", async () => {
-    expect(await resolveActorUserId({ email: "t@avantifellows.org", linkedUserId: 42 })).toBe(42);
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the User with the same email, case-insensitively", async () => {
-    mockQuery.mockResolvedValue([{ id: "88" }]);
-
-    expect(await resolveActorUserId({ email: "T@avantifellows.org", linkedUserId: null })).toBe(88);
-    expect(mockQuery.mock.calls[0][0]).toContain("LOWER(email) = LOWER($1)");
-  });
-
-  it("is null when no User has that email", async () => {
-    mockQuery.mockResolvedValue([]);
-
-    expect(await resolveActorUserId({ email: "t@avantifellows.org", linkedUserId: null })).toBeNull();
   });
 });
 
