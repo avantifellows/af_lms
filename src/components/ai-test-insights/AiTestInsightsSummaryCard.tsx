@@ -1,3 +1,5 @@
+"use client";
+
 // The AI Summary card on the AI Test Insights Student page (#550, physical
 // centres only). This slice gives it the test picker: the Student's submitted
 // Major, Full Syllabus and Mock tests of this year, newest first, with the
