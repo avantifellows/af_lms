@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-27
+last_updated: 2026-11-28
 ---
 
 # Data Access
@@ -1034,7 +1034,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   deliver. The insert writes a server `randomUUID()` key, the Student context's `school.id` and
   `programId` (the page's `centre` if it lists the Student, else the lowest centre),
   `CURRENT_ACADEMIC_YEAR`, `requested_by_user_id`, `selected_test_ids` as sent (newest first,
-  `$7::jsonb`), `notes_snapshot '[]'`, `state 'queued'` and `requested_at` / `inserted_at` /
+  `$7::jsonb`), `notes_snapshot` (the notes copy, #579 below; `'[]'` until then), `state 'queued'` and `requested_at` / `inserted_at` /
   `updated_at` = `now() AT TIME ZONE 'UTC'`. The actor's User is `user_permission.user_id`, else
   the lowest-id `user` with the same email (`actorUserId` in `src/lib/actor-user.ts`, which
   `getAcademicMentorshipActorUserId` also uses since the PR #573 review); neither → 409 `no_linked_user`. The Student page reads
@@ -1139,3 +1139,135 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   Summary could not be found.", anything else or a network error → "The PDF could not be downloaded.
   Please try again.". A modified click (new tab or window) is left to the browser. E2E moves the
   `report_pdf` key out of the Item folder (502) and back, then Retry downloads.
+- **Session Notes drafts (#551 slice #574, 2026-11-27):** `src/lib/ai-test-insights-session-notes.ts`
+  (server-only) is the only reader and writer of `ai_test_insight_sessions`; it does not import the
+  Insight Request module. `readOwnDraft(studentId, authorUserId)` is the one draft read (`state =
+  'draft'`, author = the caller), so a draft reaches nobody but its author. `saveSessionNotes({ mode:
+  "draft", … })`, one `withTransaction` per save: `expectedRevision` 0 inserts at revision 1 with the
+  Student context's School and Program (the page's `centre`), `CURRENT_ACADEMIC_YEAR` and the acting
+  User — unless all three text fields are blank (nothing written, revision 0); a hit on
+  `ati_sessions_author_student_draft_unique` is `stale` with the existing draft's revision, not a 500.
+  1+ updates `WHERE student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft'`
+  with `revision + 1` and `updated_at`; zero rows is `stale` with the caller's current draft revision
+  (0 when none). Text is stored as typed, a blank field as null; no audit row. Routes:
+  `GET …/students/[studentId]/sessions` (view; 200 `{ timeline: [], draft, notesAccess }`, `no-store`;
+  `notesAccess` `write` / `no_linked_user` / `read`, draft read only for an `edit` caller with a User;
+  `timeline` is the History timeline since #576, below) and `PUT …/sessions/draft` (edit; 200 `{ revision }`, 409
+  `{ code: "stale", currentRevision }`, 422 `{ error, field }`). Both open through
+  `src/lib/ai-test-insights-student-routes.ts` (`withAiTestInsightsStudent` /
+  `withAiTestInsightsStudentWrite`: Student access with `centre`, then body 422, then the shared
+  `actorUserId` lookup 409 `no_linked_user`; a 500 logs only `student.id` and the error name), which
+  Generate's create route now uses too. Labels, the 2,000-character limit, `validateSessionNotes`
+  (draft and final rules), `parseSessionNotesRequest`, URL builders and types live in
+  the client-safe `src/lib/ai-test-insights-session-notes-rules.ts`. E2E: seeded sessions carry
+  `other_notes = 'e2e-ati-fixture'`; `readInsightSessions` / `readSessionNoteAudits` read rows back and
+  `removeInsightSessionsMadeBySpecs` deletes every other session of the given Students with its audit
+  rows (one transaction, `SET LOCAL session_replication_role = replica`, test DB only). The mirror was
+  re-diffed against db-service `44b4cac6` on 2026-11-27: identical.
+- **Session Notes submit (#551 slice #575, 2026-11-27):** `saveSessionNotes({ mode: "submit",
+  openRequestKey, … })` checks the final rule (`validateSessionNotes(notes, "final", getTodayIST())`:
+  the draft rule, Areas of concern and Immediate actions non-blank after trim, a date present and not
+  after today in India) and then, in one `withTransaction`: (1) when `openRequestKey` is not null,
+  `SELECT id FROM ai_test_insight_requests WHERE student_id = $1 AND request_key = $2 AND state =
+  'completed'` — no row is `invalid` (`field: "openRequestKey"`, route 422) and nothing is written (the
+  module reads that table in its own SQL; it still imports nothing from the Insight Request module);
+  (2) `UPDATE ai_test_insight_sessions SET state = 'submitted'`, trimmed text (blank Other notes →
+  null), `insight_request_id`, `school_id` / `program_id` / `academic_year` from the Student context
+  (the page's `centre`) and `CURRENT_ACADEMIC_YEAR`, `submitted_at`, `revision + 1`, `updated_at`
+  `WHERE student_id = $1 AND author_user_id = $2 AND revision = $3 AND state = 'draft' RETURNING id,
+  revision` — zero rows is `stale` with the caller's draft revision (0 when none), so a second press of
+  Submit never makes a second session; (3) `INSERT INTO ai_test_insight_session_note_audits
+  (session_id, actor_user_id, action, revision, …) VALUES (…, 'submitted', <new revision>, …)` — no
+  note text. Route `POST …/students/[studentId]/sessions` (edit): body `sessionDate`,
+  `areasOfConcern`, `immediateActions`, `otherNotes`, `expectedRevision` (1 or more),
+  `openRequestKey` (null or 1–200 characters), parsed by `parseSessionNotesSubmitRequest(raw,
+  getTodayIST())`; 201 `{ sessionId, revision }`. The counts read is unchanged: the Tab and the
+  Student card count the new `submitted` row. E2E cleanup order: sessions before requests (a submitted
+  session's composite FK holds its request); the Submit specs' own `afterEach` does both in that order.
+- **History timeline (#551 slice #576, 2026-11-28):** server-only `src/lib/ai-test-insights-history.ts`
+  (`readTimeline(studentId, callerUserId)`) composes the timeline from two reads keyed by
+  `student_id` only (no School, Program or year filter): `listSubmittedSessions` in the Session Notes
+  module (`state = 'submitted'`; author name by the "Asked for by" rule — first + last name, else
+  email — joined from `"user"`; `lastEditedAt` = newest `submitted_edited` audit `occurred_at`, null
+  when none; times as `YYYY-MM-DDTHH:MM:SSZ`) and `listCompletedRequests` in the Insight Request
+  module (`state = 'completed'`, the request view plus `id`). Dependencies run History → Session
+  Notes and Insight Requests. A completed request whose `id` a submitted session's
+  `insight_request_id` holds appears only inside that session's entry. The order is
+  `orderTimeline` in the client-safe `src/lib/ai-test-insights-timeline.ts` (with the `TimelineEntry`
+  type): day newest first (`session_date`; a request's `requested_at` day in India), then moment
+  (`submitted_at` / `requested_at`), then sessions before Test Insights, then id descending.
+  `GET …/sessions` fills `timeline` for every viewer; `isAuthor` is true only when the caller has
+  `edit`, a User, and wrote the session. E2E: Asha's seeded rows (sessions by the Teacher and the
+  seated Teacher over two years with declared text and `submitted_at`, one `submitted_edited` audit,
+  a draft; requests with declared `requested_at`, the 14 Nov one recorded by her 14 Nov session, plus
+  failed, no-data and running) and her expected entries, `AI_TEST_INSIGHTS_ASHA_HISTORY`, are in
+  `e2e/helpers/ai-test-insights-fixtures.ts`; her counts are unchanged (3, 2, 14 Nov 2026).
+- **View AI Summary in History (#551 slice #577, 2026-11-28):** no new read or route. Each Test Insight
+  in the timeline (by itself or the one a session records) has "View AI Summary", which mounts the
+  shared client piece `src/components/ai-test-insights/TestInsightSummary.tsx` (moved out of the AI
+  Summary card, which now uses it too: text from part 1's `…/requests/[requestKey]/summary`, Download
+  PDF through `…/pdf`, `TestInsightMadeBy`) and "Hide AI Summary" unmounts it. Both routes are reached
+  with `aiTestInsightsRequestsUrl(studentId, centreId)`, the same URL the card gets, so the page's
+  `centre` rides along. The text is read only on open; nothing polls, wakes or enqueues. The seeded
+  fixture requests have no Item files, so the e2e "From History" specs (inside "AI Summary") use
+  requests the fake generator completed for Esha. `next dev` mounts effects twice and aborts the first
+  fetch, so a spec that counts reads counts `requestfinished`, not `request`.
+- **Session Notes edit (#551 slice #578, 2026-11-28):** `saveSessionNotes({ mode: "edit", sessionId, … })`
+  in the Session Notes module, one transaction: `SELECT … WHERE id = $1 AND student_id = $2 AND state =
+  'submitted' FOR UPDATE` (none → `not_found`; another `author_user_id` → `not_author`; another revision
+  → `stale` with the current one), then, when the trimmed fields (a blank Other notes is null) differ
+  from the stored ones, `UPDATE … SET` the four fields, `revision + 1`, `updated_at` `WHERE id … AND
+  student_id … AND author_user_id … AND revision = $4 AND state = 'submitted'` and one
+  `submitted_edited` audit row at the new revision (no note text). Unchanged notes write nothing and
+  return the same revision (`changed: false`). `submitted_at`, `insight_request_id`, School, Program,
+  academic year and author are never in the SET. Route `PATCH …/sessions/[sessionId]` (body: the four
+  fields and `expectedRevision` ≥ 1, `parseSessionNotesEditRequest`; the submit parser now builds on
+  it) answers 200 `{ revision }`; ids are parsed by `parseAiTestInsightsId` (exported from the access
+  module, the Student id's rule). `withAiTestInsightsStudent(Write)` now passes the route's `params`
+  and an optional `logIds` (here `session=<id>`, or `invalid`). Page: History's author entries have
+  Edit, which opens `SessionNotesEdit` (four fields through the shared `SessionNotesInputs`, also the
+  form's; "Save changes" under the final rule, no autosave; Cancel; 409 → the other-tab message and
+  "Reload notes"; other failures → `SESSION_NOTES_EDIT_FAILED_MESSAGE`). A save reads the timeline
+  again and Sections calls `router.refresh()`, so the Student card's last date moves; the Session
+  Notes form and draft are untouched. The submit and the edit share `sendSessionNotes` (in
+  `SessionNotesInputs.tsx`); the stale text is `SESSION_NOTES_STALE_MESSAGE` in the rules module (the
+  route helper uses it too). E2E "Session Notes › Edit" uses Bhavya with `addCompletedInsightRequest`
+  and `addSubmittedInsightSession` (new fixture helpers: a spec's completed request with its own Item,
+  and a submitted session by any author, both removed by the existing cleanups). An open edit
+  survives a later read of the timeline since the PR #580 fixes (below).
+- **Notes copy (#551 slice #579, 2026-11-28):** the Insight Request insert **reads
+  `ai_test_insight_sessions`**: its `notes_snapshot` value is a scalar subquery the Session Notes
+  module builds (`notesCopySql("$2", "$5")`, the insert's own Student and academic-year
+  placeholders, so the params are unchanged), in the same `INSERT … VALUES` statement, so the copy
+  and the row are one write. It is the only dependency of the Insight Request module on the Session
+  Notes module (the Session Notes module still imports nothing from it). Selection: `state =
+  'submitted'`, the same `student_id`, `academic_year` = `CURRENT_ACADEMIC_YEAR`, any author, `ORDER
+  BY session_date DESC, submitted_at DESC, id DESC LIMIT 5`; `jsonb_agg(jsonb_build_object(…))` in
+  that order with exactly `session_date` (`to_char(…, 'YYYY-MM-DD')`), `areas_of_concern`,
+  `immediate_actions` and `other_notes` (null unless it has a non-space character), `COALESCE(…,
+  '[]'::jsonb)`, so no notes is `[]`, never null. Nothing updates it afterwards; `existing`,
+  `already_running` and `not_configured` run no insert. The request view never returns it and no
+  log holds it. The fake generator checks it as AI Mentorship Guide does (avantifellows/ai-mentorship-guide#151):
+  not a list of objects whose four fields are each a string, null or absent → `failed` /
+  `invalid_request`, no Item (on a run and on a `completed` `/__fake/end`). E2E "Delivery › Notes
+  copy" seeds Esha with `addInsightSessions` (declared sessions and hand-written copies in
+  `AI_TEST_INSIGHTS_NOTES_COPY`, removed by `removeInsightSessionsMadeBySpecs`) and breaks a copy
+  with `setInsightRequestNotesCopy`.
+- **PR #580 review fixes (#551 part 2, 2026-11-28):** (1) **Drafts carry their id.** `readOwnDraft`
+  returns `draftId`; `PUT …/sessions/draft` takes `draftId` (null or absent with `expectedRevision` 0,
+  else required; 422 `draftId`) and answers `{ draftId, revision }`; `POST …/sessions` requires
+  `draftId`. Both UPDATEs add `id = $8` / `id = $12` to their WHERE, because every new draft starts at
+  revision 1: without the id a tab still holding an already-submitted draft A saved over, or
+  submitted, the author's next draft B. (2) **History keeps its timeline across reads**: only the
+  first read shows "Loading history…"; a later read keeps the last timeline (a failed one shows Retry
+  above it), so open Edits and "View AI Summary" panels stay. An edit saves at the revision it was
+  opened from and closes itself after a save or "Reload notes". (3) **Leaving**: Session Notes use
+  the shared `useNotesNavigationGuard` (see `context/conventions.md`): an in-app link saves the
+  pending draft first and goes on, and confirms when it cannot be saved (save fails again, stale, over
+  the limit, submitting) or while a History edit holds unsaved changes (History reports it through
+  `onUnsavedEditChange`; Sections passes it to the form as `unsavedEdit`). (4) `withAiTestInsightsStudent`
+  resolves Student access inside its `try`: a database error there answers the route's JSON 500 and
+  logs `student=unresolved`. Part 1's `withInsightRequest` (`ai-test-insights-request-routes.ts`) and
+  the tests route still resolve access before their `try`. (5) The fields (and an edit's Cancel) are
+  disabled while Submit or "Save changes" is sending. (6) `formatInsightSessionDate` takes its month
+  from the same list as `formatInsightRequestTime`: September is "Sep" everywhere.

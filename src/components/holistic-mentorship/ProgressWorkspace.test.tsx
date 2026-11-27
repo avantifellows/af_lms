@@ -195,6 +195,9 @@ describe("ProgressWorkspace", () => {
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
       expect.stringContaining("page=2"), expect.anything(),
     ));
+    // Each load empties the filter options until its answer arrives, and a
+    // select ignores a value it has no option for: wait for page 2's Mentors.
+    await screen.findByRole("option", { name: "Mentor One" });
 
     fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
 

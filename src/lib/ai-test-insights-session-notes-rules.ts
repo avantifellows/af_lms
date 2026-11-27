@@ -1,0 +1,317 @@
+// AI Test Insights Session Notes (#551): the rules the form and the server
+// share, so they never disagree. Client-safe: keep server-only imports
+// (`@/lib/db`, `@/lib/permissions`) out of this module.
+//
+// Two rules: `draft` (#574) for any draft save, and `final` (#575) for a
+// submit or an author's edit (#578), which also needs the two required fields
+// and a date not after today.
+import { aiSummaryTitle, aiTestInsightsStudentApiUrl, type InsightRequestView } from "@/lib/ai-test-insights-shared";
+import type { TimelineEntry } from "@/lib/ai-test-insights-timeline";
+import { isDateString } from "@/lib/curriculum-date-helpers";
+
+/** The most characters any one text field of Session Notes may hold. */
+export const SESSION_NOTES_MAX_LENGTH = 2000;
+
+/** What the form calls each field; the validation messages use the same words. */
+export const SESSION_NOTES_LABELS = {
+  sessionDate: "Date of conversation",
+  areasOfConcern: "Areas of concern",
+  immediateActions: "Immediate actions",
+  otherNotes: "Other notes (optional)",
+} as const;
+
+/** The three text fields, in the form's order. */
+export const SESSION_NOTES_TEXT_FIELDS = ["areasOfConcern", "immediateActions", "otherNotes"] as const;
+
+export type SessionNotesField = keyof typeof SESSION_NOTES_LABELS;
+export type SessionNotesTextField = (typeof SESSION_NOTES_TEXT_FIELDS)[number];
+
+/** The four fields of Session Notes. A blank text field or no date may be null. */
+export interface SessionNotesFields {
+  /** The day the conversation happened, `YYYY-MM-DD`. */
+  sessionDate: string | null;
+  areasOfConcern: string | null;
+  immediateActions: string | null;
+  otherNotes: string | null;
+}
+
+/**
+ * `draft`: what any save of a draft must meet. `final`: what a submit must
+ * meet (the draft rule, the two required fields, a date not after today).
+ */
+export type SessionNotesRule = "draft" | "final";
+
+export type SessionNotesValidation =
+  | { ok: true; notes: SessionNotesFields }
+  | { ok: false; field: SessionNotesField; error: string };
+
+const LIMIT_TEXT = SESSION_NOTES_MAX_LENGTH.toLocaleString("en-IN");
+
+/** A field's label without "(optional)", for messages and the History timeline. */
+export const sessionNotesFieldName = (field: SessionNotesField) => SESSION_NOTES_LABELS[field].replace(/ \(optional\)$/, "");
+
+const refuse = (field: SessionNotesField, error: string): SessionNotesValidation => ({ ok: false, field, error });
+
+/** A text field's length as the limit counts it (the form's counter shows the same number). */
+export function sessionNotesLength(text: string | null): number {
+  return text?.length ?? 0;
+}
+
+/** Null, empty or only whitespace. */
+export function isBlankNote(text: string | null): boolean {
+  return text === null || text.trim() === "";
+}
+
+/**
+ * Checks Session Notes against a rule; the form and the routes both call it.
+ *
+ * Draft rule: each text field is a string or null of at most 2,000
+ * characters; the date is null or a real `YYYY-MM-DD` date (`2026-02-30` is
+ * refused). Final rule: the draft rule, plus Areas of concern and Immediate
+ * actions non-blank after trim, plus a date that is present and not after
+ * `today` (`YYYY-MM-DD`, today in India: the server reads it from its own
+ * clock, never from the browser). Text is returned exactly as typed; trimming
+ * is the save's job. Only the four fields come back; anything else in `input`
+ * is left out. The first failing field is named.
+ */
+export function validateSessionNotes(input: unknown, rule: "draft"): SessionNotesValidation;
+export function validateSessionNotes(input: unknown, rule: SessionNotesRule, today: string): SessionNotesValidation;
+export function validateSessionNotes(input: unknown, rule: SessionNotesRule, today?: string): SessionNotesValidation {
+  const checked = validateDraftRule(input);
+  if (!checked.ok || rule === "draft") return checked;
+
+  const { sessionDate } = checked.notes;
+  if (sessionDate === null) return refuse("sessionDate", `${sessionNotesFieldName("sessionDate")} is required.`);
+  if (today === undefined || sessionDate > today) {
+    return refuse("sessionDate", `${sessionNotesFieldName("sessionDate")} can't be after today.`);
+  }
+  for (const field of SESSION_NOTES_REQUIRED_FIELDS) {
+    if (isBlankNote(checked.notes[field])) return refuse(field, `${sessionNotesFieldName(field)} is required.`);
+  }
+  return checked;
+}
+
+/** The text fields the final rule needs non-blank. */
+const SESSION_NOTES_REQUIRED_FIELDS = ["areasOfConcern", "immediateActions"] as const;
+
+function validateDraftRule(input: unknown): SessionNotesValidation {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return refuse("sessionDate", "Session Notes are missing.");
+  }
+  const raw = input as Record<string, unknown>;
+
+  const sessionDate = raw.sessionDate;
+  if (sessionDate !== null && (typeof sessionDate !== "string" || !isDateString(sessionDate))) {
+    return refuse("sessionDate", `${sessionNotesFieldName("sessionDate")} is not a real date.`);
+  }
+
+  const notes: SessionNotesFields = { sessionDate, areasOfConcern: null, immediateActions: null, otherNotes: null };
+  for (const field of SESSION_NOTES_TEXT_FIELDS) {
+    const value = raw[field];
+    if (value !== null && typeof value !== "string") return refuse(field, `${sessionNotesFieldName(field)} must be text.`);
+    if (sessionNotesLength(value) > SESSION_NOTES_MAX_LENGTH) {
+      return refuse(field, `${sessionNotesFieldName(field)} is over the ${LIMIT_TEXT}-character limit.`);
+    }
+    notes[field] = value;
+  }
+  return { ok: true, notes };
+}
+
+/**
+ * The Insight Request a submit links: the key of the request the AI Summary
+ * card shows when it is `completed`; null for none or any other state.
+ */
+export function openInsightRequestKey(request: InsightRequestView | null): string | null {
+  return request?.state === "completed" ? request.requestKey : null;
+}
+
+/** The line under the form saying which AI Summary a submit links, dated by its request day in India. */
+export function sessionNotesLinkText(request: InsightRequestView | null): string {
+  if (openInsightRequestKey(request) === null || !request) {
+    return "No AI Summary is open, so these notes won't be linked to one.";
+  }
+  return `Linked to the ${aiSummaryTitle(request)}`;
+}
+
+/** The line under the form saying who reads submitted notes. */
+export const SESSION_NOTES_VISIBILITY_TEXT =
+  "Submitted notes are visible to staff with access to this School and are used for the next AI Summary.";
+
+/** The 409 code of a save made from an older copy of the notes. */
+export const SESSION_NOTES_STALE_CODE = "stale";
+/** What a 409 `stale` says, on the route and on the page. */
+export const SESSION_NOTES_STALE_MESSAGE = "These notes were changed in another tab.";
+/** What the author's edit (#578) says when a save failed for any other reason. */
+export const SESSION_NOTES_EDIT_FAILED_MESSAGE = "These changes could not be saved. Please try again.";
+
+/** The caller's own draft for a Student, as the history route returns it. */
+export interface SessionNotesDraft extends SessionNotesFields {
+  /** The draft's id; the next save and the submit send it as `draftId`. */
+  draftId: number;
+  /** The draft's revision; the next save sends it as `expectedRevision`. */
+  revision: number;
+}
+
+/**
+ * Whether the caller may write Session Notes: `write` (feature access `edit`
+ * and a User), `no_linked_user` (access `edit`, no User) or `read`.
+ */
+export type SessionNotesAccess = "write" | "no_linked_user" | "read";
+
+/** `GET /api/ai-test-insights/students/[studentId]/sessions`. */
+export interface AiTestInsightsSessionsResponse {
+  /** The Student's History timeline, newest first (#576). */
+  timeline: TimelineEntry[];
+  /** The caller's own draft, or null. */
+  draft: SessionNotesDraft | null;
+  notesAccess: SessionNotesAccess;
+}
+
+/** `PATCH …/sessions/[sessionId]`: the four fields and the revision the edit started from. */
+export interface SessionNotesEditRequest extends SessionNotesFields {
+  expectedRevision: number;
+}
+
+/**
+ * `PUT …/sessions/draft`: the four fields, and the draft the form last saw:
+ * its id and revision, or null and 0 for none yet. The id keeps a tab that
+ * still holds a submitted draft from saving over the next one, which also
+ * starts at revision 1.
+ */
+export interface SessionNotesDraftRequest extends SessionNotesEditRequest {
+  draftId: number | null;
+}
+
+/** `POST …/sessions`: a submit of the draft with that id at `expectedRevision`, linked to the open AI Summary. */
+export interface SessionNotesSubmitRequest extends SessionNotesEditRequest {
+  draftId: number;
+  /** The key of the `completed` Insight Request the AI Summary card shows, or null when none is open. */
+  openRequestKey: string | null;
+}
+
+/** The longest open request key a submit body may carry. */
+const MAX_REQUEST_KEY_LENGTH = 200;
+
+type ParsedRequest<B> = { ok: true; value: B } | { ok: false; field: string; error: string };
+
+/** `expectedRevision`: a whole number, `min` or more. */
+function parseExpectedRevision(raw: Record<string, unknown>, min: number): ParsedRequest<number> {
+  const { expectedRevision } = raw;
+  if (typeof expectedRevision !== "number" || !Number.isSafeInteger(expectedRevision) || expectedRevision < min) {
+    return { ok: false, field: "expectedRevision", error: `expectedRevision must be a whole number, ${min} or more.` };
+  }
+  return { ok: true, value: expectedRevision };
+}
+
+const DRAFT_ID_ERROR = "draftId must be the saved draft's id, or null before the first save.";
+
+/** `draftId`: a whole number 1 or more; absent or null too when `optional`. */
+function parseDraftId(raw: Record<string, unknown>, optional: boolean): ParsedRequest<number | null> {
+  const { draftId } = raw;
+  if (optional && (draftId === undefined || draftId === null)) return { ok: true, value: null };
+  if (typeof draftId !== "number" || !Number.isSafeInteger(draftId) || draftId < 1) {
+    return { ok: false, field: "draftId", error: DRAFT_ID_ERROR };
+  }
+  return { ok: true, value: draftId };
+}
+
+/**
+ * A draft save body: the four fields under the draft rule, `expectedRevision`
+ * (a whole number 0 or more) and `draftId`: null or absent with revision 0,
+ * else the saved draft's id. Returns the first failing field; never echoes a
+ * value.
+ */
+export function parseSessionNotesRequest(raw: unknown, rule: "draft"): ParsedRequest<SessionNotesDraftRequest> {
+  const checked = validateSessionNotes(raw, rule);
+  if (!checked.ok) return checked;
+  const body = raw as Record<string, unknown>;
+  const revision = parseExpectedRevision(body, 0);
+  if (!revision.ok) return revision;
+  const draftId = parseDraftId(body, revision.value === 0);
+  if (!draftId.ok) return draftId;
+  if (revision.value === 0 && body.draftId !== undefined && body.draftId !== null) {
+    return { ok: false, field: "draftId", error: DRAFT_ID_ERROR };
+  }
+  return { ok: true, value: { ...checked.notes, expectedRevision: revision.value, draftId: draftId.value } };
+}
+
+/**
+ * An edit body (#578): the four fields under the final rule with `today`
+ * (today in India, from the server's clock), and `expectedRevision` 1 or more
+ * (a submitted session is at revision 2 or more). Returns the first failing
+ * field; never echoes a value. A submit body is the same plus its open
+ * request key.
+ */
+export function parseSessionNotesEditRequest(raw: unknown, today: string): ParsedRequest<SessionNotesEditRequest> {
+  const checked = validateSessionNotes(raw, "final", today);
+  if (!checked.ok) return checked;
+  const revision = parseExpectedRevision(raw as Record<string, unknown>, 1);
+  if (!revision.ok) return revision;
+  return { ok: true, value: { ...checked.notes, expectedRevision: revision.value } };
+}
+
+/**
+ * A submit body: the edit body (the final rule, `expectedRevision` 1 or more:
+ * a submit needs a saved draft), the saved draft's `draftId`, and
+ * `openRequestKey`, null or a key of 1 to 200 characters. Returns the first
+ * failing field; never echoes a value.
+ */
+export function parseSessionNotesSubmitRequest(raw: unknown, today: string): ParsedRequest<SessionNotesSubmitRequest> {
+  const checked = parseSessionNotesEditRequest(raw, today);
+  if (!checked.ok) return checked;
+  const draftId = parseDraftId(raw as Record<string, unknown>, false);
+  if (!draftId.ok) return draftId;
+  const { openRequestKey } = raw as Record<string, unknown>;
+  if (
+    openRequestKey !== null &&
+    (typeof openRequestKey !== "string" || openRequestKey.length < 1 || openRequestKey.length > MAX_REQUEST_KEY_LENGTH)
+  ) {
+    return { ok: false, field: "openRequestKey", error: "openRequestKey must be a request key or null." };
+  }
+  return { ok: true, value: { ...checked.value, draftId: draftId.value as number, openRequestKey } };
+}
+
+/** `PUT …/sessions/draft` 200: the draft's id and revision now (null and 0 while nothing is stored). */
+export interface SessionNotesDraftResponse {
+  draftId: number | null;
+  revision: number;
+}
+
+/** `POST …/sessions` 201: the submitted Insight Session and its revision. */
+export interface SessionNotesSubmitResponse {
+  sessionId: number;
+  revision: number;
+}
+
+/** `PATCH …/sessions/[sessionId]` 200: the session's revision now (the same one when nothing changed). */
+export interface SessionNotesEditResponse {
+  revision: number;
+}
+
+/** `PUT …/sessions/draft`, `POST …/sessions` or `PATCH …/sessions/[sessionId]` 409 `stale`: the notes changed in another tab. */
+export interface SessionNotesStaleResponse {
+  error: string;
+  code: typeof SESSION_NOTES_STALE_CODE;
+  currentRevision: number;
+}
+
+/**
+ * The history route of a Student (`student.id`), which a submit also posts
+ * to; a centre the page named carries over.
+ */
+export function aiTestInsightsSessionsUrl(studentId: number, centreId: number | null): string {
+  return aiTestInsightsStudentApiUrl(studentId, "sessions", centreId);
+}
+
+/** The draft save route of a Student (`student.id`); a centre the page named carries over. */
+export function aiTestInsightsSessionDraftUrl(studentId: number, centreId: number | null): string {
+  return aiTestInsightsStudentApiUrl(studentId, "sessions/draft", centreId);
+}
+
+/**
+ * The edit route of one submitted Insight Session (#578) of a Student
+ * (`student.id`); a centre the page named carries over.
+ */
+export function aiTestInsightsSessionUrl(studentId: number, sessionId: number, centreId: number | null): string {
+  return aiTestInsightsStudentApiUrl(studentId, `sessions/${sessionId}`, centreId);
+}

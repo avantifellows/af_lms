@@ -70,36 +70,179 @@ const studentCode = (key: string) => `E2E-ATI-${key.toUpperCase()}`;
 // Insight Sessions and Insight Requests the helper adds, by listed Student.
 // Only `submitted` sessions and `completed` requests count, across every
 // academic year; the newest submitted `session_date` is the last session.
-// Asha: three submitted sessions (one last year), a newer draft; two completed
-//   requests (one last year) plus a failed, a no-data and a queued one.
+// Asha: three submitted sessions by two Teachers (one last year, one edited
+//   once), a newer draft; two completed requests (one last year, the other
+//   recorded by her 14 Nov session) plus a failed, a no-data and a running
+//   one. Her History is declared below.
 // Divya: only a draft and a failed request, so 0, 0 and no date.
 // Chirag: one submitted session and a running request.
 // Bhavya and Esha: nothing.
-type SessionFixture = { state: "submitted" | "draft"; date: string; year: string };
-type RequestFixture = { state: "completed" | "failed" | "no_data" | "queued" | "running"; year: string };
+type Author = "teacher" | "seatedTeacher";
+type SessionFixture = {
+  state: "submitted" | "draft";
+  date: string;
+  year: string;
+  /** The author persona; the Teacher by default. */
+  author?: Author;
+  /** Areas of concern and Immediate actions; `E2E concern` and `E2E action` by default. */
+  concern?: string;
+  action?: string;
+  /** `submitted_at`, UTC; the seed's clock by default. */
+  submittedAt?: string;
+  /** The `occurred_at` (UTC) of one `submitted_edited` audit row by the author, at revision 2. */
+  editedAt?: string;
+  /** The key of the Student's seeded request the session records. */
+  records?: string;
+  /** Other notes; the seed's marker by default. A spec's sessions give their own. */
+  otherNotes?: string | null;
+};
+type RequestFixture = {
+  state: "completed" | "failed" | "no_data" | "queued" | "running";
+  year: string;
+  /** `requested_at`, UTC; the seed's clock by default (a request in progress must stay fresh). */
+  requestedAt?: string;
+  /** A request key of the Student's own, for a session to record; `e2e-ati-<n>` otherwise. */
+  key?: string;
+};
 
 const LAST_YEAR = "2025-2026";
+const ASHA_RECORDED_REQUEST = "e2e-ati-asha-recorded";
+const ASHA_TEXT = {
+  feb: { concern: "Asha drops units in kinematics answers", action: "Unit check on every answer" },
+  sep: { concern: "Asha rushes the last ten questions", action: "Timed practice for the last section" },
+  nov: { concern: "Asha guesses in chemistry and loses marks", action: "Skip questions below 50% confidence" },
+};
 const INSIGHT_SESSIONS: Record<string, SessionFixture[]> = {
   asha: [
-    { state: "submitted", date: "2026-02-10", year: LAST_YEAR },
-    { state: "submitted", date: "2026-11-14", year: CURRENT_ACADEMIC_YEAR },
-    { state: "submitted", date: "2026-09-03", year: CURRENT_ACADEMIC_YEAR },
-    { state: "draft", date: "2026-11-20", year: CURRENT_ACADEMIC_YEAR },
+    { state: "submitted", date: "2026-02-10", year: LAST_YEAR, ...ASHA_TEXT.feb, submittedAt: "2026-02-10 09:00:00" },
+    {
+      state: "submitted",
+      date: "2026-11-14",
+      year: CURRENT_ACADEMIC_YEAR,
+      ...ASHA_TEXT.nov,
+      submittedAt: "2026-11-14 08:00:00",
+      records: ASHA_RECORDED_REQUEST,
+    },
+    {
+      state: "submitted",
+      date: "2026-09-03",
+      year: CURRENT_ACADEMIC_YEAR,
+      author: "seatedTeacher",
+      ...ASHA_TEXT.sep,
+      submittedAt: "2026-09-03 10:00:00",
+      // 19:00 UTC on 4 Sep 2026 is 00:30 on 5 Sep 2026 in India.
+      editedAt: "2026-09-04 19:00:00",
+    },
+    { state: "draft", date: "2026-11-20", year: CURRENT_ACADEMIC_YEAR, concern: "Asha draft never shown" },
   ],
   chirag: [{ state: "submitted", date: "2026-10-01", year: CURRENT_ACADEMIC_YEAR }],
   divya: [{ state: "draft", date: "2026-11-25", year: CURRENT_ACADEMIC_YEAR }],
 };
 const INSIGHT_REQUESTS: Record<string, RequestFixture[]> = {
   asha: [
-    { state: "completed", year: LAST_YEAR },
-    { state: "completed", year: CURRENT_ACADEMIC_YEAR },
+    // 04:00 UTC is 09:30 on 10 Feb 2026 in India: the day of her February session, an earlier moment.
+    { state: "completed", year: LAST_YEAR, requestedAt: "2026-02-10 04:00:00" },
+    // 05:00 UTC is 10:30 on 14 Nov 2026 in India.
+    { state: "completed", year: CURRENT_ACADEMIC_YEAR, requestedAt: "2026-11-14 05:00:00", key: ASHA_RECORDED_REQUEST },
     { state: "failed", year: CURRENT_ACADEMIC_YEAR },
     { state: "no_data", year: CURRENT_ACADEMIC_YEAR },
-    { state: "queued", year: CURRENT_ACADEMIC_YEAR },
+    { state: "running", year: CURRENT_ACADEMIC_YEAR },
   ],
   chirag: [{ state: "running", year: CURRENT_ACADEMIC_YEAR }],
   divya: [{ state: "failed", year: CURRENT_ACADEMIC_YEAR }],
 };
+
+/**
+ * Asha's History on the Student page, newest first, each entry as its lines
+ * of text, written by hand from the rows above. The draft, the failed,
+ * no-data and running requests are absent, and the request her 14 Nov
+ * session records shows only inside it. Seeded requests are of the test
+ * `e2e-test-1`, which the specs' picker answer does not hold.
+ */
+export const AI_TEST_INSIGHTS_ASHA_HISTORY = [
+  [
+    "14 Nov 2026",
+    "Notes by E2E ATI Teacher",
+    "Areas of concern",
+    ASHA_TEXT.nov.concern,
+    "Immediate actions",
+    ASHA_TEXT.nov.action,
+    "Other notes",
+    "e2e-ati-fixture",
+    "AI Summary of 14 Nov 2026",
+    "Made from: an earlier test",
+    "Asked for by E2E ATI Teacher on 14 Nov 2026, 10:30",
+  ],
+  [
+    // The Student page writes September as "Sep", never the en-GB "Sept".
+    "3 Sep 2026",
+    "Notes by E2E ATI Seated Teacher",
+    "Edited on 5 Sep 2026",
+    "Areas of concern",
+    ASHA_TEXT.sep.concern,
+    "Immediate actions",
+    ASHA_TEXT.sep.action,
+    "Other notes",
+    "e2e-ati-fixture",
+  ],
+  [
+    "10 Feb 2026",
+    "Notes by E2E ATI Teacher",
+    "Areas of concern",
+    ASHA_TEXT.feb.concern,
+    "Immediate actions",
+    ASHA_TEXT.feb.action,
+    "Other notes",
+    "e2e-ati-fixture",
+  ],
+  ["AI Summary of 10 Feb 2026", "Made from: an earlier test", "Asked for by E2E ATI Teacher on 10 Feb 2026, 09:30"],
+];
+
+/**
+ * Insight Sessions a notes copy spec (#579) gives a Student with none, and
+ * the `notes_snapshot` a new request of that Student must then hold, written
+ * by hand: this academic year's `submitted` sessions by any Teacher, newest
+ * first (`session_date`, then `submitted_at`), at most 5, each with exactly
+ * four keys and a blank Other notes as null. Every Other notes differs from
+ * the seed's marker, so {@link removeInsightSessionsMadeBySpecs} removes them.
+ */
+const COPY_MARK = "[e2e-579]";
+export const AI_TEST_INSIGHTS_NOTES_COPY = {
+  /** Only last year's submitted notes, plus a draft: the copy is empty. */
+  lastYearAndDraft: {
+    sessions: [
+      { state: "submitted", date: "2026-03-02", year: LAST_YEAR, concern: `Last year's concern ${COPY_MARK}`, otherNotes: null },
+      { state: "draft", date: "2026-11-26", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Draft concern ${COPY_MARK}`, otherNotes: null },
+    ],
+    copy: [],
+  },
+  /**
+   * Six submitted this year by two Teachers (two on 20 Nov, the later
+   * submitted first; the oldest, 5 Jun, left out), one of last year and a
+   * newer draft, neither in the copy.
+   */
+  sixThisYear: {
+    sessions: [
+      { state: "submitted", date: "2026-06-05", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Jun concern ${COPY_MARK}`, action: `Jun action ${COPY_MARK}`, otherNotes: `Jun other ${COPY_MARK}`, submittedAt: "2026-06-05 06:00:00" },
+      { state: "submitted", date: "2026-11-20", year: CURRENT_ACADEMIC_YEAR, concern: `Nov 20 early concern ${COPY_MARK}`, action: `Nov 20 early action ${COPY_MARK}`, otherNotes: `Nov 20 early other ${COPY_MARK}`, submittedAt: "2026-11-20 06:00:00" },
+      { state: "submitted", date: "2026-09-01", year: CURRENT_ACADEMIC_YEAR, concern: `Sep concern ${COPY_MARK}`, action: `Sep action ${COPY_MARK}`, otherNotes: "   ", submittedAt: "2026-09-01 06:00:00" },
+      { state: "submitted", date: "2026-11-20", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Nov 20 late concern ${COPY_MARK}`, action: `Nov 20 late action ${COPY_MARK}`, otherNotes: null, submittedAt: "2026-11-20 09:00:00" },
+      { state: "submitted", date: "2026-10-15", year: CURRENT_ACADEMIC_YEAR, author: "seatedTeacher", concern: `Oct concern ${COPY_MARK}`, action: `Oct action ${COPY_MARK}`, otherNotes: `Oct other ${COPY_MARK}`, submittedAt: "2026-10-15 06:00:00" },
+      { state: "submitted", date: "2026-08-10", year: CURRENT_ACADEMIC_YEAR, concern: `Aug concern ${COPY_MARK}`, action: `Aug action ${COPY_MARK}`, otherNotes: `Aug other ${COPY_MARK}`, submittedAt: "2026-08-10 06:00:00" },
+      { state: "submitted", date: "2026-03-20", year: LAST_YEAR, concern: `Last year's concern ${COPY_MARK}`, otherNotes: `Last year's other ${COPY_MARK}` },
+      { state: "draft", date: "2026-11-27", year: CURRENT_ACADEMIC_YEAR, concern: `Draft concern ${COPY_MARK}`, otherNotes: null },
+    ],
+    copy: [
+      { session_date: "2026-11-20", areas_of_concern: `Nov 20 late concern ${COPY_MARK}`, immediate_actions: `Nov 20 late action ${COPY_MARK}`, other_notes: null },
+      { session_date: "2026-11-20", areas_of_concern: `Nov 20 early concern ${COPY_MARK}`, immediate_actions: `Nov 20 early action ${COPY_MARK}`, other_notes: `Nov 20 early other ${COPY_MARK}` },
+      { session_date: "2026-10-15", areas_of_concern: `Oct concern ${COPY_MARK}`, immediate_actions: `Oct action ${COPY_MARK}`, other_notes: `Oct other ${COPY_MARK}` },
+      { session_date: "2026-09-01", areas_of_concern: `Sep concern ${COPY_MARK}`, immediate_actions: `Sep action ${COPY_MARK}`, other_notes: null },
+      { session_date: "2026-08-10", areas_of_concern: `Aug concern ${COPY_MARK}`, immediate_actions: `Aug action ${COPY_MARK}`, other_notes: `Aug other ${COPY_MARK}` },
+    ],
+  },
+} satisfies Record<string, { sessions: SessionFixture[]; copy: unknown[] }>;
+/** The Other notes of every Insight Session the helper seeds, so a cleanup can tell them from a spec's. */
+const SEEDED_SESSION_NOTE = "e2e-ati-fixture";
 const REQUEST_KEY_PREFIX = "e2e-ati-";
 const INFERENCE_SESSION_MARKER = "e2e-ati-fixture";
 /** The `config_snapshot_json` of every Session the fake generator creates (fake-ai-mentorship-guide.cjs). */
@@ -166,20 +309,29 @@ interface PersonaFixture extends Persona {
   schoolCodes: string[];
   programIds: number[];
   seat?: "coe";
+  readOnly?: boolean;
 }
 
-const persona = (key: string, name: string, role: string, schoolCodes: string[], programIds: number[], seat?: "coe"): PersonaFixture => ({
+const persona = (
+  key: string,
+  name: string,
+  role: string,
+  schoolCodes: string[],
+  programIds: number[],
+  options: { seat?: "coe"; readOnly?: boolean } = {},
+): PersonaFixture => ({
   name,
   email: `e2e-ati-${key}@test.local`,
   role,
   schoolCodes,
   programIds,
-  seat,
+  ...options,
 });
 
 export const AI_TEST_INSIGHTS_PERSONAS = {
   teacher: persona("teacher", "E2E ATI Teacher", "teacher", [SCHOOL.code, NO_CENTRE_SCHOOL.code], [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL]),
-  seatedTeacher: persona("seated-teacher", "E2E ATI Seated Teacher", "teacher", [], [], "coe"),
+  seatedTeacher: persona("seated-teacher", "E2E ATI Seated Teacher", "teacher", [], [], { seat: "coe" }),
+  readOnlyTeacher: persona("read-only-teacher", "E2E ATI Read-only Teacher", "teacher", [SCHOOL.code], [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL], { readOnly: true }),
   otherSchoolTeacher: persona("other-teacher", "E2E ATI Other Teacher", "teacher", [OTHER_SCHOOL.code], [PROGRAM_IDS.COE]),
   nvsOnlyTeacher: persona("nvs-teacher", "E2E ATI NVS Teacher", "teacher", [SCHOOL.code, NO_CENTRE_SCHOOL.code], [PROGRAM_IDS.NVS]),
   pmuManager: persona("pmu-manager", "E2E ATI PMU Manager", "pmu_manager", [SCHOOL.code], [PROGRAM_IDS.NVS]),
@@ -322,8 +474,8 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
     personaUserIds[p.email] = userId;
     await pool.query(
       `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only, user_id, revoked_at)
-       VALUES ($1, 1, $2, $3, $4, NULL, false, $5, NULL)`,
-      [p.email, p.role, p.programIds, p.schoolCodes, userId],
+       VALUES ($1, 1, $2, $3, $4, NULL, $6, $5, NULL)`,
+      [p.email, p.role, p.programIds, p.schoolCodes, userId, p.readOnly === true],
     );
     if (p.seat === "coe") {
       await pool.query(
@@ -337,7 +489,10 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
   await insertInsightRows(pool, {
     studentIds,
     schoolId: main.id,
-    teacherUserId: personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
+    authorUserIds: {
+      teacher: personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
+      seatedTeacher: personaUserIds[AI_TEST_INSIGHTS_PERSONAS.seatedTeacher.email],
+    },
   });
 
   return { schoolId: main.id, coeCentreId, nodalCentreId, otherCentreId, studentIds, personaUserIds };
@@ -500,75 +655,355 @@ export async function endInsightRequestWithoutSummary(
  * above. Rows satisfy the mirrored tables' CHECKs: a submitted session has a
  * date, both required notes and `submitted_at`; a completed request links an
  * Item of the same Student, and only one request per Student is queued or
- * running. All on the CoE Program.
+ * running; a session records a completed request of the same Student. All
+ * on the CoE Program. Requests go in first, so a session can record one.
  */
-async function insertInsightRows(
-  pool: Pool,
-  { studentIds, schoolId, teacherUserId }: { studentIds: Record<string, number>; schoolId: number; teacherUserId: number },
-) {
-  const programId = PROGRAM_IDS.COE;
-  for (const [key, sessions] of Object.entries(INSIGHT_SESSIONS)) {
-    for (const session of sessions) {
-      const submitted = session.state === "submitted";
-      await pool.query(
-        `INSERT INTO ai_test_insight_sessions
-           (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
-            areas_of_concern, immediate_actions, submitted_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::date, 'E2E concern', 'E2E action',
-                 CASE WHEN $8::boolean THEN ${NOW} END)`,
-        [studentIds[key], schoolId, programId, session.year, teacherUserId, session.state, session.date, submitted],
-      );
-    }
-  }
+type InsightRowsContext = { studentIds: Record<string, number>; schoolId: number; authorUserIds: Record<Author, number> };
 
+async function insertInsightRows(pool: Pool, context: InsightRowsContext) {
+  await insertInsightRequests(pool, context);
+  await insertInsightSessions(pool, context);
+}
+
+/** One original Item per inference session and Student, so each completed request gets its own inference session. */
+async function insertCompletedRequestItem(pool: Pool, programId: number, studentId: number): Promise<number> {
+  const inferenceSessionId = await oneId(
+    pool,
+    `INSERT INTO acad_mentorship_inference_sessions (program_id, status, config_snapshot_json)
+     VALUES ($1, 'completed', $2) RETURNING id`,
+    [programId, INFERENCE_SESSION_MARKER],
+    "inference session",
+  );
+  return oneId(
+    pool,
+    `INSERT INTO acad_mentorship_inference_items (session_id, student_id, status)
+     VALUES ($1, $2, 'completed') RETURNING id`,
+    [inferenceSessionId, studentId],
+    "inference item",
+  );
+}
+
+const REQUEST_OUTCOMES: Partial<Record<RequestFixture["state"], string>> = { failed: "pipeline_error", no_data: "no_tests" };
+
+async function insertInsightRequests(pool: Pool, { studentIds, schoolId, authorUserIds }: InsightRowsContext) {
+  const programId = PROGRAM_IDS.COE;
   let requestNumber = 0;
   for (const [key, requests] of Object.entries(INSIGHT_REQUESTS)) {
     for (const request of requests) {
       const studentId = studentIds[key];
-      let itemId: number | null = null;
-      if (request.state === "completed") {
-        // One original Item per inference session and Student, so each
-        // completed request gets its own inference session.
-        const inferenceSessionId = await oneId(
-          pool,
-          `INSERT INTO acad_mentorship_inference_sessions (program_id, status, config_snapshot_json)
-           VALUES ($1, 'completed', $2) RETURNING id`,
-          [programId, INFERENCE_SESSION_MARKER],
-          "inference session",
-        );
-        itemId = await oneId(
-          pool,
-          `INSERT INTO acad_mentorship_inference_items (session_id, student_id, status)
-           VALUES ($1, $2, 'completed') RETURNING id`,
-          [inferenceSessionId, studentId],
-          "inference item",
-        );
-      }
+      const itemId = request.state === "completed" ? await insertCompletedRequestItem(pool, programId, studentId) : null;
       const started = request.state !== "queued";
       const finished = !["queued", "running"].includes(request.state);
-      const outcome = request.state === "failed" ? "pipeline_error" : request.state === "no_data" ? "no_tests" : null;
+      const outcome = REQUEST_OUTCOMES[request.state] ?? null;
+      ++requestNumber;
       await pool.query(
         `INSERT INTO ai_test_insight_requests
            (request_key, student_id, school_id, program_id, academic_year, requested_by_user_id,
-            selected_test_ids, state, outcome_code, inference_item_id, started_at, finished_at)
+            selected_test_ids, state, outcome_code, inference_item_id, requested_at, started_at, finished_at)
          VALUES ($1, $2, $3, $4, $5, $6, '["e2e-test-1"]'::jsonb, $7, $8, $9,
-                 CASE WHEN $10::boolean THEN ${NOW} END, CASE WHEN $11::boolean THEN ${NOW} END)`,
+                 COALESCE($12::timestamp, ${NOW}),
+                 CASE WHEN $10::boolean THEN COALESCE($12::timestamp, ${NOW}) END,
+                 CASE WHEN $11::boolean THEN COALESCE($12::timestamp + interval '4 minutes', ${NOW}) END)`,
         [
-          `${REQUEST_KEY_PREFIX}${++requestNumber}`,
+          request.key ?? `${REQUEST_KEY_PREFIX}${requestNumber}`,
           studentId,
           schoolId,
           programId,
           request.year,
-          teacherUserId,
+          authorUserIds.teacher,
           request.state,
           outcome,
           itemId,
           started,
           finished,
+          request.requestedAt ?? null,
         ],
       );
     }
   }
+}
+
+async function insertInsightSessions(pool: Pool, { studentIds, schoolId, authorUserIds }: InsightRowsContext) {
+  for (const [key, sessions] of Object.entries(INSIGHT_SESSIONS)) {
+    for (const session of sessions) {
+      await insertInsightSession(pool, { studentId: studentIds[key], schoolId, authorUserIds }, session);
+    }
+  }
+}
+
+/**
+ * Adds a spec's declared Insight Sessions for a Student (#579), by the
+ * declared personas, on the main School's CoE Program. Their Other notes are
+ * not the seed's marker, so {@link removeInsightSessionsMadeBySpecs} removes
+ * them. Returns their ids, in the declared order.
+ */
+export async function addInsightSessions(
+  pool: Pool,
+  ids: AiTestInsightsFixtureIds,
+  studentKey: string,
+  sessions: SessionFixture[],
+): Promise<number[]> {
+  if (sessions.some((session) => session.otherNotes === undefined || session.otherNotes === SEEDED_SESSION_NOTE)) {
+    throw new Error("AI Test Insights fixture: a spec's session must give Other notes that are not the seed's");
+  }
+  const authorUserIds = {
+    teacher: ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
+    seatedTeacher: ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.seatedTeacher.email],
+  };
+  const sessionIds: number[] = [];
+  for (const session of sessions) {
+    sessionIds.push(
+      await insertInsightSession(pool, { studentId: ids.studentIds[studentKey], schoolId: ids.schoolId, authorUserIds }, session),
+    );
+  }
+  return sessionIds;
+}
+
+/**
+ * Overwrites a request's `notes_snapshot` (#579), as only a broken writer
+ * could, so a spec can show the fake generator checks the copy.
+ */
+export async function setInsightRequestNotesCopy(pool: Pool, requestKey: string, copy: unknown): Promise<void> {
+  const result = await pool.query(
+    `UPDATE ai_test_insight_requests SET notes_snapshot = $2::jsonb, updated_at = ${NOW} WHERE request_key = $1`,
+    [requestKey, JSON.stringify(copy)],
+  );
+  if (result.rowCount !== 1) throw new Error("AI Test Insights fixture: no request to give a notes copy");
+}
+
+/** One declared Insight Session, on the CoE Program, with its edit audit row when it has one. Returns its `id`. */
+async function insertInsightSession(
+  pool: Pool,
+  { studentId, schoolId, authorUserIds }: { studentId: number; schoolId: number; authorUserIds: Record<Author, number> },
+  session: SessionFixture,
+): Promise<number> {
+  const submitted = session.state === "submitted";
+  const authorUserId = authorUserIds[session.author ?? "teacher"];
+  const sessionId = await oneId(
+    pool,
+    `INSERT INTO ai_test_insight_sessions
+       (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
+        areas_of_concern, immediate_actions, other_notes, submitted_at, insight_request_id, revision)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::date, $10, $11, $9,
+             CASE WHEN $8::boolean THEN COALESCE($12::timestamp, ${NOW}) END,
+             (SELECT id FROM ai_test_insight_requests WHERE request_key = $13 AND student_id = $1),
+             $14)
+     RETURNING id`,
+    [
+      studentId,
+      schoolId,
+      PROGRAM_IDS.COE,
+      session.year,
+      authorUserId,
+      session.state,
+      session.date,
+      submitted,
+      session.otherNotes === undefined ? SEEDED_SESSION_NOTE : session.otherNotes,
+      session.concern ?? "E2E concern",
+      session.action ?? "E2E action",
+      session.submittedAt ?? null,
+      session.records ?? null,
+      session.editedAt ? 2 : 1,
+    ],
+    "inserted Insight Session",
+  );
+  if (session.editedAt) {
+    await pool.query(
+      `INSERT INTO ai_test_insight_session_note_audits (session_id, actor_user_id, action, revision, occurred_at, inserted_at)
+       VALUES ($1, $2, 'submitted_edited', 2, $3::timestamp, ${NOW})`,
+      [sessionId, authorUserId, session.editedAt],
+    );
+  }
+  return sessionId;
+}
+
+/**
+ * Adds one `completed` Insight Request of a Student for a spec (#578), with
+ * its own Item, asked for by `requestedByUserId` at `requestedAt` (UTC) for
+ * the test `T9`, on the main School's CoE Program this academic year. Its
+ * key is not the fixture's, so {@link removeInsightRequestsMadeBySpecs}
+ * removes it (after the sessions that record it). Returns its `id`.
+ */
+export async function addCompletedInsightRequest(
+  pool: Pool,
+  request: { requestKey: string; studentId: number; schoolId: number; requestedByUserId: number; requestedAt: string },
+): Promise<number> {
+  if (request.requestKey.startsWith(REQUEST_KEY_PREFIX)) throw new Error("AI Test Insights fixture: a spec's key must not be the fixture's");
+  const itemId = await insertCompletedRequestItem(pool, PROGRAM_IDS.COE, request.studentId);
+  return oneId(
+    pool,
+    `INSERT INTO ai_test_insight_requests
+       (request_key, student_id, school_id, program_id, academic_year, requested_by_user_id,
+        selected_test_ids, state, inference_item_id, requested_at, started_at, finished_at)
+     VALUES ($1, $2, $3, $4, $5, $6, '["T9"]'::jsonb, 'completed', $7,
+             $8::timestamp, $8::timestamp, $8::timestamp + interval '4 minutes')
+     RETURNING id`,
+    [
+      request.requestKey,
+      request.studentId,
+      request.schoolId,
+      PROGRAM_IDS.COE,
+      CURRENT_ACADEMIC_YEAR,
+      request.requestedByUserId,
+      itemId,
+      request.requestedAt,
+    ],
+    "spec's completed request",
+  );
+}
+
+/**
+ * Adds one `submitted` Insight Session of a Student for a spec (#578), by
+ * `authorUserId`, at revision 2, on the main School's CoE Program this
+ * academic year, with no Other notes and no linked request, written straight
+ * to the table (so its author may be one who cannot open the Student). Its
+ * Other notes are not the fixture's, so {@link removeInsightSessionsMadeBySpecs}
+ * removes it. Returns its `id`.
+ */
+export async function addSubmittedInsightSession(
+  pool: Pool,
+  session: { studentId: number; schoolId: number; authorUserId: number; sessionDate: string; areasOfConcern: string; immediateActions: string },
+): Promise<number> {
+  return oneId(
+    pool,
+    `INSERT INTO ai_test_insight_sessions
+       (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
+        areas_of_concern, immediate_actions, submitted_at, revision)
+     VALUES ($1, $2, $3, $4, $5, 'submitted', $6::date, $7, $8, ${NOW}, 2)
+     RETURNING id`,
+    [
+      session.studentId,
+      session.schoolId,
+      PROGRAM_IDS.COE,
+      CURRENT_ACADEMIC_YEAR,
+      session.authorUserId,
+      session.sessionDate,
+      session.areasOfConcern,
+      session.immediateActions,
+    ],
+    "spec's submitted session",
+  );
+}
+
+/** An Insight Session row as stored, with its times as seconds since the epoch, read as UTC. */
+export interface StoredInsightSession {
+  id: number;
+  studentId: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  authorUserId: number;
+  state: string;
+  sessionDate: string | null;
+  areasOfConcern: string | null;
+  immediateActions: string | null;
+  otherNotes: string | null;
+  insightRequestId: number | null;
+  revision: number;
+  submittedAt: number | null;
+  insertedAt: number;
+  updatedAt: number;
+}
+
+/** The Student's Insight Sessions, drafts too, oldest first. */
+export async function readInsightSessions(pool: Pool, studentId: number): Promise<StoredInsightSession[]> {
+  const result = await pool.query(
+    `SELECT id, student_id, school_id, program_id, academic_year, author_user_id, state,
+            to_char(session_date, 'YYYY-MM-DD') AS session_date,
+            areas_of_concern, immediate_actions, other_notes, insight_request_id, revision,
+            EXTRACT(EPOCH FROM submitted_at)::float8 AS submitted_at,
+            EXTRACT(EPOCH FROM inserted_at)::float8 AS inserted_at,
+            EXTRACT(EPOCH FROM updated_at)::float8 AS updated_at
+     FROM ai_test_insight_sessions
+     WHERE student_id = $1
+     ORDER BY id`,
+    [studentId],
+  );
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    studentId: Number(row.student_id),
+    schoolId: Number(row.school_id),
+    programId: Number(row.program_id),
+    academicYear: row.academic_year,
+    authorUserId: Number(row.author_user_id),
+    state: row.state,
+    sessionDate: row.session_date,
+    areasOfConcern: row.areas_of_concern,
+    immediateActions: row.immediate_actions,
+    otherNotes: row.other_notes,
+    insightRequestId: row.insight_request_id === null ? null : Number(row.insight_request_id),
+    revision: Number(row.revision),
+    submittedAt: row.submitted_at === null ? null : Number(row.submitted_at),
+    insertedAt: Number(row.inserted_at),
+    updatedAt: Number(row.updated_at),
+  }));
+}
+
+/** A Session Note audit row as stored, with its time as seconds since the epoch, read as UTC. */
+export interface StoredSessionNoteAudit {
+  sessionId: number;
+  actorUserId: number;
+  action: string;
+  revision: number;
+  occurredAt: number;
+}
+
+/** The audit rows of the Student's Insight Sessions, oldest first. */
+export async function readSessionNoteAudits(pool: Pool, studentId: number): Promise<StoredSessionNoteAudit[]> {
+  const result = await pool.query(
+    `SELECT a.session_id, a.actor_user_id, a.action, a.revision,
+            EXTRACT(EPOCH FROM a.occurred_at)::float8 AS occurred_at
+     FROM ai_test_insight_session_note_audits a
+     JOIN ai_test_insight_sessions s ON s.id = a.session_id
+     WHERE s.student_id = $1
+     ORDER BY a.id`,
+    [studentId],
+  );
+  return result.rows.map((row) => ({
+    sessionId: Number(row.session_id),
+    actorUserId: Number(row.actor_user_id),
+    action: row.action,
+    revision: Number(row.revision),
+    occurredAt: Number(row.occurred_at),
+  }));
+}
+
+/**
+ * Deletes the Insight Sessions matching `where` (placeholders from `$1`) and
+ * their audit rows, in one transaction. Audit rows are append-only (a
+ * trigger) and a session with one cannot be deleted, so the trigger is
+ * skipped for this test-database cleanup only.
+ */
+async function deleteInsightSessions(pool: Pool, where: string, params: unknown[]): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      `DELETE FROM ai_test_insight_session_note_audits
+       WHERE session_id IN (SELECT id FROM ai_test_insight_sessions WHERE ${where})`,
+      params,
+    );
+    await client.query(`DELETE FROM ai_test_insight_sessions WHERE ${where}`, params);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Removes the Insight Sessions a spec made for these Students (every one the
+ * helper did not seed), drafts and submitted ones, with their audit rows, so
+ * the next spec finds the Students as seeded.
+ */
+export async function removeInsightSessionsMadeBySpecs(pool: Pool, studentIds: number[]): Promise<void> {
+  await deleteInsightSessions(pool, `student_id = ANY($1::bigint[]) AND other_notes IS DISTINCT FROM $2`, [
+    studentIds,
+    SEEDED_SESSION_NOTE,
+  ]);
 }
 
 /**
@@ -605,9 +1040,9 @@ async function removeFakeGeneratorItems(pool: Pool, studentIds: number[]): Promi
 export async function removeAiTestInsightsFixture(pool: Pool): Promise<void> {
   const users = await pool.query<{ id: number }>(`SELECT id FROM "user" WHERE email = ANY($1)`, [ALL_EMAILS]);
   const userIds = users.rows.map((row) => Number(row.id));
-  await pool.query(
-    `DELETE FROM ai_test_insight_sessions
-     WHERE student_id IN (SELECT id FROM student WHERE user_id = ANY($1)) OR author_user_id = ANY($1)`,
+  await deleteInsightSessions(
+    pool,
+    `student_id IN (SELECT id FROM student WHERE user_id = ANY($1)) OR author_user_id = ANY($1)`,
     [userIds],
   );
   await pool.query(

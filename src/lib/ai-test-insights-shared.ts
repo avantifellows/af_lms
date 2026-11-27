@@ -127,16 +127,19 @@ export function aiTestInsightsStudentPageUrl(studentId: number, centreId?: numbe
   return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
 }
 
-/** `2026-11-14` → `14 Nov 2026`; no date stays empty. Read as a calendar date, not a moment. */
+/** Every AI Test Insights date writes its month with these names. */
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * `2026-11-14` → `14 Nov 2026`; no date stays empty. Read as a calendar date,
+ * not a moment. The month comes from {@link SHORT_MONTHS}, as in
+ * {@link formatInsightRequestTime}, so September reads `Sep` everywhere (the
+ * en-GB locale would print `Sept`).
+ */
 export function formatInsightSessionDate(date: string | null): string {
   if (!date) return "";
   const [year, month, day] = date.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+  return `${day} ${SHORT_MONTHS[month - 1]} ${year}`;
 }
 
 /** The states an Insight Request is stored in. */
@@ -154,6 +157,24 @@ export interface InsightRequestView {
   requestedByName: string;
   /** UTC, ISO 8601; null until the request ends. */
   finishedAt: string | null;
+}
+
+/**
+ * The tests an AI Summary was made from, by name from the test picker's read;
+ * an id the picker does not hold reads "an earlier test". Until the picker
+ * has answered, how many tests.
+ */
+export function insightTestNames(selectedTestIds: string[], tests: AiTestInsightsTestsState): string {
+  if (tests.status !== "loaded") {
+    return selectedTestIds.length === 1 ? "1 test" : `${selectedTestIds.length} tests`;
+  }
+  const names = new Map(tests.tests.map((test) => [test.id, test.name]));
+  return selectedTestIds.map((id) => names.get(id) ?? "an earlier test").join(", ");
+}
+
+/** A Test Insight's name, dated by its request day in India: `AI Summary of 27 Nov 2026`. */
+export function aiSummaryTitle(request: InsightRequestView): string {
+  return `AI Summary of ${formatInsightSessionDate(insightRequestDateInIndia(request.requestedAt))}`;
 }
 
 /** A `queued` or `running` request holds the Student's one running slot. */
@@ -183,13 +204,24 @@ export interface AiTestInsightsSummaryResponse {
 /** The 409 code of a login whose permission links no User and no User has its email. */
 export const NO_LINKED_USER_CODE = "no_linked_user";
 
+/** What a Teacher with no User sees instead of Generate's answer or the Session Notes form. */
+export const NO_LINKED_USER_MESSAGE = "Your login is not linked to a user record. Contact your program admin.";
+
 /** The 503 code of Generate without the delivery settings, and of the summary route without the reader's settings. */
 export const NOT_CONFIGURED_CODE = "not_configured";
 
+/**
+ * A route under a Student's AI Test Insights API path (`student.id`), such as
+ * `requests` or `sessions/draft`; a centre the page named carries over.
+ */
+export function aiTestInsightsStudentApiUrl(studentId: number, path: string, centreId?: number | null): string {
+  const base = `/api/ai-test-insights/students/${studentId}/${path}`;
+  return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
+}
+
 /** The create route for a Student (`student.id`); a centre the page named carries over. */
 export function aiTestInsightsRequestsUrl(studentId: number, centreId?: number | null): string {
-  const base = `/api/ai-test-insights/students/${studentId}/requests`;
-  return centreId === undefined || centreId === null ? base : `${base}?centre=${encodeURIComponent(String(centreId))}`;
+  return aiTestInsightsStudentApiUrl(studentId, "requests", centreId);
 }
 
 /**
@@ -225,16 +257,19 @@ export function aiTestInsightsRequestPdfUrl(requestsUrl: string, requestKey: str
  * `2026-11-27T05:30:00Z` of Student 1001 is `ai-summary-1001-2026-11-27.pdf`.
  */
 export function aiTestInsightPdfFileName(studentId: number, requestedAt: string): string {
-  const date = new Intl.DateTimeFormat("en-CA", {
+  return `ai-summary-${studentId}-${insightRequestDateInIndia(requestedAt)}.pdf`;
+}
+
+/** The day of a UTC moment in India, `YYYY-MM-DD`: `2026-11-27T19:30:00Z` is `2026-11-28`. */
+export function insightRequestDateInIndia(iso: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date(requestedAt));
-  return `ai-summary-${studentId}-${date}.pdf`;
+  }).format(new Date(iso));
 }
 
-const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** A UTC moment (`2026-11-27T05:30:00Z`) in India time: `27 Nov 2026, 11:00`. */
 export function formatInsightRequestTime(iso: string): string {

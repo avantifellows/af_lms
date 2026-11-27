@@ -35,7 +35,12 @@
 // `output/report.pdf`, keys under `{prefix}/{environment}/items/{item id}/`),
 // and ends the request `completed` with that Item. Every end is guarded by
 // `state IN ('queued', 'running')`; every write uses UTC times (`now() AT TIME
-// ZONE 'UTC'`) and sets `updated_at`.
+// ZONE 'UTC'`) and sets `updated_at`. Before any of that, once it holds the
+// request, it checks the row's notes copy (#579) as AI Mentorship Guide does
+// (avantifellows/ai-mentorship-guide#151): `notes_snapshot` must be a list of
+// objects whose `session_date`, `areas_of_concern`, `immediate_actions` and
+// `other_notes` are each a string or null (or absent); otherwise the request
+// ends `failed` with `invalid_request`, with no Item.
 //
 // Modes:
 // - Steered (the default, for specs): every accepted request is left
@@ -54,8 +59,9 @@
 //   has not started it yet.
 // - POST /__fake/end {"requestKey", "state": "no_data" | "failed",
 //   "outcomeCode"} or {"requestKey", "state": "completed"} ends a request it
-//   holds as running. 204, or 409 when no `queued` or `running` row has that
-//   key.
+//   holds as running. A completed end checks the notes copy first, so a row
+//   with a bad copy ends `failed` with `invalid_request`. 204, or 409 when no
+//   `queued` or `running` row has that key.
 // - GET /__fake/calls lists the wake and enqueue calls received since reset.
 // - POST /__fake/reset clears the calls and goes back to "accept".
 // - GET /__fake/health answers 200 once the fake is listening.
@@ -88,6 +94,7 @@ const END_STATES = new Set(["no_data", "failed"]);
 const RUN_BEHAVIOURS = new Set(["hold", "complete", "no_data", "failed"]);
 const OUTCOME_CODE = /^[a-z0-9_]{1,64}$/;
 const UTC_NOW = "(now() AT TIME ZONE 'UTC')";
+const NOTE_FIELDS = ["session_date", "areas_of_concern", "immediate_actions", "other_notes"];
 const AUTO = process.argv.includes("--auto");
 const DEFAULT_BEHAVIOUR = AUTO
   ? { enqueue: "accept", run: "complete", delayMs: config.autoCompleteAfterMs }
@@ -225,6 +232,31 @@ async function claim(requestKey) {
   return result.rowCount === 1;
 }
 
+/** AI Mentorship Guide's check of a notes copy: a list of objects whose four fields are each a string or null (or absent). */
+function isValidNotesCopy(notes) {
+  return (
+    Array.isArray(notes) &&
+    notes.every(
+      (note) =>
+        typeof note === "object" &&
+        note !== null &&
+        !Array.isArray(note) &&
+        NOTE_FIELDS.every((name) => note[name] === undefined || note[name] === null || typeof note[name] === "string"),
+    )
+  );
+}
+
+/**
+ * As the generator does once it holds a request: a row whose notes copy fails
+ * the check ends `failed` with `invalid_request`. Returns null when the row
+ * may run on, else whether a row changed. It logs nothing of the copy.
+ */
+async function endIfUnrunnable(requestKey) {
+  const found = await pool.query(`SELECT notes_snapshot FROM ai_test_insight_requests WHERE request_key = $1`, [requestKey]);
+  if (isValidNotesCopy(found.rows[0]?.notes_snapshot)) return null;
+  return endWithoutResult(requestKey, "failed", "invalid_request");
+}
+
 /** Ends a request without a result. Returns whether a row changed. */
 async function endWithoutResult(requestKey, state, outcomeCode) {
   const result = await pool.query(
@@ -312,12 +344,19 @@ async function complete(requestKey) {
   }
 }
 
+/** A `completed` end, as the generator runs a request: claim it, check its notes copy, then complete it. */
+async function claimCheckAndComplete(requestKey) {
+  await claim(requestKey);
+  return (await endIfUnrunnable(requestKey)) ?? (await complete(requestKey));
+}
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Runs an accepted request as steered, after the 202 has been sent. Logs the key and an error name only. */
 async function run(requestKey, steered) {
   try {
     if (!(await claim(requestKey))) return;
+    if ((await endIfUnrunnable(requestKey)) !== null) return;
     if (steered.run === "hold") return;
     if (steered.run === "complete") {
       if (steered.delayMs) await delay(steered.delayMs);
@@ -404,7 +443,7 @@ async function handle(req, res) {
     if (!end) return send(res, 400, { error: "unknown end" });
     const ended =
       end.state === "completed"
-        ? (await claim(end.requestKey), await complete(end.requestKey))
+        ? await claimCheckAndComplete(end.requestKey)
         : await endWithoutResult(end.requestKey, end.state, end.outcomeCode);
     return send(res, ended ? 204 : 409, ended ? undefined : { error: "no queued or running request" });
   }

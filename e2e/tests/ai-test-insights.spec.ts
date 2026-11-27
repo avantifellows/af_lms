@@ -4,25 +4,35 @@ import type { Page } from "@playwright/test";
 
 import { test, expect, signInAs } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
+import { TEST_USERS } from "../helpers/test-users";
 import {
+  AI_TEST_INSIGHTS_ASHA_HISTORY,
   AI_TEST_INSIGHTS_CARDS,
   AI_TEST_INSIGHTS_COE_CENTRE_LIST,
   AI_TEST_INSIGHTS_NOT_LISTED_KEYS,
   AI_TEST_INSIGHTS_NO_CENTRE_SCHOOL,
   AI_TEST_INSIGHTS_NODAL_CENTRE_LIST,
+  AI_TEST_INSIGHTS_NOTES_COPY,
   AI_TEST_INSIGHTS_PERSONAS,
   AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
+  addCompletedInsightRequest,
+  addInsightSessions,
+  addSubmittedInsightSession,
   backdateInsightRequest,
   backdateInsightRequestUpdate,
   endInsightRequestWithoutSummary,
   markInsightRequestRunning,
   readInsightRequestItem,
   readInsightRequests,
+  readInsightSessions,
+  readSessionNoteAudits,
   removeAiTestInsightsFixture,
   removeInsightRequestsMadeBySpecs,
+  removeInsightSessionsMadeBySpecs,
   seedAiTestInsightsFixture,
+  setInsightRequestNotesCopy,
   type AiTestInsightsFixtureIds,
 } from "../helpers/ai-test-insights-fixtures";
 import {
@@ -78,6 +88,18 @@ async function studentCard(page: Page): Promise<{ name: string; fields: string[]
     terms.map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
   );
   return { name, fields };
+}
+
+/** The History section's entries, each as its lines of text, once it has loaded. */
+async function historyEntries(page: Page): Promise<string[][]> {
+  const history = page.getByRole("region", { name: "History" });
+  await expect(history.getByText("Loading history…")).toHaveCount(0);
+  await expect(history.getByRole("alert")).toHaveCount(0);
+  return history
+    .getByRole("listitem")
+    .evaluateAll((items) =>
+      items.map((item) => Array.from(item.querySelectorAll("h3, p, dt, dd")).map((line) => line.textContent ?? "")),
+    );
 }
 
 async function expectNotFound(page: Page, url: string) {
@@ -156,6 +178,16 @@ function expectAfterTeacherFeedback(names: string[]) {
 // Students and one of each kind the tab leaves out, a second School, a School
 // with no active centre, the personas the e2e seed lacks, and Insight Sessions
 // and Insight Requests whose counts it declares by hand.
+/**
+ * Fails unless `page` is signed in as the Admin test user. `adminPage` is the
+ * test's own `page`, so a `signInAs(page, …)` in the same test would quietly
+ * turn an Admin check into a check of that persona.
+ */
+async function expectAdmin(page: Page) {
+  const session = (await (await page.request.get("/api/auth/session")).json()) as { user?: { email?: string } };
+  expect(session.user?.email).toBe(TEST_USERS.admin.email);
+}
+
 test.describe("AI Test Insights tab", () => {
   const pool = getTestPool();
   let ids: AiTestInsightsFixtureIds;
@@ -187,7 +219,7 @@ test.describe("AI Test Insights tab", () => {
     const rows = await listedRows(adminPage);
 
     // Asha: 3 submitted sessions (a newer draft ignored), 2 completed requests
-    // (failed, no-data and queued ignored), newest submitted on 14 Nov 2026.
+    // (failed, no-data and running ignored), newest submitted on 14 Nov 2026.
     expect(rows).toContainEqual(["Asha Atiq", "E2E-ATI-ASHA", "11", "3", "2", "14 Nov 2026"]);
     // Divya has only a draft and a failed request; Bhavya has nothing.
     expect(rows).toContainEqual(["Divya Dutt", "E2E-ATI-DIVYA", "12", "0", "0", ""]);
@@ -242,12 +274,14 @@ test.describe("AI Test Insights tab", () => {
   });
 
   test("shows the tab after Teacher Feedback for Teacher, Program Manager, Program Admin and Admin", async ({
-    page,
+    browser,
     adminPage,
     pmPage,
     programAdminPage,
   }) => {
-    await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+    // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+    const teacherContext = await browser.newContext();
+    const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
     for (const viewer of [page, pmPage, programAdminPage, adminPage]) {
       await viewer.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
       expectAfterTeacherFeedback(await tabNames(viewer));
@@ -256,6 +290,8 @@ test.describe("AI Test Insights tab", () => {
       await viewer.goto(`/centre/${ids.coeCentreId}`);
       expectAfterTeacherFeedback(await tabNames(viewer));
     }
+    await expectAdmin(adminPage);
+    await teacherContext.close();
   });
 
   test("hides the tab for both PMU roles and an NVS-only Teacher", async ({ page }) => {
@@ -278,16 +314,20 @@ test.describe("AI Test Insights tab", () => {
   });
 
   test("hides the tab for every role at a School with no active centre", async ({
-    page,
+    browser,
     adminPage,
     pmPage,
     programAdminPage,
   }) => {
-    await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+    // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+    const teacherContext = await browser.newContext();
+    const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
     for (const viewer of [page, pmPage, programAdminPage, adminPage]) {
       await viewer.goto(`/school/${AI_TEST_INSIGHTS_NO_CENTRE_SCHOOL.code}`);
       expect(await tabNames(viewer)).not.toContain(TAB);
     }
+    await expectAdmin(adminPage);
+    await teacherContext.close();
   });
 
   test("refuses a Teacher of another School with 403 from the list route", async ({ page }) => {
@@ -313,6 +353,17 @@ test.describe("AI Test Insights tab", () => {
   test.describe("Student page", () => {
     const studentUrl = (key: string, centreId?: number) =>
       `/ai-test-insights/students/${ids.studentIds[key]}${centreId === undefined ? "" : `?centre=${centreId}`}`;
+
+    /** Opens Esha's page as the Teacher with the picker answered, and presses Generate. */
+    async function generateForEsha(page: Page) {
+      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+      await answerTestPicker(page, 200, { tests: PICKER_TESTS });
+      await page.goto(studentUrl("esha"));
+      const summary = page.getByRole("region", { name: "AI Summary" });
+      await expect(summary.getByRole("checkbox", { name: /Mock Test 1/ })).toBeChecked();
+      await summary.getByRole("button", { name: "Generate" }).click();
+      return summary;
+    }
 
     test("opens from the School page and goes back to the School page's tab", async ({ adminPage }) => {
       await adminPage.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
@@ -691,17 +742,6 @@ test.describe("AI Test Insights tab", () => {
         await resetFakeAiMentorshipGuide();
         await removeInsightRequestsMadeBySpecs(pool, ids.studentIds.esha);
       });
-
-      /** Opens Esha's page as the Teacher with the picker answered, and presses Generate. */
-      async function generateForEsha(page: Page) {
-        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
-        await answerTestPicker(page, 200, { tests: PICKER_TESTS });
-        await page.goto(studentUrl("esha"));
-        const summary = page.getByRole("region", { name: "AI Summary" });
-        await expect(summary.getByRole("checkbox", { name: /Mock Test 1/ })).toBeChecked();
-        await summary.getByRole("button", { name: "Generate" }).click();
-        return summary;
-      }
 
       test("wakes the generator and enqueues the request once, with the secret and the environment, and it stays queued", async ({
         page,
@@ -1297,6 +1337,1094 @@ test.describe("AI Test Insights tab", () => {
           expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([earlier]);
           expect(await enqueueOrWakeCalls()).toBe(callsBefore);
         });
+
+        // "View AI Summary" in History (#577): every Test Insight in the
+        // timeline opens in place through part 1's summary and PDF routes, so
+        // generating again no longer hides an earlier AI Summary.
+        test.describe("From History", () => {
+          const CONCERN = "Loses marks on rotational motion [e2e-577]";
+          const ACTIONS = "Two torque worksheets a week [e2e-577]";
+          const sessionsRoute = () => `/api/ai-test-insights/students/${ids.studentIds.esha}/sessions`;
+          const history = (page: Page) => page.getByRole("region", { name: "History" });
+          /** The History entry (list item) that holds `text`. */
+          const entryWith = (page: Page, text: string) =>
+            history(page).getByRole("listitem").filter({ hasText: text });
+          const setRequestedAt = (requestKey: string, at: string) =>
+            pool.query(`UPDATE ai_test_insight_requests SET requested_at = $2 WHERE request_key = $1`, [requestKey, at]);
+
+          /**
+           * Counts the page's answered reads of one request's summary route and
+           * status route from now on. `next dev` mounts each effect twice and
+           * aborts the first fetch, so only finished requests count.
+           */
+          function countRequestReads(page: Page, requestKey: string) {
+            const reads = { summary: 0, status: 0 };
+            const base = `/api/ai-test-insights/students/${ids.studentIds.esha}/requests/${requestKey}`;
+            page.on("requestfinished", (request) => {
+              const path = new URL(request.url()).pathname;
+              if (path === `${base}/summary`) reads.summary += 1;
+              if (path === base) reads.status += 1;
+            });
+            return reads;
+          }
+
+          // Sessions first: a submitted session holds its linked request.
+          test.afterEach(async () => {
+            await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.esha]);
+          });
+
+          test("reads and downloads a Test Insight no session records, and still does after Generate again", async ({
+            page,
+          }) => {
+            test.slow();
+            await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+            const summary = await generateForEsha(page);
+            await expectFixedText(summary, POLLED);
+            const [earlier] = await readInsightRequests(pool, ids.studentIds.esha);
+            // 05:30 UTC is 11:00 on 20 Nov 2026 in India.
+            await setRequestedAt(earlier.requestKey, "2026-11-20 05:30:00");
+            await page.reload();
+            await expectFixedText(summary);
+            expect(await historyEntries(page)).toEqual([
+              ["AI Summary of 20 Nov 2026", "Made from: Mock Test 1", "Asked for by E2E ATI Teacher on 20 Nov 2026, 11:00"],
+            ]);
+
+            // Nothing is read before it is opened; opening reads the text once and polls nothing.
+            const reads = countRequestReads(page, earlier.requestKey);
+            const callsBefore = await enqueueOrWakeCalls();
+            const entry = entryWith(page, "AI Summary of 20 Nov 2026");
+            await expect(entry.getByRole("article")).toHaveCount(0);
+            expect(reads).toEqual({ summary: 0, status: 0 });
+            await entry.getByRole("button", { name: "View AI Summary" }).click();
+            await expectFixedText(entry);
+            await expect(entry.getByText("Made from: Mock Test 1", { exact: true })).toBeVisible();
+            await expectFixedPdfDownload(page, entry, `ai-summary-${ids.studentIds.esha}-2026-11-20.pdf`);
+            await entry.getByRole("button", { name: "Hide AI Summary" }).click();
+            await expect(entry.getByRole("article")).toHaveCount(0);
+            expect(reads).toEqual({ summary: 1, status: 0 });
+            expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+
+            // Generate again: the card shows the new AI Summary, and the earlier one stays readable in History.
+            await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+            await summary.getByRole("button", { name: "Generate again" }).click();
+            await page.getByRole("dialog", { name: "Generate again?" }).getByRole("button", { name: "Generate again" }).click();
+            await expect(history(page).getByRole("listitem")).toHaveCount(2, POLLED);
+            const rows = await readInsightRequests(pool, ids.studentIds.esha);
+            expect(rows.map((row) => row.state)).toEqual(["completed", "completed"]);
+            await entry.getByRole("button", { name: "View AI Summary" }).click();
+            await expectFixedText(entry);
+            await expectFixedPdfDownload(page, entry, `ai-summary-${ids.studentIds.esha}-2026-11-20.pdf`);
+          });
+
+          test("reads and downloads the Test Insight a submitted session records, for the Teacher and a viewer", async ({
+            page,
+            pmPage,
+          }) => {
+            test.slow();
+            await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+            const summary = await generateForEsha(page);
+            await expectFixedText(summary, POLLED);
+            const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+            // 05:30 UTC is 11:00 on 27 Nov 2026 in India.
+            await setRequestedAt(request.requestKey, "2026-11-27 05:30:00");
+            const notes = { sessionDate: "2026-11-20", areasOfConcern: CONCERN, immediateActions: ACTIONS, otherNotes: null };
+            const draft = await page.request.put(`${sessionsRoute()}/draft`, { data: { ...notes, expectedRevision: 0 } });
+            expect(draft.status()).toBe(200);
+            const saved = (await draft.json()) as { draftId: number; revision: number };
+            const submitted = await page.request.post(sessionsRoute(), {
+              data: { ...notes, draftId: saved.draftId, expectedRevision: saved.revision, openRequestKey: request.requestKey },
+            });
+            expect(submitted.status()).toBe(201);
+            const callsBefore = await enqueueOrWakeCalls();
+
+            for (const viewer of [page, pmPage]) {
+              await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+              await viewer.goto(studentUrl("esha"));
+              // The Test Insight shows once, inside the session.
+              await expect(history(viewer).getByRole("listitem")).toHaveCount(1);
+              const entry = entryWith(viewer, "Notes by E2E ATI Teacher");
+              await expect(entry.getByText("AI Summary of 27 Nov 2026", { exact: true })).toBeVisible();
+              await entry.getByRole("button", { name: "View AI Summary" }).click();
+              await expectFixedText(entry);
+              await expect(entry.getByText("Asked for by E2E ATI Teacher on 27 Nov 2026, 11:00", { exact: true })).toBeVisible();
+              await expectFixedPdfDownload(viewer, entry, `ai-summary-${ids.studentIds.esha}-2026-11-27.pdf`);
+            }
+            expect(await enqueueOrWakeCalls()).toBe(callsBefore);
+          });
+        });
+      });
+
+      // The notes copy (#579): a new request carries the Student's latest
+      // submitted Session Notes of this academic year, written with the row
+      // and never changed. Esha has no seeded sessions; each test removes the
+      // ones it added, before the requests go.
+      test.describe("Notes copy", () => {
+        // Up to two 10-second polls.
+        const POLLED = { timeout: 25_000 };
+        const editRoute = (sessionId: number) => `/api/ai-test-insights/students/${ids.studentIds.esha}/sessions/${sessionId}`;
+
+        test.afterEach(async () => {
+          await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.esha]);
+        });
+
+        test("is empty when the Student's only submitted notes are last year's, beside a draft", async ({ page }) => {
+          await addInsightSessions(pool, ids, "esha", AI_TEST_INSIGHTS_NOTES_COPY.lastYearAndDraft.sessions);
+
+          const summary = await generateForEsha(page);
+          await expect(summary.getByText(WAITING)).toBeVisible();
+
+          const rows = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(rows).toHaveLength(1);
+          expect(rows[0].notesSnapshot).toEqual([]);
+        });
+
+        test("holds the five newest submitted this year by any Teacher, the generator completes it, and a later edit leaves it", async ({
+          page,
+        }) => {
+          test.slow();
+          const notesCopy = AI_TEST_INSIGHTS_NOTES_COPY.sixThisYear;
+          // The second declared session is the Teacher's earlier one of 20 Nov.
+          const [, teachersSessionId] = await addInsightSessions(pool, ids, "esha", notesCopy.sessions);
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+
+          const summary = await generateForEsha(page);
+          await expect(summary.getByRole("article", { name: "AI Summary text" })).toBeVisible(POLLED);
+
+          const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(request).toMatchObject({ state: "completed", outcomeCode: null });
+          expect(request.notesSnapshot).toEqual(notesCopy.copy);
+
+          // The author edits one of the copied sessions: the stored copy stays.
+          const edited = await page.request.patch(editRoute(teachersSessionId), {
+            data: {
+              sessionDate: "2026-11-21",
+              areasOfConcern: "Edited concern [e2e-579]",
+              immediateActions: "Edited action [e2e-579]",
+              otherNotes: "Edited other [e2e-579]",
+              expectedRevision: 1,
+            },
+          });
+          expect(edited.status()).toBe(200);
+          expect(await edited.json()).toEqual({ revision: 2 });
+          expect(await readInsightRequests(pool, ids.studentIds.esha)).toEqual([request]);
+        });
+
+        test("ends a request whose copy is malformed failed with invalid_request in the fake generator, with no Item", async ({
+          page,
+        }) => {
+          const summary = await generateForEsha(page);
+          await expect(summary.getByText(WAITING)).toBeVisible();
+          const [queued] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(queued.notesSnapshot).toEqual([]);
+
+          // `session_date` as a number, which AI Mentorship Guide refuses.
+          await setInsightRequestNotesCopy(pool, queued.requestKey, [
+            { session_date: 20261120, areas_of_concern: "Concern [e2e-579]", immediate_actions: "Action [e2e-579]", other_notes: null },
+          ]);
+          await endFakeAiMentorshipGuideRequest(queued.requestKey, { state: "completed" });
+
+          const [ended] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(ended).toMatchObject({ state: "failed", outcomeCode: "invalid_request" });
+          expect(await readInsightRequestItem(pool, queued.requestKey)).toBeNull();
+        });
+      });
+    });
+
+    // Session Notes (#574): a Teacher's private draft, saved by itself about
+    // a second after typing stops. Bhavya and Esha have no seeded sessions.
+    // History (#576): every submitted Insight Session and every completed
+    // Test Insight no session records, newest first, for everyone who can
+    // open the page.
+    test.describe("History", () => {
+      test("shows Asha's declared entries in the declared order to the author, a second Teacher and each viewer role", async ({
+        browser,
+        pmPage,
+        programAdminPage,
+        adminPage,
+      }) => {
+        // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+        const teacherContext = await browser.newContext();
+        const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
+        const secondContext = await browser.newContext();
+        const secondTeacher = await signInAs(await secondContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+        for (const viewer of [page, secondTeacher, pmPage, programAdminPage, adminPage]) {
+          await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+          await viewer.goto(studentUrl("asha"));
+          expect(await historyEntries(viewer)).toEqual(AI_TEST_INSIGHTS_ASHA_HISTORY);
+        }
+        await expectAdmin(adminPage);
+        await secondContext.close();
+        await teacherContext.close();
+      });
+
+      test("puts History below Session Notes for a Teacher and below the AI Summary card for a viewer", async ({
+        page,
+        programAdminPage,
+      }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        for (const [viewer, sections] of [
+          [page, ["AI Summary", "Session Notes", "History"]],
+          [programAdminPage, ["AI Summary", "History"]],
+        ] as const) {
+          await viewer.goto(studentUrl("asha"));
+          await expect(viewer.getByRole("region", { name: "History" })).toBeVisible();
+          const regions = await viewer
+            .getByRole("main")
+            .getByRole("region")
+            .evaluateAll((all) => all.map((region) => region.getAttribute("aria-label")));
+          expect(regions).toEqual(["Student", "Performance", ...sections]);
+        }
+      });
+
+      test("says so for a Student with no entry", async ({ adminPage }) => {
+        await adminPage.goto(studentUrl("bhavya"));
+
+        await expect(
+          adminPage.getByRole("region", { name: "History" }).getByText("No Insight Sessions or AI Summaries yet.", { exact: true }),
+        ).toBeVisible();
+      });
+
+      test("keeps the AI Summary card working when the sessions route fails, and Retry loads the timeline", async ({
+        adminPage,
+      }) => {
+        let failures = 0;
+        await adminPage.route("**/api/ai-test-insights/students/*/sessions*", async (route) => {
+          if (route.request().method() === "GET" && failures === 0) {
+            failures += 1;
+            await route.fulfill({ status: 500, json: { error: "Session Notes could not be loaded" } });
+            return;
+          }
+          await route.continue();
+        });
+        await answerTestPicker(adminPage, 200, { tests: PICKER_TESTS });
+        await adminPage.goto(studentUrl("asha"));
+
+        const history = adminPage.getByRole("region", { name: "History" });
+        await expect(history.getByRole("alert")).toContainText("History could not be loaded.");
+        const summary = adminPage.getByRole("region", { name: "AI Summary" });
+        await expect(summary.getByText("Writing the AI Summary. This usually takes about 4 minutes.")).toBeVisible();
+        await expect(summary.getByRole("checkbox")).toHaveCount(PICKER_TESTS.length);
+        expect(await studentCard(adminPage)).toEqual({
+          ...AI_TEST_INSIGHTS_CARDS.asha,
+          fields: AI_TEST_INSIGHTS_CARDS.asha.fields.map(([label, value]) =>
+            label === "Newest test" ? [label, "Mock Test 1 · 2 Nov 2026"] : [label, value],
+          ),
+        });
+
+        await history.getByRole("button", { name: "Retry" }).click();
+        expect(await historyEntries(adminPage)).toEqual(AI_TEST_INSIGHTS_ASHA_HISTORY);
+      });
+
+      test("answers 404 from the sessions route to a Teacher of another School", async ({ page }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher);
+
+        const response = await page.request.get(`/api/ai-test-insights/students/${ids.studentIds.asha}/sessions`);
+
+        expect(response.status()).toBe(404);
+      });
+    });
+
+    test.describe("Session Notes", () => {
+      const CONCERN = "Loses marks on rotational motion [e2e-574]";
+      const ACTIONS = "Two torque worksheets a week [e2e-574]";
+      const sessionsRoute = (key: string) => `/api/ai-test-insights/students/${ids.studentIds[key]}/sessions`;
+      const draftRoute = (key: string) => `${sessionsRoute(key)}/draft`;
+      const draftBody = (overrides: Record<string, unknown> = {}) => ({
+        sessionDate: "2026-11-20",
+        areasOfConcern: CONCERN,
+        immediateActions: ACTIONS,
+        otherNotes: null,
+        expectedRevision: 0,
+        ...overrides,
+      });
+      const submitBody = (overrides: Record<string, unknown> = {}) => draftBody({ openRequestKey: null, ...overrides });
+      /** Today in India by the test's own clock, `YYYY-MM-DD`. */
+      const todayInIndia = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+      const notesOf = (page: Page) => page.getByRole("region", { name: "Session Notes" });
+
+      test.afterEach(async () => {
+        await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.bhavya, ids.studentIds.esha, ids.studentIds.divya]);
+      });
+
+      test("saves a Teacher's typing as one draft row with no audit row, and the form holds it after leaving", async ({
+        page,
+      }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await page.goto(studentUrl("bhavya"));
+        const notes = notesOf(page);
+        await expect(notes.getByLabel("Date of conversation")).toHaveValue(todayInIndia());
+
+        await notes.getByLabel("Areas of concern").fill(CONCERN);
+        await notes.getByLabel("Immediate actions").fill(ACTIONS);
+        await expect(notes.getByText("Saved", { exact: true })).toBeVisible();
+
+        await expect
+          .poll(async () => (await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => row.immediateActions))
+          .toEqual([ACTIONS]);
+        const [row] = await readInsightSessions(pool, ids.studentIds.bhavya);
+        expect(row).toMatchObject({
+          state: "draft",
+          authorUserId: ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
+          schoolId: ids.schoolId,
+          programId: PROGRAM_IDS.COE,
+          academicYear: CURRENT_ACADEMIC_YEAR,
+          sessionDate: todayInIndia(),
+          areasOfConcern: CONCERN,
+          immediateActions: ACTIONS,
+          otherNotes: null,
+          insightRequestId: null,
+          submittedAt: null,
+        });
+        const nowSeconds = Date.now() / 1000;
+        for (const time of [row.insertedAt, row.updatedAt]) expect(Math.abs(time - nowSeconds)).toBeLessThan(60);
+        expect(await readSessionNoteAudits(pool, ids.studentIds.bhavya)).toEqual([]);
+
+        await page.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
+        await page.goto(studentUrl("bhavya"));
+        await expect(notes.getByLabel("Areas of concern")).toHaveValue(CONCERN);
+        await expect(notes.getByLabel("Immediate actions")).toHaveValue(ACTIONS);
+        await expect(notes.getByLabel("Other notes (optional)")).toHaveValue("");
+      });
+
+      test("shows a second Teacher of the School a blank form, and the history route gives only the author the draft", async ({
+        page,
+        browser,
+      }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        expect((await page.request.put(draftRoute("bhavya"), { data: draftBody() })).status()).toBe(200);
+
+        const otherContext = await browser.newContext();
+        const otherPage = await signInAs(await otherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+        await otherPage.goto(studentUrl("bhavya"));
+        const notes = notesOf(otherPage);
+        await expect(notes.getByLabel("Date of conversation")).toHaveValue(todayInIndia());
+        await expect(notes.getByLabel("Areas of concern")).toHaveValue("");
+        await expect(notes.getByLabel("Immediate actions")).toHaveValue("");
+        const othersRead = await otherPage.request.get(sessionsRoute("bhavya"));
+        expect(await othersRead.json()).toEqual({ timeline: [], draft: null, notesAccess: "write" });
+        await otherContext.close();
+
+        const ownRead = await page.request.get(sessionsRoute("bhavya"));
+        expect(ownRead.headers()["cache-control"]).toBe("no-store");
+        expect(await ownRead.json()).toEqual({
+          timeline: [],
+          draft: {
+            draftId: (await readInsightSessions(pool, ids.studentIds.bhavya))[0].id,
+            revision: 1,
+            sessionDate: "2026-11-20",
+            areasOfConcern: CONCERN,
+            immediateActions: ACTIONS,
+            otherNotes: null,
+          },
+          notesAccess: "write",
+        });
+      });
+
+      test("shows a Program Manager, Program Admin, Admin and read_only Teacher no form, and the draft route refuses them", async ({
+        pmPage,
+        programAdminPage,
+        adminPage,
+        browser,
+      }) => {
+        // The Teacher signs in in a browser of their own: `adminPage` is the test's own page.
+        const teacherContext = await browser.newContext();
+        const teacherPage = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
+        expect((await teacherPage.request.put(draftRoute("bhavya"), { data: draftBody() })).status()).toBe(200);
+        await teacherContext.close();
+        const readOnlyContext = await browser.newContext();
+        const readOnlyPage = await signInAs(await readOnlyContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.readOnlyTeacher);
+
+        const viewers = { "Program Manager": pmPage, "Program Admin": programAdminPage, Admin: adminPage, "read_only Teacher": readOnlyPage };
+        for (const [role, viewer] of Object.entries(viewers)) {
+          await test.step(role, async () => {
+            await viewer.goto(studentUrl("bhavya"));
+            await expect(viewer.getByRole("region", { name: "AI Summary" })).toBeVisible();
+            await expect(notesOf(viewer)).toHaveCount(0);
+
+            const read = await viewer.request.get(sessionsRoute("bhavya"));
+            expect(await read.json()).toEqual({ timeline: [], draft: null, notesAccess: "read" });
+            const write = await viewer.request.put(draftRoute("bhavya"), {
+              data: draftBody({ areasOfConcern: "Viewer text", expectedRevision: 1 }),
+            });
+            expect(write.status()).toBe(403);
+            const submit = await viewer.request.post(sessionsRoute("bhavya"), { data: submitBody({ expectedRevision: 1 }) });
+            expect(submit.status()).toBe(403);
+          });
+        }
+        await readOnlyContext.close();
+
+        const rows = await readInsightSessions(pool, ids.studentIds.bhavya);
+        expect(rows.map((row) => [row.state, row.areasOfConcern, row.revision])).toEqual([["draft", CONCERN, 1]]);
+        expect(await readSessionNoteAudits(pool, ids.studentIds.bhavya)).toEqual([]);
+      });
+
+      test("leaves no row when a Teacher opens and leaves a blank form", async ({ page }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await page.goto(studentUrl("esha"));
+        await expect(notesOf(page).getByLabel("Areas of concern")).toHaveValue("");
+        // Longer than the autosave pause.
+        await page.waitForTimeout(2_500);
+        await page.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
+
+        expect(await readInsightSessions(pool, ids.studentIds.esha)).toEqual([]);
+      });
+
+      test("refuses a second tab's older save with 409, says so, and keeps the newer text", async ({ page }) => {
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        const olderTab = await page.context().newPage();
+        await page.goto(studentUrl("bhavya"));
+        await olderTab.goto(studentUrl("bhavya"));
+        await expect(notesOf(olderTab).getByLabel("Areas of concern")).toHaveValue("");
+
+        await notesOf(page).getByLabel("Areas of concern").fill(CONCERN);
+        await expect(notesOf(page).getByText("Saved", { exact: true })).toBeVisible();
+
+        const refused = olderTab.waitForResponse(
+          (response) => response.url().endsWith(draftRoute("bhavya")) && response.request().method() === "PUT",
+        );
+        await notesOf(olderTab).getByLabel("Areas of concern").fill("Older tab text [e2e-574]");
+        const response = await refused;
+        expect(response.status()).toBe(409);
+        expect(await response.json()).toEqual({
+          error: "These notes were changed in another tab.",
+          code: "stale",
+          currentRevision: 1,
+        });
+        const alert = notesOf(olderTab).getByRole("alert");
+        await expect(alert).toContainText("These notes were changed in another tab.");
+        await expect(notesOf(olderTab).getByLabel("Areas of concern")).toHaveValue("Older tab text [e2e-574]");
+        expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => [row.areasOfConcern, row.revision])).toEqual([
+          [CONCERN, 1],
+        ]);
+
+        await alert.getByRole("button", { name: "Reload notes" }).click();
+        await expect(notesOf(olderTab).getByLabel("Areas of concern")).toHaveValue(CONCERN);
+      });
+
+      test("keeps typing left less than a second before the Back link as a draft, and asks before leaving a failed save", async ({
+        page,
+      }) => {
+        const TYPED = "Typed just before Back [fix580]";
+        const backToTab = new RegExp(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}\\?tab=ai_test_insights$`);
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await page.goto(studentUrl("bhavya"));
+        const notes = notesOf(page);
+        const back = page.getByRole("link", { name: "Back to AI Test Insights" });
+
+        await notes.getByLabel("Areas of concern").fill(TYPED);
+        await back.click();
+        await expect(page).toHaveURL(backToTab);
+        expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => [row.state, row.areasOfConcern])).toEqual([
+          ["draft", TYPED],
+        ]);
+
+        // Every draft save now fails.
+        await page.route(`**${draftRoute("bhavya")}*`, (route) => route.fulfill({ status: 500, json: { error: "failed" } }));
+        await page.goto(studentUrl("bhavya"));
+        await expect(notes.getByLabel("Areas of concern")).toHaveValue(TYPED);
+        await notes.getByLabel("Immediate actions").fill(ACTIONS);
+        await expect(notes.getByRole("alert")).toContainText("These notes could not be saved.");
+        const questions: string[] = [];
+        page.once("dialog", (dialog) => {
+          questions.push(dialog.message());
+          void dialog.dismiss();
+        });
+        await back.click();
+        await expect.poll(() => questions).toEqual(["Your Session Notes are not saved. Leave this page anyway?"]);
+        await expect(page).toHaveURL(new RegExp(`/ai-test-insights/students/${ids.studentIds.bhavya}$`));
+        await expect(notes.getByLabel("Immediate actions")).toHaveValue(ACTIONS);
+
+        page.once("dialog", (dialog) => void dialog.accept());
+        await back.click();
+        await expect(page).toHaveURL(backToTab);
+      });
+
+      test("refuses a tab still holding a submitted draft, so the next draft is never overwritten or submitted twice", async ({
+        page,
+      }) => {
+        const NEXT_CONCERN = "Next conversation: optics [fix580]";
+        const notes = notesOf(page);
+        await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+        await page.goto(studentUrl("bhavya"));
+        await notes.getByLabel("Areas of concern").fill(CONCERN);
+        await notes.getByLabel("Immediate actions").fill(ACTIONS);
+        await expect(notes.getByText("Saved", { exact: true })).toBeVisible();
+        // Tabs 2 and 3 open draft A at revision 1, as tab 1 saved it.
+        const tabs = [await page.context().newPage(), await page.context().newPage()];
+        for (const tab of tabs) {
+          await tab.goto(studentUrl("bhavya"));
+          await expect(notesOf(tab).getByLabel("Immediate actions")).toHaveValue(ACTIONS);
+        }
+        const [autosaveTab, submitTab] = tabs;
+
+        // Tab 1 submits A and starts draft B, also at revision 1.
+        await notes.getByRole("button", { name: "Submit" }).click();
+        await expect(notes.getByLabel("Areas of concern")).toHaveValue("");
+        await notes.getByLabel("Areas of concern").fill(NEXT_CONCERN);
+        await expect(notes.getByText("Saved", { exact: true })).toBeVisible();
+        const [submittedA, draftB] = await readInsightSessions(pool, ids.studentIds.bhavya);
+        expect([draftB.state, draftB.areasOfConcern, draftB.revision]).toEqual(["draft", NEXT_CONCERN, 1]);
+
+        // Tab 2's autosave of A is refused.
+        const refusedSave = autosaveTab.waitForResponse(
+          (response) => response.url().endsWith(draftRoute("bhavya")) && response.request().method() === "PUT",
+        );
+        await notesOf(autosaveTab).getByLabel("Other notes (optional)").fill("Stale tab text [fix580]");
+        expect((await refusedSave).status()).toBe(409);
+        await expect(notesOf(autosaveTab).getByRole("alert")).toContainText("These notes were changed in another tab.");
+
+        // Tab 3's Submit of A, unchanged so it saves nothing first, is refused.
+        const refusedSubmit = submitTab.waitForResponse(
+          (response) => response.url().endsWith(sessionsRoute("bhavya")) && response.request().method() === "POST",
+        );
+        await notesOf(submitTab).getByRole("button", { name: "Submit" }).click();
+        expect((await refusedSubmit).status()).toBe(409);
+        await expect(notesOf(submitTab).getByRole("alert")).toContainText("These notes were changed in another tab.");
+
+        expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([submittedA, draftB]);
+        expect((await readSessionNoteAudits(pool, ids.studentIds.bhavya)).map((audit) => audit.action)).toEqual(["submitted"]);
+        for (const tab of tabs) await tab.close();
+      });
+
+      test("answers 404 to a Teacher of another School and to a seat-confined Teacher outside their centre, and 403 to a PMU user", async ({
+        browser,
+      }) => {
+        const asks = [
+          { persona: AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher, key: "bhavya", status: 404 },
+          { persona: AI_TEST_INSIGHTS_PERSONAS.seatedTeacher, key: "divya", status: 404 },
+          { persona: AI_TEST_INSIGHTS_PERSONAS.pmuManager, key: "bhavya", status: 403 },
+        ];
+        for (const { persona, key, status } of asks) {
+          const context = await browser.newContext();
+          const asker = await signInAs(await context.newPage(), persona);
+          await expectNotFound(asker, studentUrl(key));
+          expect((await asker.request.get(sessionsRoute(key))).status()).toBe(status);
+          expect((await asker.request.put(draftRoute(key), { data: draftBody() })).status()).toBe(status);
+          const submit = await asker.request.post(sessionsRoute(key), { data: submitBody({ expectedRevision: 1 }) });
+          expect(submit.status()).toBe(status);
+          await context.close();
+        }
+        expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([]);
+        expect(
+          (await readInsightSessions(pool, ids.studentIds.divya)).map((row) => [row.state, row.areasOfConcern]),
+        ).toEqual([["draft", "E2E concern"]]);
+        expect(await readSessionNoteAudits(pool, ids.studentIds.divya)).toEqual([]);
+      });
+
+      // Submit (#575): the draft becomes an Insight Session linked to the
+      // completed request the AI Summary card shows, if any.
+      test.describe("Submit", () => {
+        const LINKED_NONE = "No AI Summary is open, so these notes won't be linked to one.";
+        const VISIBLE_TO = "Submitted notes are visible to staff with access to this School and are used for the next AI Summary.";
+        // Up to two 10-second polls.
+        const POLLED = { timeout: 25_000 };
+
+        test.beforeEach(async () => {
+          await resetFakeAiMentorshipGuide();
+        });
+
+        // Sessions first: a submitted session holds its linked request.
+        test.afterEach(async () => {
+          await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.bhavya, ids.studentIds.esha]);
+          await resetFakeAiMentorshipGuide();
+          await removeInsightRequestsMadeBySpecs(pool, ids.studentIds.esha);
+        });
+
+        const requestIdOf = async (requestKey: string) =>
+          Number(
+            (await pool.query<{ id: string }>(`SELECT id FROM ai_test_insight_requests WHERE request_key = $1`, [requestKey]))
+              .rows[0].id,
+          );
+        const cardValue = (page: Page, label: string) =>
+          page.getByRole("region", { name: "Student" }).locator(`dt:text-is('${label}') + dd`);
+
+        test("links the AI Summary the card shows, writes one submitted audit row, blanks the form, and the counts move", async ({
+          browser,
+          pmPage,
+          programAdminPage,
+          adminPage,
+        }) => {
+          test.slow();
+          await steerFakeAiMentorshipGuide({ enqueue: "accept", run: "complete" });
+          // The Teacher works in a browser of their own: `adminPage` is the test's `page`.
+          const teacherContext = await browser.newContext();
+          const page = await teacherContext.newPage();
+          const summary = await generateForEsha(page);
+          await expect(summary.getByRole("link", { name: "Download PDF" })).toBeVisible(POLLED);
+          const [request] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(request.state).toBe("completed");
+          // 05:30 UTC is 11:00 on 27 Nov 2026 in India.
+          await pool.query(`UPDATE ai_test_insight_requests SET requested_at = '2026-11-27 05:30:00' WHERE request_key = $1`, [
+            request.requestKey,
+          ]);
+          await page.reload();
+
+          const notes = notesOf(page);
+          await expect(notes.getByText("Linked to the AI Summary of 27 Nov 2026", { exact: true })).toBeVisible();
+          await expect(notes.getByText(VISIBLE_TO, { exact: true })).toBeVisible();
+          await expect(cardValue(page, "Insight Sessions completed")).toHaveText("0");
+          await notes.getByLabel("Date of conversation").fill("2026-11-20");
+          await notes.getByLabel("Areas of concern").fill(`  ${CONCERN}  `);
+          await notes.getByLabel("Immediate actions").fill(`\n${ACTIONS}\n`);
+          await notes.getByLabel("Other notes (optional)").fill("   ");
+          // Before the submit the AI Summary is a History entry of its own.
+          const ESHA_AI_SUMMARY = [
+            "AI Summary of 27 Nov 2026",
+            "Made from: Mock Test 1",
+            "Asked for by E2E ATI Teacher on 27 Nov 2026, 11:00",
+          ];
+          expect(await historyEntries(page)).toEqual([ESHA_AI_SUMMARY]);
+          await notes.getByRole("button", { name: "Submit" }).click();
+
+          // The form is blank again, dated today, and the Student card moves with no reload.
+          await expect(notes.getByLabel("Areas of concern")).toHaveValue("");
+          await expect(notes.getByLabel("Immediate actions")).toHaveValue("");
+          await expect(notes.getByLabel("Date of conversation")).toHaveValue(todayInIndia());
+          await expect(cardValue(page, "Insight Sessions completed")).toHaveText("1");
+          await expect(cardValue(page, "Last Insight Session")).toHaveText("20 Nov 2026");
+
+          // The session joins History with no reload, with the AI Summary it
+          // records inside it and not on its own; the second Teacher and each
+          // viewer role see it once they open the page.
+          const ESHA_HISTORY = [
+            [
+              "20 Nov 2026",
+              "Notes by E2E ATI Teacher",
+              "Areas of concern",
+              CONCERN,
+              "Immediate actions",
+              ACTIONS,
+              ...ESHA_AI_SUMMARY,
+            ],
+          ];
+          await expect(page.getByRole("region", { name: "History" }).getByText("20 Nov 2026", { exact: true })).toBeVisible();
+          expect(await historyEntries(page)).toEqual(ESHA_HISTORY);
+          const secondContext = await browser.newContext();
+          const secondTeacher = await signInAs(await secondContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+          for (const viewer of [secondTeacher, pmPage, programAdminPage, adminPage]) {
+            await answerTestPicker(viewer, 200, { tests: PICKER_TESTS });
+            await viewer.goto(studentUrl("esha"));
+            expect(await historyEntries(viewer)).toEqual(ESHA_HISTORY);
+          }
+          await expectAdmin(adminPage);
+          await secondContext.close();
+
+          const [row] = await readInsightSessions(pool, ids.studentIds.esha);
+          const teacherUserId = ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email];
+          expect(row).toMatchObject({
+            state: "submitted",
+            authorUserId: teacherUserId,
+            schoolId: ids.schoolId,
+            programId: PROGRAM_IDS.COE,
+            academicYear: CURRENT_ACADEMIC_YEAR,
+            sessionDate: "2026-11-20",
+            areasOfConcern: CONCERN,
+            immediateActions: ACTIONS,
+            otherNotes: null,
+            insightRequestId: await requestIdOf(request.requestKey),
+          });
+          const nowSeconds = Date.now() / 1000;
+          expect(Math.abs((row.submittedAt as number) - nowSeconds)).toBeLessThan(60);
+          expect(Math.abs(row.updatedAt - nowSeconds)).toBeLessThan(60);
+          const audits = await readSessionNoteAudits(pool, ids.studentIds.esha);
+          expect(audits.map(({ sessionId, actorUserId, action, revision }) => ({ sessionId, actorUserId, action, revision }))).toEqual([
+            { sessionId: row.id, actorUserId: teacherUserId, action: "submitted", revision: row.revision },
+          ]);
+          expect(Math.abs(audits[0].occurredAt - nowSeconds)).toBeLessThan(60);
+
+          // A new draft can start.
+          await notes.getByLabel("Areas of concern").fill("Next conversation [e2e-575]");
+          await expect(notes.getByText("Saved", { exact: true })).toBeVisible();
+          expect((await readInsightSessions(pool, ids.studentIds.esha)).map((r) => [r.state, r.areasOfConcern])).toEqual([
+            ["submitted", CONCERN],
+            ["draft", "Next conversation [e2e-575]"],
+          ]);
+
+          // The Student's row on the Tab shows the same numbers.
+          await page.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
+          const rows = await listedRows(page);
+          expect(rows.find(([name]) => name === "Esha Ekka")).toEqual(["Esha Ekka", "E2E-ATI-ESHA", "11", "1", "1", "20 Nov 2026"]);
+          await teacherContext.close();
+        });
+
+        test("links nothing with no request, or when the latest request failed, and the route refuses that key", async ({
+          page,
+        }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          await page.goto(studentUrl("bhavya"));
+          await expect(notesOf(page).getByText(LINKED_NONE, { exact: true })).toBeVisible();
+          await notesOf(page).getByLabel("Areas of concern").fill(CONCERN);
+          await notesOf(page).getByLabel("Immediate actions").fill(ACTIONS);
+          await notesOf(page).getByRole("button", { name: "Submit" }).click();
+          await expect(notesOf(page).getByLabel("Areas of concern")).toHaveValue("");
+          expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((r) => [r.state, r.insightRequestId])).toEqual([
+            ["submitted", null],
+          ]);
+
+          await steerFakeAiMentorshipGuide({ enqueue: "reject", status: 422 });
+          const summary = await generateForEsha(page);
+          await expect(summary.getByRole("button", { name: "Try again" })).toBeVisible();
+          const [failed] = await readInsightRequests(pool, ids.studentIds.esha);
+          expect(failed.state).toBe("failed");
+          const notes = notesOf(page);
+          await expect(notes.getByText(LINKED_NONE, { exact: true })).toBeVisible();
+          await notes.getByLabel("Areas of concern").fill(CONCERN);
+          await notes.getByLabel("Immediate actions").fill(ACTIONS);
+          await expect
+            .poll(async () => (await readInsightSessions(pool, ids.studentIds.esha)).map((r) => r.immediateActions))
+            .toEqual([ACTIONS]);
+          const [draft] = await readInsightSessions(pool, ids.studentIds.esha);
+
+          const refused = await page.request.post(sessionsRoute("esha"), {
+            data: submitBody({ draftId: draft.id, expectedRevision: draft.revision, openRequestKey: failed.requestKey }),
+          });
+          expect(refused.status()).toBe(422);
+          expect(await refused.json()).toMatchObject({ field: "openRequestKey" });
+          expect(await readInsightSessions(pool, ids.studentIds.esha)).toEqual([draft]);
+          expect(await readSessionNoteAudits(pool, ids.studentIds.esha)).toEqual([]);
+
+          await notes.getByRole("button", { name: "Submit" }).click();
+          await expect(notes.getByLabel("Areas of concern")).toHaveValue("");
+          expect((await readInsightSessions(pool, ids.studentIds.esha)).map((r) => [r.state, r.insightRequestId])).toEqual([
+            ["submitted", null],
+          ]);
+        });
+
+        test("keeps Submit off with a required field blank or a future date, and the route answers 422 and changes no row", async ({
+          page,
+        }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          await page.goto(studentUrl("bhavya"));
+          const notes = notesOf(page);
+          const submit = notes.getByRole("button", { name: "Submit" });
+          await notes.getByLabel("Areas of concern").fill(CONCERN);
+          await expect(notes.getByText("Saved", { exact: true })).toBeVisible();
+          await expect(submit).toBeDisabled();
+
+          await notes.getByLabel("Immediate actions").fill(ACTIONS);
+          await expect(submit).toBeEnabled();
+          const tomorrow = new Date(`${todayInIndia()}T00:00:00Z`);
+          tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+          await notes.getByLabel("Date of conversation").fill(tomorrow.toISOString().slice(0, 10));
+          await expect(submit).toBeDisabled();
+          await expect(notes.getByText("Date of conversation can't be after today.", { exact: true })).toBeVisible();
+          // A draft may hold a future date; only a submit refuses it.
+          await expect
+            .poll(async () => (await readInsightSessions(pool, ids.studentIds.bhavya)).map((r) => r.sessionDate))
+            .toEqual([tomorrow.toISOString().slice(0, 10)]);
+          const [draft] = await readInsightSessions(pool, ids.studentIds.bhavya);
+
+          const refusals = [
+            { body: submitBody({ draftId: draft.id, expectedRevision: draft.revision, areasOfConcern: "  " }), field: "areasOfConcern" },
+            { body: submitBody({ draftId: draft.id, expectedRevision: draft.revision, immediateActions: "" }), field: "immediateActions" },
+            {
+              body: submitBody({
+                draftId: draft.id,
+                expectedRevision: draft.revision,
+                sessionDate: tomorrow.toISOString().slice(0, 10),
+              }),
+              field: "sessionDate",
+            },
+          ];
+          for (const { body, field } of refusals) {
+            const response = await page.request.post(sessionsRoute("bhavya"), { data: body });
+            expect(response.status()).toBe(422);
+            expect(await response.json()).toMatchObject({ field });
+          }
+          expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([draft]);
+          expect(await readSessionNoteAudits(pool, ids.studentIds.bhavya)).toEqual([]);
+        });
+      });
+      // Edit (#578): only the author corrects submitted notes, each saved
+      // change is audited, and an older copy overwrites nothing. Bhavya has no
+      // seeded row; each test submits or adds its own.
+      test.describe("Edit", () => {
+        const EDITED_CONCERN = "Loses marks on rolling motion [e2e-578]";
+        const EDITED_OTHER = "Parents called on Friday [e2e-578]";
+        const SPEC_REQUEST = "spec-578-bhavya-completed";
+        const sessionRoute = (key: string, sessionId: number) => `${sessionsRoute(key)}/${sessionId}`;
+        const editBody = (overrides: Record<string, unknown> = {}) => ({
+          sessionDate: "2026-11-20",
+          areasOfConcern: CONCERN,
+          immediateActions: ACTIONS,
+          otherNotes: null,
+          expectedRevision: 2,
+          ...overrides,
+        });
+        const historyOf = (page: Page) => page.getByRole("region", { name: "History" });
+        const cardValue = (page: Page, label: string) =>
+          page.getByRole("region", { name: "Student" }).locator(`dt:text-is('${label}') + dd`);
+        /** Today as the Student page writes it (`3 Sep 2026`, never "Sept"), from the test's own clock. */
+        const todayShown = () => {
+          const [year, month, day] = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()).split("-");
+          const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          return `${Number(day)} ${months[Number(month) - 1]} ${year}`;
+        };
+        const teacherUserId = () => ids.personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email];
+
+        /** Saves a draft for the Student and submits it as `page`'s Teacher: the session at revision 2. */
+        async function submitFor(page: Page, key: string, openRequestKey: string | null = null): Promise<number> {
+          const saved = await page.request.put(draftRoute(key), { data: draftBody() });
+          expect(saved.status()).toBe(200);
+          const { draftId } = (await saved.json()) as { draftId: number };
+          const submitted = await page.request.post(sessionsRoute(key), {
+            data: submitBody({ draftId, expectedRevision: 1, openRequestKey }),
+          });
+          expect(submitted.status()).toBe(201);
+          return ((await submitted.json()) as { sessionId: number }).sessionId;
+        }
+
+        // Sessions first: a submitted session holds its linked request.
+        test.afterEach(async () => {
+          await removeInsightSessionsMadeBySpecs(pool, [ids.studentIds.bhavya, ids.studentIds.divya]);
+          await removeInsightRequestsMadeBySpecs(pool, ids.studentIds.bhavya);
+        });
+
+        test("shows Edit only to the author; a saved change is audited once and keeps submitted_at and the link", async ({
+          browser,
+          pmPage,
+          programAdminPage,
+          adminPage,
+        }) => {
+          // 05:00 UTC is 10:30 on 14 Nov 2026 in India.
+          const requestId = await addCompletedInsightRequest(pool, {
+            requestKey: SPEC_REQUEST,
+            studentId: ids.studentIds.bhavya,
+            schoolId: ids.schoolId,
+            requestedByUserId: teacherUserId(),
+            requestedAt: "2026-11-14 05:00:00",
+          });
+          const teacherContext = await browser.newContext();
+          const teacher = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
+          const sessionId = await submitFor(teacher, "bhavya", SPEC_REQUEST);
+          const [before] = await readInsightSessions(pool, ids.studentIds.bhavya);
+          expect(before).toMatchObject({ id: sessionId, state: "submitted", revision: 2, insightRequestId: requestId });
+
+          // A second Teacher and every viewer role see the entry with no Edit, and the edit route refuses them.
+          const secondContext = await browser.newContext();
+          const secondTeacher = await signInAs(await secondContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.seatedTeacher);
+          const readOnlyContext = await browser.newContext();
+          const readOnly = await signInAs(await readOnlyContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.readOnlyTeacher);
+          const others = {
+            "second Teacher": secondTeacher,
+            "Program Manager": pmPage,
+            "Program Admin": programAdminPage,
+            Admin: adminPage,
+            "read_only Teacher": readOnly,
+          };
+          for (const [who, other] of Object.entries(others)) {
+            await test.step(who, async () => {
+              await other.goto(studentUrl("bhavya"));
+              await expect(historyOf(other).getByText("Notes by E2E ATI Teacher", { exact: true })).toBeVisible();
+              await expect(historyOf(other).getByRole("button", { name: "Edit" })).toHaveCount(0);
+              const refused = await other.request.patch(sessionRoute("bhavya", sessionId), {
+                data: editBody({ areasOfConcern: `${who} text [e2e-578]` }),
+              });
+              expect(refused.status()).toBe(403);
+            });
+          }
+          await secondContext.close();
+          await readOnlyContext.close();
+          expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([before]);
+
+          // The author edits in place.
+          await answerTestPicker(teacher, 200, { tests: PICKER_TESTS });
+          await teacher.goto(studentUrl("bhavya"));
+          const history = historyOf(teacher);
+          await history.getByRole("button", { name: "Edit" }).click();
+          await expect(history.getByLabel("Date of conversation")).toHaveValue("2026-11-20");
+          await expect(history.getByLabel("Areas of concern")).toHaveValue(CONCERN);
+          await expect(history.getByLabel("Immediate actions")).toHaveValue(ACTIONS);
+          await expect(history.getByLabel("Other notes (optional)")).toHaveValue("");
+          await history.getByLabel("Areas of concern").fill(`  ${EDITED_CONCERN}  `);
+          await history.getByLabel("Other notes (optional)").fill(`\n${EDITED_OTHER} `);
+          await history.getByRole("button", { name: "Save changes" }).click();
+
+          await expect(history.getByText(`Edited on ${todayShown()}`, { exact: true })).toBeVisible();
+          expect(await historyEntries(teacher)).toEqual([
+            [
+              "20 Nov 2026",
+              "Notes by E2E ATI Teacher",
+              `Edited on ${todayShown()}`,
+              "Areas of concern",
+              EDITED_CONCERN,
+              "Immediate actions",
+              ACTIONS,
+              "Other notes",
+              EDITED_OTHER,
+              "AI Summary of 14 Nov 2026",
+              "Made from: Mock Test 1",
+              "Asked for by E2E ATI Teacher on 14 Nov 2026, 10:30",
+            ],
+          ]);
+          const [after] = await readInsightSessions(pool, ids.studentIds.bhavya);
+          expect(after).toEqual({
+            ...before,
+            areasOfConcern: EDITED_CONCERN,
+            otherNotes: EDITED_OTHER,
+            revision: 3,
+            updatedAt: after.updatedAt,
+          });
+          expect(Math.abs(after.updatedAt - Date.now() / 1000)).toBeLessThan(60);
+          const audits = await readSessionNoteAudits(pool, ids.studentIds.bhavya);
+          expect(audits.map(({ sessionId: id, actorUserId, action, revision }) => ({ id, actorUserId, action, revision }))).toEqual([
+            { id: sessionId, actorUserId: teacherUserId(), action: "submitted", revision: 2 },
+            { id: sessionId, actorUserId: teacherUserId(), action: "submitted_edited", revision: 3 },
+          ]);
+          expect(Math.abs(audits[1].occurredAt - Date.now() / 1000)).toBeLessThan(60);
+          await teacherContext.close();
+        });
+
+        test("adds no audit row and keeps the revision when nothing changed", async ({ page }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          const sessionId = await submitFor(page, "bhavya");
+          const [before] = await readInsightSessions(pool, ids.studentIds.bhavya);
+
+          await page.goto(studentUrl("bhavya"));
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+          const saved = page.waitForResponse(
+            (response) => response.url().endsWith(sessionRoute("bhavya", sessionId)) && response.request().method() === "PATCH",
+          );
+          await history.getByRole("button", { name: "Save changes" }).click();
+          expect(await (await saved).json()).toEqual({ revision: 2 });
+          await expect(history.getByRole("button", { name: "Save changes" })).toHaveCount(0);
+
+          // The same notes with spaces around them are no change either.
+          const spaced = await page.request.patch(sessionRoute("bhavya", sessionId), {
+            data: editBody({ areasOfConcern: `  ${CONCERN}\n`, otherNotes: "  " }),
+          });
+          expect(spaced.status()).toBe(200);
+          expect(await spaced.json()).toEqual({ revision: 2 });
+
+          expect(await readInsightSessions(pool, ids.studentIds.bhavya)).toEqual([before]);
+          expect((await readSessionNoteAudits(pool, ids.studentIds.bhavya)).map((audit) => audit.action)).toEqual(["submitted"]);
+          const [entry] = await historyEntries(page);
+          expect(entry.filter((line) => line.startsWith("Edited on"))).toEqual([]);
+        });
+
+        test("refuses an older copy with 409, keeps the newer text, adds no audit row, and the older tab says so", async ({
+          page,
+        }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          const sessionId = await submitFor(page, "bhavya");
+          await page.goto(studentUrl("bhavya"));
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+
+          // Another tab saves first.
+          const newer = await page.request.patch(sessionRoute("bhavya", sessionId), {
+            data: editBody({ areasOfConcern: EDITED_CONCERN }),
+          });
+          expect(await newer.json()).toEqual({ revision: 3 });
+          const older = await page.request.patch(sessionRoute("bhavya", sessionId), {
+            data: editBody({ areasOfConcern: "Older copy [e2e-578]" }),
+          });
+          expect(older.status()).toBe(409);
+          expect(await older.json()).toEqual({
+            error: "These notes were changed in another tab.",
+            code: "stale",
+            currentRevision: 3,
+          });
+
+          await history.getByLabel("Immediate actions").fill("Typed in the older tab [e2e-578]");
+          await history.getByRole("button", { name: "Save changes" }).click();
+          const alert = history.getByRole("alert");
+          await expect(alert).toContainText("These notes were changed in another tab.");
+          await expect(history.getByLabel("Immediate actions")).toHaveValue("Typed in the older tab [e2e-578]");
+          await expect(history.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+          const [row] = await readInsightSessions(pool, ids.studentIds.bhavya);
+          expect([row.areasOfConcern, row.immediateActions, row.revision]).toEqual([EDITED_CONCERN, ACTIONS, 3]);
+          expect((await readSessionNoteAudits(pool, ids.studentIds.bhavya)).map((audit) => [audit.action, audit.revision])).toEqual([
+            ["submitted", 2],
+            ["submitted_edited", 3],
+          ]);
+
+          await alert.getByRole("button", { name: "Reload notes" }).click();
+          await expect(history.getByText(EDITED_CONCERN, { exact: true })).toBeVisible();
+          await expect(history.getByLabel("Immediate actions")).toHaveCount(0);
+        });
+
+        test("answers 404 to a Teacher of another School and to a seat-confined Teacher outside their centre, even as author", async ({
+          browser,
+        }) => {
+          const otherSchoolTeacher = AI_TEST_INSIGHTS_PERSONAS.otherSchoolTeacher;
+          const seatedTeacher = AI_TEST_INSIGHTS_PERSONAS.seatedTeacher;
+          const asks = [
+            { persona: otherSchoolTeacher, key: "bhavya" },
+            { persona: seatedTeacher, key: "divya" },
+          ];
+          for (const { persona, key } of asks) {
+            const sessionId = await addSubmittedInsightSession(pool, {
+              studentId: ids.studentIds[key],
+              schoolId: ids.schoolId,
+              authorUserId: ids.personaUserIds[persona.email],
+              sessionDate: "2026-11-20",
+              areasOfConcern: CONCERN,
+              immediateActions: ACTIONS,
+            });
+            const context = await browser.newContext();
+            const asker = await signInAs(await context.newPage(), persona);
+            const response = await asker.request.patch(sessionRoute(key, sessionId), {
+              data: editBody({ areasOfConcern: EDITED_CONCERN }),
+            });
+            expect(response.status()).toBe(404);
+            await context.close();
+            const rows = (await readInsightSessions(pool, ids.studentIds[key])).filter((row) => row.id === sessionId);
+            expect(rows.map((row) => [row.areasOfConcern, row.revision])).toEqual([[CONCERN, 2]]);
+            expect((await readSessionNoteAudits(pool, ids.studentIds[key])).filter((audit) => audit.sessionId === sessionId)).toEqual(
+              [],
+            );
+          }
+        });
+
+        test("asks before the Back link leaves an edit with unsaved changes, and keeps them on No", async ({ page }) => {
+          const TYPED = "Correction not saved yet [fix580]";
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          await submitFor(page, "bhavya");
+          await page.goto(studentUrl("bhavya"));
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+          await history.getByLabel("Areas of concern").fill(TYPED);
+
+          const questions: string[] = [];
+          page.once("dialog", (dialog) => {
+            questions.push(dialog.message());
+            void dialog.dismiss();
+          });
+          await page.getByRole("link", { name: "Back to AI Test Insights" }).click();
+          await expect.poll(() => questions).toEqual(["Your Session Notes are not saved. Leave this page anyway?"]);
+          await expect(page).toHaveURL(new RegExp(`/ai-test-insights/students/${ids.studentIds.bhavya}$`));
+          await expect(history.getByLabel("Areas of concern")).toHaveValue(TYPED);
+
+          // Put back as opened, the edit holds nothing to lose: Back leaves with no question.
+          await history.getByRole("button", { name: "Cancel" }).click();
+          await page.getByRole("link", { name: "Back to AI Test Insights" }).click();
+          await expect(page).toHaveURL(new RegExp(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}\\?tab=ai_test_insights$`));
+          expect(questions).toHaveLength(1);
+          expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => row.areasOfConcern)).toEqual([CONCERN]);
+        });
+
+        test("moves the Student card's last Insight Session date when the newest session's date changes", async ({ page }) => {
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          await submitFor(page, "bhavya");
+          await page.goto(studentUrl("bhavya"));
+          await expect(cardValue(page, "Insight Sessions completed")).toHaveText("1");
+          await expect(cardValue(page, "Last Insight Session")).toHaveText("20 Nov 2026");
+
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+          await history.getByLabel("Date of conversation").fill("2026-11-24");
+          await history.getByRole("button", { name: "Save changes" }).click();
+
+          await expect(cardValue(page, "Last Insight Session")).toHaveText("24 Nov 2026");
+          await expect(cardValue(page, "Insight Sessions completed")).toHaveText("1");
+          await expect(history.getByRole("heading", { name: "24 Nov 2026", level: 3 })).toBeVisible();
+          expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => [row.sessionDate, row.revision])).toEqual([
+            ["2026-11-24", 3],
+          ]);
+        });
       });
     });
 
@@ -1309,16 +2437,20 @@ test.describe("AI Test Insights tab", () => {
     });
 
     test("shows the page to a Teacher, Program Manager, Program Admin and Admin", async ({
-      page,
+      browser,
       adminPage,
       pmPage,
       programAdminPage,
     }) => {
-      await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+      // The Teacher signs in in a browser of their own: `adminPage` is the test's `page`.
+      const teacherContext = await browser.newContext();
+      const page = await signInAs(await teacherContext.newPage(), AI_TEST_INSIGHTS_PERSONAS.teacher);
       for (const viewer of [page, pmPage, programAdminPage, adminPage]) {
         await viewer.goto(studentUrl("chirag"));
         expect(await studentCard(viewer)).toEqual(AI_TEST_INSIGHTS_CARDS.chirag);
       }
+      await expectAdmin(adminPage);
+      await teacherContext.close();
     });
 
     test("is not found for a Teacher of another School, either way round", async ({ page, browser }) => {

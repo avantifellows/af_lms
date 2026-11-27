@@ -201,7 +201,8 @@ function refuseStudent(status: AiTestInsightsStudentRefusal["status"]): AiTestIn
   return { authorized: false, status, response: NextResponse.json({ error: REFUSAL_MESSAGES[status] }, { status }) };
 }
 
-function parseStudentId(raw: string): number | null {
+/** A path id: a whole number 1 or more, written plainly (`"07"`, `"1.5"`, `"-1"` are not ids). */
+export function parseAiTestInsightsId(raw: string): number | null {
   if (!/^[1-9][0-9]*$/.test(raw)) return null;
   const id = Number(raw);
   return Number.isSafeInteger(id) ? id : null;
@@ -271,7 +272,7 @@ export async function resolveAiTestInsightsStudentAccess(
 ): Promise<AiTestInsightsStudentAccess> {
   const session = await getSession();
   if (!session) return refuseStudent(401);
-  const studentId = parseStudentId(rawStudentId);
+  const studentId = parseAiTestInsightsId(rawStudentId);
   if (studentId === null) return refuseStudent(422);
 
   const email = session.user?.email;

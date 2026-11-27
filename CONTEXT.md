@@ -883,10 +883,12 @@ _Avoid_: Post-Session Notes, Teacher Feedback, Follow-up Note, mentor notes
 - A Student has at most one running **Insight Request** at a time
 - Asking again for the same Student and the same tests shows the **Test Insight** that exists; generating again needs a confirmation and keeps the earlier **Test Insight** in history
 - An **Insight Session** exists once its **Session Notes** are submitted; it records the **Test Insight** that was open, if any, and the date the conversation happened as entered by the Teacher
+- The **Test Insight** an **Insight Session** records is the one the AI Summary card showed when the Teacher pressed Submit, and only when it was a finished one; while the card shows a failed, no-data, waiting or running request, the **Insight Session** records none. Later edits of the **Session Notes** keep it
 - A **Test Insight** can exist without an **Insight Session**, and an **Insight Session** can exist without a **Test Insight**
+- A Student's History timeline on the Student page covers the Student across Schools and academic years: every submitted **Insight Session** by any Teacher and every finished **Test Insight** no **Insight Session** records, newest first, whatever School or Program each was recorded under; a **Test Insight** an **Insight Session** records shows inside that session only, and drafts and unfinished requests never show
 - Draft **Session Notes** are visible only to their author; submitted **Session Notes** are visible to every Teacher with access to the School, whoever held the **Insight Session**
 - Only the author can edit submitted **Session Notes**, and each edit is audited
-- Submitted **Session Notes** from a Student's earlier **Insight Sessions** are given to the next **Test Insight** as input
+- Submitted **Session Notes** from a Student's earlier **Insight Sessions** are given to the next **Test Insight** as input: each new **Insight Request** carries a copy of the Student's submitted **Session Notes** of the current academic year, by any Teacher, newest first (by session date, then submit time), at most 5. Drafts and earlier years are never copied. The copy is written with the request and never updated, so a later edit of those **Session Notes** does not change a request already made
 - **AI Test Insights** has no Pending or Completed status; the **AI Test Insights Tab** shows each Student's count of **Insight Sessions** and of **Test Insights**
 
 ## Example dialogue
