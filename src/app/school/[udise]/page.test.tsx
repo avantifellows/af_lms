@@ -1344,6 +1344,36 @@ describe("SchoolPage (server component)", () => {
       });
     });
 
+    // Review finding 3 (#573): the list route keeps only the School's centres
+    // whose Program is in the user's program context, so the tab must too.
+    it.each(["program_manager", "program_admin"])(
+      "is hidden for a %s whose Programs include none of the School's physical centres",
+      async (role) => {
+        await setupViewer(role, { schoolOverrides: { centre_program_ids: [2, 64] } });
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      },
+    );
+
+    it("shows a Program Manager the tab when one of the School's physical centres is in their Programs", async () => {
+      await setupViewer("program_manager", { schoolOverrides: { centre_program_ids: [1, 2, 64] } });
+
+      await renderPage();
+
+      expect(screen.getByTestId("tab-ai_test_insights")).toBeInTheDocument();
+    });
+
+    it("shows an Admin the tab whatever their Program list, as the list route does", async () => {
+      await setupViewer("admin", { schoolOverrides: { centre_program_ids: [2, 64] } });
+
+      await renderPage();
+
+      expect(screen.getByTestId("tab-ai_test_insights")).toBeInTheDocument();
+    });
+
     it.each(["pmu_manager", "pmu_govt_school_user"])("is hidden for %s", async (role) => {
       await setupViewer(role);
 

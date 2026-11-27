@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { isPhysicalCentreProgramId } from "@/lib/ai-test-insights-shared";
 import { listedStudentRowsSql } from "@/lib/ai-test-insights-students";
 import { query } from "@/lib/db";
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -67,6 +68,35 @@ function centresForUser(
   }
   const { programIds } = getProgramContextSync(permission);
   return centres.filter((centre) => programIds.includes(centre.programId)).map((centre) => centre.id);
+}
+
+/**
+ * Whether the AI Test Insights tab shows on a roster page: the list route's
+ * scope rule (`centresForUser`) applied to the page's active physical-centre
+ * centres, so the tab never shows where its list would answer 403 (PR #573
+ * review). The page has already checked School access, the centre (seat) and
+ * the feature view, and its centre or `centre_program_ids` hold only active
+ * centres, as the route reads them.
+ *
+ * - Centre page: its centre, when its Program is a physical-centre one.
+ * - School page: one stand-in centre per active physical-centre Program. Only
+ *   their Programs matter: admin lists them all, a seat-confined user gets no
+ *   tab on a School page (the route refuses them without a centre), and anyone
+ *   else needs one of those Programs in their program context.
+ */
+export function aiTestInsightsTabHasScope(
+  permission: UserPermission,
+  page: { centreId: number; programId: number | null } | { centreProgramIds: number[] },
+): boolean {
+  if ("centreId" in page) {
+    if (!isPhysicalCentreProgramId(page.programId)) return false;
+    const centres = [{ id: page.centreId, programId: Number(page.programId) }];
+    return (centresForUser(permission, centres, page.centreId)?.length ?? 0) > 0;
+  }
+  const centres = page.centreProgramIds
+    .filter(isPhysicalCentreProgramId)
+    .map((programId, index) => ({ id: -1 - index, programId: Number(programId) }));
+  return (centresForUser(permission, centres, null)?.length ?? 0) > 0;
 }
 
 /**

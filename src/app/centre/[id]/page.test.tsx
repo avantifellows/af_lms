@@ -596,6 +596,28 @@ describe("CentrePage → RosterPage (centre scope)", () => {
       });
     });
 
+    // Review finding 3 (#573): the list route keeps only centres whose
+    // Program is in the user's program context, so the tab must too.
+    it.each(["program_manager", "program_admin"])(
+      "is hidden for a %s whose Programs do not include the centre's Program",
+      async (role) => {
+        await setupViewer(role, { program_id: 2, program_name: "JNV Nodal" }, { program_ids: [1, 64] });
+
+        await renderCentre();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.queryByTestId("tab-ai_test_insights")).not.toBeInTheDocument();
+      },
+    );
+
+    it("shows an Admin the tab whatever their Program list, as the list route does", async () => {
+      await setupViewer("admin", { program_id: 2, program_name: "JNV Nodal" }, { program_ids: [1, 64] });
+
+      await renderCentre();
+
+      expect(screen.getByTestId("tab-ai_test_insights")).toBeInTheDocument();
+    });
+
     it("is hidden for an NVS-only Teacher", async () => {
       await setupViewer("teacher", {}, { program_ids: [64], scope: undefined });
 

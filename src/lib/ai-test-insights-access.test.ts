@@ -15,7 +15,8 @@ vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 
-import { resolveAiTestInsightsStudentAccess } from "./ai-test-insights-access";
+import { aiTestInsightsTabHasScope, resolveAiTestInsightsStudentAccess } from "./ai-test-insights-access";
+import type { UserPermission } from "./permissions";
 
 const email = "staff@avantifellows.org";
 
@@ -332,5 +333,51 @@ describe("resolveAiTestInsightsStudentAccess", () => {
 
       expect(studentReads()).toHaveLength(1);
     });
+  });
+});
+
+// The tab's visibility (PR #573 review finding 3): the list route's scope
+// rule on the page's centre, or on the School's active centre Programs.
+describe("aiTestInsightsTabHasScope", () => {
+  const permission = (overrides: Partial<UserPermission> = {}) =>
+    ({
+      email,
+      level: 3,
+      role: "program_manager",
+      school_codes: null,
+      regions: null,
+      program_ids: [1, 64],
+      read_only: false,
+      ...overrides,
+    }) as UserPermission;
+  const seated = (centres: number[]) =>
+    permission({
+      role: "teacher",
+      level: 1,
+      school_codes: ["JNV001"],
+      scope: { schools: new Set(["JNV001"]), centres: new Set(centres), programs: new Set([1]) },
+    } as Partial<UserPermission>);
+
+  it.each([
+    ["its Program is in the user's Programs", permission(), { centreId: 301, programId: 1 }, true],
+    ["its Program is not in the user's Programs", permission(), { centreId: 302, programId: 2 }, false],
+    ["it is JNV NVS", permission({ program_ids: [1, 64] }), { centreId: 303, programId: 64 }, false],
+    ["it has no Program", permission(), { centreId: 304, programId: null }, false],
+    ["the user is an Admin, whatever their Programs", permission({ role: "admin", program_ids: [1] }), { centreId: 302, programId: 2 }, true],
+    ["the user is seated there", seated([302]), { centreId: 302, programId: 2 }, true],
+    ["the user is seated elsewhere", seated([301]), { centreId: 302, programId: 2 }, false],
+  ] as const)("on a Centre page: %s → %s", (_label, user, page, expected) => {
+    expect(aiTestInsightsTabHasScope(user, page)).toBe(expected);
+  });
+
+  it.each([
+    ["one active physical centre's Program is the user's", permission(), [2, 1, 64], true],
+    ["none of the School's physical centre Programs is the user's", permission(), [2, 64], false],
+    ["the School's only active centre is JNV NVS", permission(), [64], false],
+    ["the School has no active centre", permission(), [], false],
+    ["an Admin, whatever their Programs", permission({ role: "admin", program_ids: [1] }), [2, 64], true],
+    ["a seat-confined user (the route refuses them without a centre)", seated([301]), [1, 2], false],
+  ] as const)("on a School page: %s → %s", (_label, user, centreProgramIds, expected) => {
+    expect(aiTestInsightsTabHasScope(user, { centreProgramIds: [...centreProgramIds] })).toBe(expected);
   });
 });

@@ -223,8 +223,13 @@ Learning roles and the Alumni Manager). It is NVS-gated, so a user with only JNV
 
 - **Tab:** "AI Test Insights", right after Teacher Feedback, on a Centre page whose centre has
   a physical-centre Program (every Program but JNV NVS), or a School page whose School has at
-  least one such active centre. A School with no active centre never shows it, for any role.
-  The tab loads its own list; the roster page runs no AI Test Insights query.
+  least one such active centre, and only where the user's list scope (below) is not empty, the
+  same rule the list route uses: an Admin sees it there; a centre-seated user only on their seat
+  centres' pages; anyone else only when that centre's Program (on a School page, one of its
+  active physical centres' Programs) is in their program list. So the tab never shows where its
+  list would be refused. A School with no active centre, or whose only active centre is JNV NVS,
+  never shows it, for any role. The tab loads its own list; the roster page runs no AI Test
+  Insights query.
 - **List route:** `GET /api/school/[udise]/ai-test-insights` (optional `centre_id`) refuses,
   before any Student read: 401 no session, 404 School not found, 403 no School access, 403 no
   `ai_test_insights` view, 403 no physical-centre scope for this user.
