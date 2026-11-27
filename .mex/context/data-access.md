@@ -979,5 +979,15 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   `src/lib/student-support-rules.ts`, the exam-stream normaliser). A blank stream is **not**
   listed, unlike the Student Report's `studentExamStream`, which defaults blank to engineering.
   A Student on two centres' rosters gives two rows: `listAiTestInsightsStudents(centreIds)` groups
-  by Student (lowest Grade if two), orders by Grade, then name, and reads no `ai_test_insight_*`
-  table yet. Later slices reuse the same subquery for Student access.
+  by Student (lowest Grade if two), orders by Grade, then name, and adds each Student's counts
+  (below). Later slices reuse the same subquery for Student access.
+- **Insight counts (#556):** `readAiTestInsightsCounts(studentIds)` in
+  `src/lib/ai-test-insights-counts.ts` is the one read of "how much attention a Student has had";
+  the Tab uses it now and the Student page reuses it, so the two never disagree. It makes two
+  `query()` reads keyed by `student_id = ANY($1::bigint[])`, across all academic years:
+  1. `ai_test_insight_sessions WHERE state = 'submitted'` → `insightSessionsCompleted` (count) and
+     `lastInsightSessionDate` (`TO_CHAR(MAX(session_date), 'YYYY-MM-DD')`);
+  2. `ai_test_insight_requests WHERE state = 'completed'` → `testInsightsGenerated` (count).
+  Drafts and requests in any other state are not counted. A Student with no rows gets 0, 0 and
+  null; a failed read throws, and the list route answers 500 (never zeros). The Tab's search (name
+  or Student ID) and Grade filter run in the browser on the loaded list.

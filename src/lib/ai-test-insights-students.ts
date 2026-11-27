@@ -3,6 +3,7 @@
 import { query } from "@/lib/db";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import { ENGINEERING_STREAM_VALUES } from "@/lib/student-support-rules";
+import { readAiTestInsightsCounts } from "@/lib/ai-test-insights-counts";
 import type { AiTestInsightsStudent } from "@/lib/ai-test-insights-shared";
 
 /**
@@ -50,8 +51,9 @@ export function listedStudentRowsSql(firstParam: number): { sql: string; params:
 
 /**
  * The listed Students of these centres, one row per Student (a Student on two
- * centres' rosters appears once), ordered by Grade, then name. Callers pass
- * only centres the access module allowed.
+ * centres' rosters appears once), ordered by Grade, then name, each with
+ * their Insight counts. Callers pass only centres the access module allowed.
+ * A failed read throws, whether of the Students or of the counts.
  */
 export async function listAiTestInsightsStudents(centreIds: number[]): Promise<AiTestInsightsStudent[]> {
   if (centreIds.length === 0) return [];
@@ -75,10 +77,12 @@ export async function listAiTestInsightsStudents(centreIds: number[]): Promise<A
      ORDER BY grade, name, student_id`,
     [centreIds, ...listed.params],
   );
+  const counts = await readAiTestInsightsCounts(rows.map((row) => Number(row.student_id)));
   return rows.map((row) => ({
     studentId: Number(row.student_id),
     name: row.name,
     studentCode: row.student_code,
     grade: Number(row.grade) as 11 | 12,
+    ...counts.get(Number(row.student_id))!,
   }));
 }

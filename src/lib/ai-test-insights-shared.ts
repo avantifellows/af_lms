@@ -3,8 +3,18 @@
 // `@/lib/permissions`) out of this module.
 import { PROGRAM_IDS } from "@/lib/constants";
 
+/** How much attention a Student has had, across all academic years. */
+export interface AiTestInsightsCounts {
+  /** The Student's `submitted` Insight Sessions. */
+  insightSessionsCompleted: number;
+  /** The Student's `completed` Insight Requests (Test Insights). */
+  testInsightsGenerated: number;
+  /** The newest `session_date` of a submitted Insight Session, `YYYY-MM-DD`. */
+  lastInsightSessionDate: string | null;
+}
+
 /** One row of the AI Test Insights Tab, as the list route returns it. */
-export interface AiTestInsightsStudent {
+export interface AiTestInsightsStudent extends AiTestInsightsCounts {
   /** `student.id`. */
   studentId: number;
   name: string;

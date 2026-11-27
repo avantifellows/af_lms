@@ -38,6 +38,15 @@ const LISTED: Array<{ centreId: string; row: Record<string, unknown> }> = [
   { centreId: "401", row: { student_id: "2001", name: "Dev Other", student_code: "STU2001", grade: 11 } },
 ];
 
+// Count rows as the two count reads return them: submitted Insight Sessions
+// (with the newest session date) and completed Test Insights, per Student.
+// Bilal has a Test Insight but no session; Chitra and Asha's neighbours none.
+const SESSION_COUNTS = [{ student_id: "1001", sessions_completed: 3, last_session_date: "2026-11-14" }];
+const REQUEST_COUNTS = [
+  { student_id: "1001", tests_generated: 2 },
+  { student_id: "1002", tests_generated: 1 },
+];
+
 const ROLES = [
   "teacher",
   "program_manager",
@@ -98,6 +107,11 @@ beforeEach(() => {
     if (sql.includes("FROM school WHERE")) {
       const school = SCHOOLS[String(params[0])];
       return school ? [school] : [];
+    }
+    if (sql.includes("FROM ai_test_insight_sessions") || sql.includes("FROM ai_test_insight_requests")) {
+      const ids = (params[0] as number[]).map(String);
+      const rows = sql.includes("FROM ai_test_insight_sessions") ? SESSION_COUNTS : REQUEST_COUNTS;
+      return rows.filter((countRow) => ids.includes(countRow.student_id));
     }
     if (isStudentRead(sql)) {
       const centreIds = params.find(
@@ -320,16 +334,59 @@ describe("GET /api/school/[udise]/ai-test-insights — list scope", () => {
 });
 
 describe("GET /api/school/[udise]/ai-test-insights — response", () => {
-  it("returns each listed Student's id, name, Student ID and Grade", async () => {
-    const response = await get("JNV001", "301");
+  it("returns each listed Student's id, name, Student ID, Grade and Insight counts", async () => {
+    const response = await get();
 
     expect(await response.json()).toEqual({
       students: [
-        { studentId: 1001, name: "Asha Kumar", studentCode: "STU1001", grade: 11 },
-        { studentId: 1002, name: "Bilal Khan", studentCode: null, grade: 12 },
+        {
+          studentId: 1001,
+          name: "Asha Kumar",
+          studentCode: "STU1001",
+          grade: 11,
+          insightSessionsCompleted: 3,
+          testInsightsGenerated: 2,
+          lastInsightSessionDate: "2026-11-14",
+        },
+        {
+          studentId: 1002,
+          name: "Bilal Khan",
+          studentCode: null,
+          grade: 12,
+          insightSessionsCompleted: 0,
+          testInsightsGenerated: 1,
+          lastInsightSessionDate: null,
+        },
+        {
+          studentId: 1003,
+          name: "Chitra Nair",
+          studentCode: "STU1003",
+          grade: 11,
+          insightSessionsCompleted: 0,
+          testInsightsGenerated: 0,
+          lastInsightSessionDate: null,
+        },
       ],
     });
   });
+
+  it.each(["ai_test_insight_sessions", "ai_test_insight_requests"])(
+    "answers 500, never zeros, when the %s count read fails",
+    async (table) => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const base = mockQuery.getMockImplementation()!;
+      mockQuery.mockImplementation(async (sql: string, params: unknown[]) => {
+        if (sql.includes(`FROM ${table}`)) throw Object.assign(new Error("relation does not exist"), { name: "DatabaseError" });
+        return base(sql, params);
+      });
+
+      const response = await get();
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Failed to load AI Test Insights" });
+      consoleError.mockRestore();
+    },
+  );
 
   it("returns an empty list when the centres list no Student", async () => {
     schoolCentres["9"] = [{ id: "303", program_id: 1 }];

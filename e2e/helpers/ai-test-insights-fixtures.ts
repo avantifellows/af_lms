@@ -65,24 +65,58 @@ const STUDENTS = [...LISTED, ...EXCLUDED];
 const studentEmail = (key: string) => `e2e-ati-student-${key}@test.local`;
 const studentCode = (key: string) => `E2E-ATI-${key.toUpperCase()}`;
 
-/** The rows the tab must show, in its order (Grade, then name), as [name, Student ID, Grade]. */
-export const AI_TEST_INSIGHTS_SCHOOL_LIST = [
-  ["Asha Atiq", "E2E-ATI-ASHA", "11"],
-  ["Chirag Chand", "E2E-ATI-CHIRAG", "11"],
-  ["Esha Ekka", "E2E-ATI-ESHA", "11"],
-  ["Bhavya Bose", "E2E-ATI-BHAVYA", "12"],
-  ["Divya Dutt", "E2E-ATI-DIVYA", "12"],
-];
-export const AI_TEST_INSIGHTS_COE_CENTRE_LIST = [
-  ["Asha Atiq", "E2E-ATI-ASHA", "11"],
-  ["Chirag Chand", "E2E-ATI-CHIRAG", "11"],
-  ["Esha Ekka", "E2E-ATI-ESHA", "11"],
-  ["Bhavya Bose", "E2E-ATI-BHAVYA", "12"],
-];
-export const AI_TEST_INSIGHTS_NODAL_CENTRE_LIST = [
-  ["Esha Ekka", "E2E-ATI-ESHA", "11"],
-  ["Divya Dutt", "E2E-ATI-DIVYA", "12"],
-];
+// Insight Sessions and Insight Requests the helper adds, by listed Student.
+// Only `submitted` sessions and `completed` requests count, across every
+// academic year; the newest submitted `session_date` is the last session.
+// Asha: three submitted sessions (one last year), a newer draft; two completed
+//   requests (one last year) plus a failed, a no-data and a queued one.
+// Divya: only a draft and a failed request, so 0, 0 and no date.
+// Chirag: one submitted session and a running request.
+// Bhavya and Esha: nothing.
+type SessionFixture = { state: "submitted" | "draft"; date: string; year: string };
+type RequestFixture = { state: "completed" | "failed" | "no_data" | "queued" | "running"; year: string };
+
+const LAST_YEAR = "2025-2026";
+const INSIGHT_SESSIONS: Record<string, SessionFixture[]> = {
+  asha: [
+    { state: "submitted", date: "2026-02-10", year: LAST_YEAR },
+    { state: "submitted", date: "2026-11-14", year: CURRENT_ACADEMIC_YEAR },
+    { state: "submitted", date: "2026-09-03", year: CURRENT_ACADEMIC_YEAR },
+    { state: "draft", date: "2026-11-20", year: CURRENT_ACADEMIC_YEAR },
+  ],
+  chirag: [{ state: "submitted", date: "2026-10-01", year: CURRENT_ACADEMIC_YEAR }],
+  divya: [{ state: "draft", date: "2026-11-25", year: CURRENT_ACADEMIC_YEAR }],
+};
+const INSIGHT_REQUESTS: Record<string, RequestFixture[]> = {
+  asha: [
+    { state: "completed", year: LAST_YEAR },
+    { state: "completed", year: CURRENT_ACADEMIC_YEAR },
+    { state: "failed", year: CURRENT_ACADEMIC_YEAR },
+    { state: "no_data", year: CURRENT_ACADEMIC_YEAR },
+    { state: "queued", year: CURRENT_ACADEMIC_YEAR },
+  ],
+  chirag: [{ state: "running", year: CURRENT_ACADEMIC_YEAR }],
+  divya: [{ state: "failed", year: CURRENT_ACADEMIC_YEAR }],
+};
+const REQUEST_KEY_PREFIX = "e2e-ati-";
+const INFERENCE_SESSION_MARKER = "e2e-ati-fixture";
+
+/**
+ * The rows the tab must show, in its order (Grade, then name), as [name,
+ * Student ID, Grade, Insight Sessions completed, Test Insights generated,
+ * Last Insight Session].
+ */
+const ROW = {
+  asha: ["Asha Atiq", "E2E-ATI-ASHA", "11", "3", "2", "14 Nov 2026"],
+  chirag: ["Chirag Chand", "E2E-ATI-CHIRAG", "11", "1", "0", "1 Oct 2026"],
+  esha: ["Esha Ekka", "E2E-ATI-ESHA", "11", "0", "0", ""],
+  bhavya: ["Bhavya Bose", "E2E-ATI-BHAVYA", "12", "0", "0", ""],
+  divya: ["Divya Dutt", "E2E-ATI-DIVYA", "12", "0", "0", ""],
+};
+export const AI_TEST_INSIGHTS_ROWS = ROW;
+export const AI_TEST_INSIGHTS_SCHOOL_LIST = [ROW.asha, ROW.chirag, ROW.esha, ROW.bhavya, ROW.divya];
+export const AI_TEST_INSIGHTS_COE_CENTRE_LIST = [ROW.asha, ROW.chirag, ROW.esha, ROW.bhavya];
+export const AI_TEST_INSIGHTS_NODAL_CENTRE_LIST = [ROW.esha, ROW.divya];
 
 export interface Persona {
   name: string;
@@ -200,13 +234,16 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
     batchGroups[key] = await insertBatchGroup(pool, BATCHES[key]);
   }
 
+  const studentIds: Record<string, number> = {};
   for (const student of STUDENTS) {
     const gradeId = await oneId(pool, `SELECT id FROM grade WHERE number = $1 ORDER BY id LIMIT 1`, [student.grade], `grade ${student.grade}`);
     const userId = await insertUser(pool, studentEmail(student.key), "student", student.first, student.last);
-    await pool.query(
+    studentIds[student.key] = await oneId(
+      pool,
       `INSERT INTO student (student_id, user_id, grade_id, status, stream, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, ${NOW}, ${NOW})`,
+       VALUES ($1, $2, $3, $4, $5, ${NOW}, ${NOW}) RETURNING id`,
       [studentCode(student.key), userId, gradeId, student.status, student.stream],
+      "inserted student",
     );
     const schoolGroupId = student.school === "main" ? main.groupId : other.groupId;
     for (const groupId of [schoolGroupId, ...student.batches.map((key) => batchGroups[key])]) {
@@ -222,8 +259,10 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
     );
   }
 
+  const personaUserIds: Record<string, number> = {};
   for (const p of Object.values(AI_TEST_INSIGHTS_PERSONAS) as PersonaFixture[]) {
     const userId = await insertUser(pool, p.email, p.role, null, null);
+    personaUserIds[p.email] = userId;
     await pool.query(
       `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only, user_id, revoked_at)
        VALUES ($1, 1, $2, $3, $4, NULL, false, $5, NULL)`,
@@ -238,13 +277,111 @@ export async function seedAiTestInsightsFixture(pool: Pool): Promise<AiTestInsig
     }
   }
 
+  await insertInsightRows(pool, {
+    studentIds,
+    schoolId: main.id,
+    teacherUserId: personaUserIds[AI_TEST_INSIGHTS_PERSONAS.teacher.email],
+  });
+
   return { coeCentreId, nodalCentreId, otherCentreId };
+}
+
+/**
+ * Insight Sessions and Insight Requests for the listed Students, as declared
+ * above. Rows satisfy the mirrored tables' CHECKs: a submitted session has a
+ * date, both required notes and `submitted_at`; a completed request links an
+ * Item of the same Student, and only one request per Student is queued or
+ * running. All on the CoE Program.
+ */
+async function insertInsightRows(
+  pool: Pool,
+  { studentIds, schoolId, teacherUserId }: { studentIds: Record<string, number>; schoolId: number; teacherUserId: number },
+) {
+  const programId = PROGRAM_IDS.COE;
+  for (const [key, sessions] of Object.entries(INSIGHT_SESSIONS)) {
+    for (const session of sessions) {
+      const submitted = session.state === "submitted";
+      await pool.query(
+        `INSERT INTO ai_test_insight_sessions
+           (student_id, school_id, program_id, academic_year, author_user_id, state, session_date,
+            areas_of_concern, immediate_actions, submitted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::date, 'E2E concern', 'E2E action',
+                 CASE WHEN $8::boolean THEN ${NOW} END)`,
+        [studentIds[key], schoolId, programId, session.year, teacherUserId, session.state, session.date, submitted],
+      );
+    }
+  }
+
+  let requestNumber = 0;
+  for (const [key, requests] of Object.entries(INSIGHT_REQUESTS)) {
+    for (const request of requests) {
+      const studentId = studentIds[key];
+      let itemId: number | null = null;
+      if (request.state === "completed") {
+        // One original Item per inference session and Student, so each
+        // completed request gets its own inference session.
+        const inferenceSessionId = await oneId(
+          pool,
+          `INSERT INTO acad_mentorship_inference_sessions (program_id, status, config_snapshot_json)
+           VALUES ($1, 'completed', $2) RETURNING id`,
+          [programId, INFERENCE_SESSION_MARKER],
+          "inference session",
+        );
+        itemId = await oneId(
+          pool,
+          `INSERT INTO acad_mentorship_inference_items (session_id, student_id, status)
+           VALUES ($1, $2, 'completed') RETURNING id`,
+          [inferenceSessionId, studentId],
+          "inference item",
+        );
+      }
+      const started = request.state !== "queued";
+      const finished = !["queued", "running"].includes(request.state);
+      const outcome = request.state === "failed" ? "pipeline_error" : request.state === "no_data" ? "no_tests" : null;
+      await pool.query(
+        `INSERT INTO ai_test_insight_requests
+           (request_key, student_id, school_id, program_id, academic_year, requested_by_user_id,
+            selected_test_ids, state, outcome_code, inference_item_id, started_at, finished_at)
+         VALUES ($1, $2, $3, $4, $5, $6, '["e2e-test-1"]'::jsonb, $7, $8, $9,
+                 CASE WHEN $10::boolean THEN ${NOW} END, CASE WHEN $11::boolean THEN ${NOW} END)`,
+        [
+          `${REQUEST_KEY_PREFIX}${++requestNumber}`,
+          studentId,
+          schoolId,
+          programId,
+          request.year,
+          teacherUserId,
+          request.state,
+          outcome,
+          itemId,
+          started,
+          finished,
+        ],
+      );
+    }
+  }
 }
 
 /** Remove everything {@link seedAiTestInsightsFixture} added. */
 export async function removeAiTestInsightsFixture(pool: Pool): Promise<void> {
   const users = await pool.query<{ id: number }>(`SELECT id FROM "user" WHERE email = ANY($1)`, [ALL_EMAILS]);
   const userIds = users.rows.map((row) => Number(row.id));
+  await pool.query(
+    `DELETE FROM ai_test_insight_sessions
+     WHERE student_id IN (SELECT id FROM student WHERE user_id = ANY($1)) OR author_user_id = ANY($1)`,
+    [userIds],
+  );
+  await pool.query(
+    `DELETE FROM ai_test_insight_requests
+     WHERE request_key LIKE $1 OR student_id IN (SELECT id FROM student WHERE user_id = ANY($2))`,
+    [`${REQUEST_KEY_PREFIX}%`, userIds],
+  );
+  await pool.query(
+    `DELETE FROM acad_mentorship_inference_items
+     WHERE session_id IN (SELECT id FROM acad_mentorship_inference_sessions WHERE config_snapshot_json = $1)`,
+    [INFERENCE_SESSION_MARKER],
+  );
+  await pool.query(`DELETE FROM acad_mentorship_inference_sessions WHERE config_snapshot_json = $1`, [INFERENCE_SESSION_MARKER]);
   await pool.query(`DELETE FROM user_permission WHERE email = ANY($1)`, [PERSONA_EMAILS]);
   if (userIds.length > 0) {
     await pool.query(`DELETE FROM centre_positions WHERE user_id = ANY($1)`, [userIds]);

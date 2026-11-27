@@ -6,7 +6,7 @@
 // error with Retry, never an empty list.
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Input, Select } from "@/components/ui";
 import {
   aiTestInsightsListUrl,
   type AiTestInsightsListResponse,
@@ -47,21 +47,29 @@ function useAiTestInsightsList(schoolCode: string, centreId: number | undefined)
   return { state, retry: load };
 }
 
-function StudentList({ students }: { students: AiTestInsightsStudent[] }) {
-  if (students.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-text-muted">
-        No JEE Students in Grade 11 or 12 are listed here.
-      </p>
-    );
-  }
+/** `2026-11-14` → `14 Nov 2026`; no date stays empty. Read as a calendar date, not a moment. */
+function formatSessionDate(date: string | null): string {
+  if (!date) return "";
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function StudentTable({ students }: { students: AiTestInsightsStudent[] }) {
   return (
     <div className="overflow-x-auto">
       <table aria-label="AI Test Insights students" className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
             <th scope="col" className="py-2 pr-3 font-medium">Student</th>
-            <th scope="col" className="py-2 font-medium">Grade</th>
+            <th scope="col" className="py-2 pr-3 font-medium">Grade</th>
+            <th scope="col" className="py-2 pr-3 font-medium">Insight Sessions completed</th>
+            <th scope="col" className="py-2 pr-3 font-medium">Test Insights generated</th>
+            <th scope="col" className="py-2 font-medium">Last Insight Session</th>
           </tr>
         </thead>
         <tbody>
@@ -71,11 +79,69 @@ function StudentList({ students }: { students: AiTestInsightsStudent[] }) {
                 <div className="font-medium text-text-primary">{student.name}</div>
                 <div className="font-mono text-xs text-text-secondary">{student.studentCode ?? "—"}</div>
               </td>
-              <td className="py-2 text-text-secondary">{student.grade}</td>
+              <td className="py-2 pr-3 text-text-secondary">{student.grade}</td>
+              <td className="py-2 pr-3 text-text-secondary">{student.insightSessionsCompleted}</td>
+              <td className="py-2 pr-3 text-text-secondary">{student.testInsightsGenerated}</td>
+              <td className="py-2 text-text-secondary">{formatSessionDate(student.lastInsightSessionDate)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+type GradeFilter = "all" | "11" | "12";
+
+/** Search and filter the loaded list in the browser; no new request. */
+function StudentList({ students }: { students: AiTestInsightsStudent[] }) {
+  const [search, setSearch] = useState("");
+  const [grade, setGrade] = useState<GradeFilter>("all");
+
+  if (students.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-text-muted">
+        No JEE Students in Grade 11 or 12 are listed here.
+      </p>
+    );
+  }
+
+  const needle = search.trim().toLowerCase();
+  const shown = students.filter(
+    (student) =>
+      (grade === "all" || String(student.grade) === grade) &&
+      (!needle ||
+        student.name.toLowerCase().includes(needle) ||
+        (student.studentCode ?? "").toLowerCase().includes(needle)),
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Input
+          type="search"
+          aria-label="Search by name or Student ID"
+          placeholder="Search by name or Student ID"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          className="sm:max-w-xs"
+        />
+        <Select
+          aria-label="Grade"
+          value={grade}
+          onChange={(event) => setGrade(event.target.value as GradeFilter)}
+          className="sm:w-32"
+        >
+          <option value="all">All</option>
+          <option value="11">11</option>
+          <option value="12">12</option>
+        </Select>
+      </div>
+      {shown.length === 0 ? (
+        <p className="py-8 text-center text-sm text-text-muted">No Students match your search.</p>
+      ) : (
+        <StudentTable students={shown} />
+      )}
     </div>
   );
 }

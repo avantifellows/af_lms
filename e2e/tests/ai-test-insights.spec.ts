@@ -7,6 +7,7 @@ import {
   AI_TEST_INSIGHTS_NO_CENTRE_SCHOOL,
   AI_TEST_INSIGHTS_NODAL_CENTRE_LIST,
   AI_TEST_INSIGHTS_PERSONAS,
+  AI_TEST_INSIGHTS_ROWS,
   AI_TEST_INSIGHTS_SCHOOL,
   AI_TEST_INSIGHTS_SCHOOL_LIST,
   removeAiTestInsightsFixture,
@@ -26,7 +27,10 @@ async function tabNames(page: Page): Promise<string[]> {
   return (await tabBar(page).getByRole("tab").allTextContents()).map((name) => name.trim());
 }
 
-/** Opens the tab and reads its rows as [name, Student ID, Grade]. */
+/**
+ * Opens the tab and reads its rows as [name, Student ID, Grade, Insight
+ * Sessions completed, Test Insights generated, Last Insight Session].
+ */
 async function listedRows(page: Page): Promise<string[][]> {
   await tabBar(page).getByRole("tab", { name: TAB }).click();
   return shownRows(page);
@@ -37,9 +41,9 @@ async function shownRows(page: Page): Promise<string[][]> {
   await expect(table).toBeVisible();
   return table.locator("tbody tr").evaluateAll((rows) =>
     rows.map((row) => {
-      const [student, grade] = Array.from(row.querySelectorAll("td"));
+      const [student, ...rest] = Array.from(row.querySelectorAll("td"));
       const [name, code] = Array.from(student.querySelectorAll("div")).map((div) => div.textContent ?? "");
-      return [name, code, grade.textContent ?? ""];
+      return [name, code, ...rest.map((cell) => cell.textContent ?? "")];
     }),
   );
 }
@@ -50,10 +54,11 @@ function expectAfterTeacherFeedback(names: string[]) {
   expect(names[names.indexOf(before) + 1]).toBe(TAB);
 }
 
-// AI Test Insights Tab (#550, slice #555): physical centres only. The helper
-// seeds a JNV School with an active CoE and Nodal centre, its listed Students
-// and one of each kind the tab leaves out, a second School, a School with no
-// active centre, and the personas the e2e seed lacks.
+// AI Test Insights Tab (#550, slices #555 and #556): physical centres only.
+// The helper seeds a JNV School with an active CoE and Nodal centre, its listed
+// Students and one of each kind the tab leaves out, a second School, a School
+// with no active centre, the personas the e2e seed lacks, and Insight Sessions
+// and Insight Requests whose counts it declares by hand.
 test.describe("AI Test Insights tab", () => {
   const pool = getTestPool();
   let ids: AiTestInsightsFixtureIds;
@@ -76,6 +81,60 @@ test.describe("AI Test Insights tab", () => {
 
     await adminPage.goto(`/centre/${ids.nodalCentreId}?tab=ai_test_insights`);
     expect(await shownRows(adminPage)).toEqual(AI_TEST_INSIGHTS_NODAL_CENTRE_LIST);
+  });
+
+  test("shows each Student's Insight Sessions, Test Insights and last session, or 0, 0 and no date", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
+    const rows = await listedRows(adminPage);
+
+    // Asha: 3 submitted sessions (a newer draft ignored), 2 completed requests
+    // (failed, no-data and queued ignored), newest submitted on 14 Nov 2026.
+    expect(rows).toContainEqual(["Asha Atiq", "E2E-ATI-ASHA", "11", "3", "2", "14 Nov 2026"]);
+    // Divya has only a draft and a failed request; Bhavya has nothing.
+    expect(rows).toContainEqual(["Divya Dutt", "E2E-ATI-DIVYA", "12", "0", "0", ""]);
+    expect(rows).toContainEqual(["Bhavya Bose", "E2E-ATI-BHAVYA", "12", "0", "0", ""]);
+  });
+
+  test("narrows the list by name, Student ID and Grade in the browser, and says when nothing matches", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}`);
+    await listedRows(adminPage);
+    let listRequests = 0;
+    adminPage.on("request", (request) => {
+      if (request.url().includes("/ai-test-insights")) listRequests++;
+    });
+    const search = adminPage.getByRole("searchbox", { name: "Search by name or Student ID" });
+    const grade = adminPage.getByRole("combobox", { name: "Grade" });
+
+    await search.fill("chirag");
+    expect(await shownRows(adminPage)).toEqual([AI_TEST_INSIGHTS_ROWS.chirag]);
+
+    await search.fill("e2e-ati-divya");
+    expect(await shownRows(adminPage)).toEqual([AI_TEST_INSIGHTS_ROWS.divya]);
+
+    await search.fill("");
+    await grade.selectOption("12");
+    expect(await shownRows(adminPage)).toEqual([AI_TEST_INSIGHTS_ROWS.bhavya, AI_TEST_INSIGHTS_ROWS.divya]);
+
+    await grade.selectOption("11");
+    expect(await shownRows(adminPage)).toEqual([
+      AI_TEST_INSIGHTS_ROWS.asha,
+      AI_TEST_INSIGHTS_ROWS.chirag,
+      AI_TEST_INSIGHTS_ROWS.esha,
+    ]);
+
+    await search.fill("Divya");
+    await expect(adminPage.getByText("No Students match your search.")).toBeVisible();
+    await expect(adminPage.getByRole("table", { name: "AI Test Insights students" })).toHaveCount(0);
+    await expect(adminPage.getByText("Couldn't load AI Test Insights")).toHaveCount(0);
+
+    await search.fill("");
+    await grade.selectOption("All");
+    expect(await shownRows(adminPage)).toEqual(AI_TEST_INSIGHTS_SCHOOL_LIST);
+    expect(listRequests).toBe(0);
   });
 
   test("opens straight onto the tab from ?tab=ai_test_insights on the School page", async ({ adminPage }) => {
