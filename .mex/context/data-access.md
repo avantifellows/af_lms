@@ -965,7 +965,7 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   compare with `now() AT TIME ZONE 'UTC'` and set `updated_at` yourself (no trigger).
 - **E2E fixture schema:** `e2e/fixtures/migrations/20261127120000_add_ai_test_insights_schema.sql`
   mirrors, idempotently and pg_dump-identically, db-service `20260616100000_create_academic_mentorship_tables`
-  (all 14 `acad_mentorship_*` tables plus its seeded `global` runtime-settings row),
+  (all 15 `acad_mentorship_*` tables plus its seeded `global` runtime-settings row),
   `20260616173000_allow_scoring_status_in_eval_run_benchmarks` and
   `20261126120504_create_ai_test_insight_tables`, read from `origin/feat/issue-880-ai-test-insights-tables`.
   It seeds no Insight Request or Session rows. Re-diff with `patterns/mirror-db-service-schema-in-e2e.md`
