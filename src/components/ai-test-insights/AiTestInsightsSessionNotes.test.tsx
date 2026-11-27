@@ -105,7 +105,7 @@ let onSubmitted: ReturnType<typeof vi.fn<() => void>>;
 const BACK_PATH = "/school/JNV001?tab=ai_test_insights";
 
 /** The section with the page's read of the history route, as the Student page gives it, under its Back link. */
-function NotesWithRead({ openRequest }: { openRequest: InsightRequestView | null }) {
+function NotesWithRead({ openRequest, unsavedEdit = false }: { openRequest: InsightRequestView | null; unsavedEdit?: boolean }) {
   const sessions = useAiTestInsightsSessions(SESSIONS_URL);
   return (
     <>
@@ -116,14 +116,15 @@ function NotesWithRead({ openRequest }: { openRequest: InsightRequestView | null
         draftUrl={DRAFT_URL}
         openRequest={openRequest}
         onSubmitted={onSubmitted}
+        unsavedEdit={unsavedEdit}
       />
     </>
   );
 }
 
-async function renderNotes(openRequest: InsightRequestView | null = null) {
+async function renderNotes(openRequest: InsightRequestView | null = null, unsavedEdit = false) {
   onSubmitted = vi.fn();
-  render(<NotesWithRead openRequest={openRequest} />);
+  render(<NotesWithRead openRequest={openRequest} unsavedEdit={unsavedEdit} />);
   await tick(0);
 }
 
@@ -426,6 +427,20 @@ describe("AiTestInsightsSessionNotes", () => {
       expect(confirmSpy).toHaveBeenCalledTimes(1);
       expect(savedBodies()).toHaveLength(1);
       expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it("asks before leaving while an edit in History holds unsaved changes, even with the draft saved", async () => {
+      await renderNotes(null, true);
+      confirmSpy.mockReturnValue(false);
+
+      back();
+      await tick(0);
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(mockPush).not.toHaveBeenCalled();
+      const unload = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(unload);
+      expect(unload.defaultPrevented).toBe(true);
     });
 
     it("asks before leaving a field over the limit, which cannot be saved", async () => {

@@ -82,6 +82,7 @@ const REQUESTS_URL = "/api/ai-test-insights/students/1001/requests";
 const sessionUrl = (sessionId: number) => `/api/ai-test-insights/students/1001/sessions/${sessionId}?centre=302`;
 
 let onEdited: ReturnType<typeof vi.fn<() => void>>;
+let onUnsavedEditChange: ReturnType<typeof vi.fn<(unsaved: boolean) => void>>;
 /** Shows the rendered History the page's next read of the sessions route. */
 let rerenderWith: (sessions: SessionsRead) => void;
 
@@ -91,6 +92,7 @@ function renderHistory(
   requestsUrl: string = REQUESTS_URL,
 ) {
   onEdited = vi.fn();
+  onUnsavedEditChange = vi.fn();
   const history = (read: SessionsRead) => (
     <AiTestInsightsHistory
       sessions={read}
@@ -98,6 +100,7 @@ function renderHistory(
       requestsUrl={requestsUrl}
       sessionUrl={sessionUrl}
       onEdited={onEdited}
+      onUnsavedEditChange={onUnsavedEditChange}
     />
   );
   const { rerender } = render(history(sessions));
@@ -653,6 +656,21 @@ describe("AiTestInsightsHistory Edit", () => {
     expect(sessions.reload).toHaveBeenCalledTimes(1);
     expect(within(entry).queryByLabelText("Areas of concern")).not.toBeInTheDocument();
     expect(within(entry).getByText(`Saved elsewhere ${MARKER}`)).toBeInTheDocument();
+  });
+
+  it("tells the page while an open edit holds changes, so leaving can ask first, and not once it is put back", () => {
+    const entry = editAshasEntry();
+    expect(onUnsavedEditChange).not.toHaveBeenCalledWith(true);
+
+    type(entry, "Areas of concern", `Typed in the edit ${MARKER}`);
+    expect(onUnsavedEditChange).toHaveBeenLastCalledWith(true);
+    type(entry, "Areas of concern", `Weak in optics ${MARKER}`);
+    expect(onUnsavedEditChange).toHaveBeenLastCalledWith(false);
+
+    type(entry, "Areas of concern", `Typed again ${MARKER}`);
+    expect(onUnsavedEditChange).toHaveBeenLastCalledWith(true);
+    fireEvent.click(within(entry).getByRole("button", { name: "Cancel" }));
+    expect(onUnsavedEditChange).toHaveBeenLastCalledWith(false);
   });
 
   it("closes the edit once it is saved", async () => {

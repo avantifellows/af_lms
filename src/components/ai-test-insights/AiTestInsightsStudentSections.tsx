@@ -22,7 +22,8 @@
 // saves through the session's edit route with the page's `centre`; after a
 // save History reads the timeline again and the page is refreshed from the
 // server, so the Student card's last Insight Session date moves. An edit
-// leaves the Session Notes form and its draft as they are.
+// leaves the Session Notes form and its draft as they are; while it holds
+// unsaved changes the Session Notes leave guard asks before leaving.
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 
@@ -76,6 +77,8 @@ export default function AiTestInsightsStudentSections({
   const { state, retry } = useFetchWithRetry(aiTestInsightsTestsUrl(studentId), readTests);
   // The request the AI Summary card shows: the page's latest until the card reports.
   const [shownRequest, setShownRequest] = useState<InsightRequestView | null>(latestRequest);
+  // An author's edit open in History holds unsaved changes; the Session Notes leave guard covers it.
+  const [unsavedEdit, setUnsavedEdit] = useState(false);
   const router = useRouter();
   const sessionsUrl = aiTestInsightsSessionsUrl(studentId, centreId);
   const requestsUrl = aiTestInsightsRequestsUrl(studentId, centreId);
@@ -118,6 +121,7 @@ export default function AiTestInsightsStudentSections({
             router.refresh();
             reloadSessions();
           }}
+          unsavedEdit={unsavedEdit}
         />
       )}
       <AiTestInsightsHistory
@@ -126,6 +130,7 @@ export default function AiTestInsightsStudentSections({
         requestsUrl={requestsUrl}
         sessionUrl={(sessionId) => aiTestInsightsSessionUrl(studentId, sessionId, centreId)}
         onEdited={() => router.refresh()}
+        onUnsavedEditChange={setUnsavedEdit}
       />
     </>
   );

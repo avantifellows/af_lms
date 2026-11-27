@@ -2379,6 +2379,33 @@ test.describe("AI Test Insights tab", () => {
           }
         });
 
+        test("asks before the Back link leaves an edit with unsaved changes, and keeps them on No", async ({ page }) => {
+          const TYPED = "Correction not saved yet [fix580]";
+          await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
+          await submitFor(page, "bhavya");
+          await page.goto(studentUrl("bhavya"));
+          const history = historyOf(page);
+          await history.getByRole("button", { name: "Edit" }).click();
+          await history.getByLabel("Areas of concern").fill(TYPED);
+
+          const questions: string[] = [];
+          page.once("dialog", (dialog) => {
+            questions.push(dialog.message());
+            void dialog.dismiss();
+          });
+          await page.getByRole("link", { name: "Back to AI Test Insights" }).click();
+          await expect.poll(() => questions).toEqual(["Your Session Notes are not saved. Leave this page anyway?"]);
+          await expect(page).toHaveURL(new RegExp(`/ai-test-insights/students/${ids.studentIds.bhavya}$`));
+          await expect(history.getByLabel("Areas of concern")).toHaveValue(TYPED);
+
+          // Put back as opened, the edit holds nothing to lose: Back leaves with no question.
+          await history.getByRole("button", { name: "Cancel" }).click();
+          await page.getByRole("link", { name: "Back to AI Test Insights" }).click();
+          await expect(page).toHaveURL(new RegExp(`/school/${AI_TEST_INSIGHTS_SCHOOL.code}\\?tab=ai_test_insights$`));
+          expect(questions).toHaveLength(1);
+          expect((await readInsightSessions(pool, ids.studentIds.bhavya)).map((row) => row.areasOfConcern)).toEqual([CONCERN]);
+        });
+
         test("moves the Student card's last Insight Session date when the newest session's date changes", async ({ page }) => {
           await signInAs(page, AI_TEST_INSIGHTS_PERSONAS.teacher);
           await submitFor(page, "bhavya");

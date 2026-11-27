@@ -166,6 +166,7 @@ function SessionNotesForm({
   openRequest,
   onReload,
   onSubmitted,
+  unsavedEdit,
 }: {
   draft: SessionNotesDraft | null;
   draftUrl: string;
@@ -177,6 +178,8 @@ function SessionNotesForm({
   onReload: () => void;
   /** The draft became an Insight Session. */
   onSubmitted: () => void;
+  /** An edit open in History holds unsaved changes. */
+  unsavedEdit: boolean;
 }) {
   const { values, update, status, stale, sendable, changed, retry, markStale, version } = useSessionNotesDraft(
     draft,
@@ -184,14 +187,16 @@ function SessionNotesForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
-  // Leaving saves what is pending first, and asks only when it cannot be saved.
+  // Leaving saves what is pending first, and asks only when it cannot be
+  // saved, or when an edit in History holds changes (an edit never saves by itself).
   const beforeNavigation = useCallback(
-    async () => (!submitting && sendable && (await retry())) || window.confirm(LEAVE_UNSAVED_QUESTION),
-    [submitting, sendable, retry],
+    async () =>
+      (!submitting && sendable && (await retry()) && !unsavedEdit) || window.confirm(LEAVE_UNSAVED_QUESTION),
+    [submitting, sendable, retry, unsavedEdit],
   );
   useNotesNavigationGuard({
     beforeNavigation,
-    guardNeeded: changed || status === "failed" || status === "saving" || submitting,
+    guardNeeded: changed || status === "failed" || status === "saving" || submitting || unsavedEdit,
     router,
   });
   const [submitFailed, setSubmitFailed] = useState(false);
@@ -266,6 +271,7 @@ export default function AiTestInsightsSessionNotes({
   draftUrl,
   openRequest,
   onSubmitted,
+  unsavedEdit = false,
 }: {
   /** The page's read of the sessions route. */
   sessions: SessionsRead;
@@ -277,6 +283,11 @@ export default function AiTestInsightsSessionNotes({
   openRequest: InsightRequestView | null;
   /** A submit made an Insight Session (the page refreshes the Student card's counts and reads History again). */
   onSubmitted?: () => void;
+  /**
+   * An author's edit open in History holds unsaved changes: the form's leave
+   * guard covers it too (an edit is only open for a Teacher who has this form).
+   */
+  unsavedEdit?: boolean;
 }) {
   const { state, reload } = sessions;
   // The read the form started from; null until a read answers, and again after "Reload notes".
@@ -312,6 +323,7 @@ export default function AiTestInsightsSessionNotes({
               setSubmits((count) => count + 1);
               onSubmitted?.();
             }}
+            unsavedEdit={unsavedEdit}
           />
         )}
       </Card>

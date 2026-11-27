@@ -20,6 +20,8 @@
 // with "Save changes" and Cancel. After a save the timeline is read again and
 // the page is told (`onEdited`), so the Student card's last Insight Session
 // date moves; "Reload notes" after a stale save reads the timeline again.
+// While an open edit holds unsaved changes History tells the page
+// (`onUnsavedEditChange`), whose leave guard then asks before leaving.
 //
 // Only the first read shows "Loading history…". A later read (after a
 // submit, an edit, "Reload notes", or the AI Summary card's request
@@ -27,7 +29,7 @@
 // failed one shows Retry above it, so an open Edit keeps its typing and an
 // open AI Summary stays open. An edit saves at the revision it was opened
 // from, so a change another tab made meanwhile still gets the 409.
-import { useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import SessionNotesEdit from "@/components/ai-test-insights/SessionNotesEdit";
 import TestInsightMadeBy from "@/components/ai-test-insights/TestInsightMadeBy";
@@ -86,6 +88,8 @@ interface EditProps {
   reload: () => void;
   /** An edit was saved. */
   onEdited?: () => void;
+  /** Marks a session's open edit as holding unsaved changes, or not. Stable. */
+  markUnsaved: (sessionId: number, unsaved: boolean) => void;
 }
 
 function SessionEntry({
@@ -100,6 +104,9 @@ function SessionEntry({
   edit: EditProps;
 }) {
   const [editing, setEditing] = useState(false);
+  const { markUnsaved } = edit;
+  const { sessionId } = entry;
+  const onUnsavedChange = useCallback((unsaved: boolean) => markUnsaved(sessionId, unsaved), [markUnsaved, sessionId]);
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -132,6 +139,7 @@ function SessionEntry({
             setEditing(false);
             edit.reload();
           }}
+          onUnsavedChange={onUnsavedChange}
         />
       ) : (
         <dl className="space-y-2">
@@ -158,6 +166,7 @@ export default function AiTestInsightsHistory({
   requestsUrl,
   sessionUrl,
   onEdited,
+  onUnsavedEditChange,
 }: {
   /** The page's read of the sessions route. */
   sessions: SessionsRead;
@@ -169,9 +178,26 @@ export default function AiTestInsightsHistory({
   sessionUrl: (sessionId: number) => string;
   /** The author saved an edit (the page refreshes the Student card; History reads the timeline again itself). */
   onEdited?: () => void;
+  /** True while any open edit holds unsaved changes, so the page's leave guard asks first. */
+  onUnsavedEditChange?: (unsaved: boolean) => void;
 }) {
   const { state } = sessions;
-  const edit: EditProps = { sessionUrl, reload: sessions.reload, onEdited };
+  // The sessions whose open edit holds unsaved changes.
+  const [unsavedEdits, setUnsavedEdits] = useState<ReadonlySet<number>>(() => new Set());
+  const markUnsaved = useCallback((sessionId: number, unsaved: boolean) => {
+    setUnsavedEdits((current) => {
+      if (current.has(sessionId) === unsaved) return current;
+      const next = new Set(current);
+      if (unsaved) next.add(sessionId);
+      else next.delete(sessionId);
+      return next;
+    });
+  }, []);
+  const anyUnsaved = unsavedEdits.size > 0;
+  useEffect(() => {
+    onUnsavedEditChange?.(anyUnsaved);
+  }, [anyUnsaved, onUnsavedEditChange]);
+  const edit: EditProps = { sessionUrl, reload: sessions.reload, onEdited, markUnsaved };
   // The newest timeline a read answered, kept on screen while the next read runs or after it fails.
   const [shown, setShown] = useState<TimelineEntry[] | null>(null);
   if (state.status === "loaded" && state.sessions.timeline !== shown) setShown(state.sessions.timeline);

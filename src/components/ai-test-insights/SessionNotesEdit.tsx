@@ -13,8 +13,9 @@
 // with "Reload notes" (which closes the edit and reads the timeline again) and
 // keeps the typed text until then; any other failure
 // says so and lets the author save again. It never touches the caller's draft
-// or the Session Notes form.
-import { useState } from "react";
+// or the Session Notes form. While the fields differ from the entry it tells
+// History (`onUnsavedChange`), so leaving the page asks first.
+import { useEffect, useState } from "react";
 
 import SessionNotesInputs, {
   asSessionNotes,
@@ -42,6 +43,7 @@ export default function SessionNotesEdit({
   onSaved,
   onCancel,
   onReload,
+  onUnsavedChange,
 }: {
   /** The author's own session, as the timeline gave it. */
   entry: SessionEntry;
@@ -53,13 +55,22 @@ export default function SessionNotesEdit({
   onCancel: () => void;
   /** "Reload notes" after a stale save: the page reads the timeline again. */
   onReload: () => void;
+  /** True while the fields differ from the entry as opened; false again when they match or the edit closes. Keep it stable. */
+  onUnsavedChange?: (unsaved: boolean) => void;
 }) {
-  const [values, setValues] = useState<SessionNotesFormValues>(() => ({
+  const [opened] = useState<SessionNotesFormValues>(() => ({
     sessionDate: entry.sessionDate,
     areasOfConcern: entry.areasOfConcern,
     immediateActions: entry.immediateActions,
     otherNotes: entry.otherNotes ?? "",
   }));
+  const [values, setValues] = useState(opened);
+  const changed = JSON.stringify(values) !== JSON.stringify(opened);
+  useEffect(() => {
+    if (!changed || !onUnsavedChange) return;
+    onUnsavedChange(true);
+    return () => onUnsavedChange(false);
+  }, [changed, onUnsavedChange]);
   const [state, setState] = useState<SaveState>("idle");
   // The revision the edit was opened from: a reload of the timeline meanwhile
   // must not move it, or a change another tab made would be saved over.
